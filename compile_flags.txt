@@ -1,0 +1,6 @@
+-I
+include
+-I
+framework-open/include
+-Wall
+-Wextra

@@ -1,0 +1,8 @@
+*.db
+opencode.json
+.env
+bin/*
+!bin/.keep
+obj/*
+!obj/.keep
+.smallcode/
