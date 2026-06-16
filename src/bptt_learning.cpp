@@ -10,17 +10,20 @@ using namespace neuro;
 using nlohmann::json;
 
 // Adam/Learning Parameters
-#define LEARNING_RATE (1.0e-3)
+#define LEARNING_RATE (8.0e-3)
 #define C_DECAY (0.0000000001)
 #define BETA1 (0.9)
 #define BETA2 (0.999)
 #define ADAM_EPS (1.0e-8)
 #define EPOCHS (10000)
 #define BATCH_SIZE (15)
+#define SCALE_RHO (1.0)
+#define TAU_RHO_SCALED (1.0)
+#define W (1.0)
 
 // Network Topo/Size
 #define INPUT_NEURONS (4)
-#define HIDDEN_NEURONS (16)
+#define HIDDEN_NEURONS (4)
 #define OUTPUT_NEURONS (3)
 #define TOTAL_NEURONS (INPUT_NEURONS + HIDDEN_NEURONS + OUTPUT_NEURONS)
 
@@ -68,9 +71,9 @@ double normal(double mean, double stddev) {
 }
 
 void softmax(const double* logits, double* out, size_t n) {
-    double max = DBL_MIN;
-    for (size_t i = 0; i < n; i++) {
-        if (logits[i] > DBL_MIN) {
+    double max = logits[0];
+    for (size_t i = 1; i < n; i++) {
+        if (logits[i] > max) {
             max = logits[i];
         }
     }
@@ -101,9 +104,10 @@ double cross_entropy(const double* logits, const double* targets, double* grads,
 
 double alpha(bool leak) { return (double)!leak; }
 
-double spike_surrogate(double charge, double threshold) {
-    double x = 1.0 + abs(charge - threshold);
-    return 1.0 / (x * x);
+double spike_surrogate(double v_pre_t, double v_thresh, double scale_rho,
+                       double tau_rho_scaled, double w) {
+    return ((scale_rho / (2.0f * tau_rho_scaled)) *
+            expf(-fabs(w * (v_pre_t - v_thresh)) / tau_rho_scaled));
 }
 
 int main(int argc, char* argv[]) {
@@ -125,8 +129,9 @@ int main(int argc, char* argv[]) {
     Network* n = new Network();
     n->from_json(emptynet);
 
-    string leak_prop = n->get_data("proc_params")["leak_mode"];
-    bool leak        = leak_prop == "all";
+    string leak_prop     = n->get_data("proc_params")["leak_mode"];
+    bool leak            = leak_prop == "all";
+    double min_potential = n->get_data("proc_params")["min_potential"];
 
     if (!n) {
         fprintf(stderr, "%s:%s:%d: Unable to create network.\n", __FILE__,
@@ -189,8 +194,10 @@ int main(int argc, char* argv[]) {
                        (d.max_vals[j] - d.min_vals[j]);
             x        = x < 0.0 ? 0.0 : (x > 1.0 ? 1.0 : x);
 
-            for (double k = 0.0; k < (double)TIMESTEPS; k += 1.0 / x) {
-                data_spikes[i][j][(size_t)k] = true;
+            if (x > 0.0) {
+                for (double k = 0.0; k < (double)TIMESTEPS; k += 1.0 / x) {
+                    data_spikes[i][j][(size_t)k] = true;
+                }
             }
             // for (size_t k = 0; k < TIMESTEPS; k++) {
             //     if (drand48() < x) {
@@ -221,8 +228,6 @@ int main(int argc, char* argv[]) {
     puts("Beginning training");
     size_t* batch_order = (size_t*)calloc(d.rows, sizeof(*batch_order));
     for (size_t epoch = 0; epoch < EPOCHS; epoch++) {
-        Processor* p = nullptr;
-        load_network(&p, n);
         double epoch_loss = 0.0;
         size_t correct    = 0;
         size_t zero_fires = 0;
@@ -241,6 +246,9 @@ int main(int argc, char* argv[]) {
         // Batch processing loop
         for (int batch_start = 0; batch_start < d.rows;
              batch_start += BATCH_SIZE) {
+            Processor* p = nullptr;
+            load_network(&p, n);
+
             double batch_loss                            = 0.0;
             size_t batch_correct                         = 0;
             double delta_W[TOTAL_NEURONS][TOTAL_NEURONS] = {{0}};
@@ -251,9 +259,10 @@ int main(int argc, char* argv[]) {
 
                 p->clear_activity();
 
-                bool spikes[TOTAL_NEURONS][TIMESTEPS]    = {{0}};
-                double charges[TOTAL_NEURONS][TIMESTEPS] = {{0.0}};
-                double output_counts[OUTPUT_NEURONS]     = {0};
+                bool spikes[TOTAL_NEURONS][TIMESTEPS]   = {{0}};
+                double v_pre[TOTAL_NEURONS][TIMESTEPS]  = {{0.0}};
+                double v_post[TOTAL_NEURONS][TIMESTEPS] = {{0.0}};
+                double output_counts[OUTPUT_NEURONS]    = {0};
 
                 // 1. Forward Pass
                 for (size_t t = 0; t < TIMESTEPS; t++) {
@@ -267,16 +276,14 @@ int main(int argc, char* argv[]) {
 
                     const vector<int>& neuron_counts     = p->neuron_counts();
                     const vector<double>& neuron_charges = p->neuron_charges();
+                    const vector<double>& neuron_pre_charges =
+                        p->neuron_pre_charges();
                     for (size_t neuron = 0; neuron < TOTAL_NEURONS; neuron++) {
                         spikes[neuron][t] = neuron_counts[neuron];
-
-                        // Neuron charges are reset to zero when they fire, so
-                        // we lose their charge
-                        if (neuron_counts[neuron]) {
-                            charges[neuron][t] = thresholds[neuron];
-                        } else {
-                            charges[neuron][t] = neuron_charges[neuron];
-                        }
+                        v_pre[neuron][t]  = neuron_pre_charges[neuron];
+                        v_post[neuron][t] = neuron_counts[neuron]
+                                                ? 0.0
+                                                : neuron_charges[neuron];
 
                         // Keep track of output fire counts for decoding later
                         if (neuron >= layer_cumulitive_sizes[num_layers - 1]) {
@@ -344,10 +351,11 @@ int main(int argc, char* argv[]) {
 
                     for (int dest = TOTAL_NEURONS - 1; dest >= 0; dest--) {
                         double s     = spikes[dest][t];
-                        double u     = charges[dest][t];
-                        double ds_du = spike_surrogate(u, thresholds[dest]);
-                        double g_u   = future_mem_grad[dest] * (1.0 - s) +
-                                       same_time_grad[dest] * ds_du;
+                        double u     = v_pre[dest][t];
+                        double ds_du = spike_surrogate(
+                            u, thresholds[dest], SCALE_RHO, TAU_RHO_SCALED, W);
+                        double g_u = future_mem_grad[dest] * (1.0 - s) +
+                                     same_time_grad[dest] * ds_du;
 
                         for (size_t source = 0; source < TOTAL_NEURONS;
                              source++) {
@@ -367,7 +375,11 @@ int main(int argc, char* argv[]) {
                                 g_u * weights[source][dest];
                         }
 
-                        next_future_mem_grad[dest] = alpha(leak) * g_u;
+                        double leaked_mem = alpha(leak) * v_post[dest][t];
+                        bool leak_mask    = leaked_mem > min_potential;
+
+                        next_future_mem_grad[dest] =
+                            alpha(leak) * g_u * leak_mask;
                     }
 
                     memcpy(future_mem_grad, next_future_mem_grad,
@@ -375,18 +387,13 @@ int main(int argc, char* argv[]) {
                 }
             }
 
-            // Average gradients over batch
-            double inv_batch = 1.0 / BATCH_SIZE;
+            // Average gradients over the actual batch size.
+            size_t current_batch_size =
+                min((size_t)BATCH_SIZE, d.rows - (size_t)batch_start);
+            double inv_batch = 1.0 / (double)current_batch_size;
             for (size_t i = 0; i < TOTAL_NEURONS; i++) {
                 for (size_t j = 0; j < TOTAL_NEURONS; j++) {
                     delta_W[i][j] *= inv_batch;
-
-                    if (delta_W[i][j] >= 5.0) {
-                        delta_W[i][j] = 5.0;
-                    }
-                    if (delta_W[i][j] <= -5.0) {
-                        delta_W[i][j] = -5.0;
-                    }
                 }
             }
 
@@ -419,12 +426,13 @@ int main(int argc, char* argv[]) {
                     e->set("Weight", weights[i][k]);
                 }
             }
+
+            delete p;
         }
 
         printf("Epoch: %zu/%zu, Loss: %f, Acc: %f, Zero Fires: %zu, L2: %g\n",
                epoch + 1, (size_t)EPOCHS, epoch_loss / (double)d.rows,
                correct / (double)d.rows, zero_fires, L2);
-        delete p;
     }
 
     delete n;

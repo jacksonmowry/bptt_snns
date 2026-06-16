@@ -102,7 +102,7 @@ def leak_alpha_from_tau(tau: float, dt: float) -> float:
         return 1.0
     if tau <= 0.0:
         return 0.0
-    sys.exit(1)
+    return float(np.exp(-dt / tau))
 
 
 class GlobalGraphSNN:
@@ -115,6 +115,7 @@ class GlobalGraphSNN:
         dt: float = 1.0,
         threshold: float = 1.0,
         reset: float = 0.0,
+        minimum_potential: float = -1.0,
         lr: float = 1e-2,
         seed: int = 0,
     ) -> None:
@@ -132,6 +133,7 @@ class GlobalGraphSNN:
         self.eps = 1e-8
         self.step_count = 0
         self.reset = reset
+        self.minimum_potential = minimum_potential
         self.alpha = leak_alpha_from_tau(tau, dt)
         self.delay_min = 1
         self.delay_max = 7
@@ -172,83 +174,123 @@ class GlobalGraphSNN:
     ) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
         batch_size, steps, _ = X.shape
         spikes = np.zeros((batch_size, steps, self.num_nodes), dtype=np.float32)
-        pre_acts = np.zeros_like(spikes)
-        current_mem = np.zeros((batch_size, self.num_nodes), dtype=np.float32)
+        v_pre = np.zeros_like(spikes)
+        y = np.zeros_like(spikes)
+        v = np.zeros((batch_size, self.num_nodes), dtype=np.float32)
 
         for t in range(steps):
             for node in range(self.num_nodes):
                 if node < self.input_size:
                     spikes[:, t, node] = X[:, t, node]
-                    continue
 
-                u = self.alpha * current_mem[:, node]
+                v = self.alpha * v
+                v = np.maximum(v, self.minimum_potential)
+
                 for source in self.incoming[node]:
                     delay = self.delays[source, node]
                     source_time = t - delay
                     if source_time >= 0:
-                        u = (
-                            u
+                        v = (
+                            v
                             + spikes[:, source_time, source]
                             * self.weights[source, node]
                         )
 
-                s = (u >= self.thresholds[node]).astype(np.float32)
-                v = np.where(s > 0.0, self.reset, u)
-                pre_acts[:, t, node] = u
-                spikes[:, t, node] = s
-                current_mem[:, node] = v
+                v_pre[:, t, node] = v
+                spike = (v >= self.threshold[node]).astype(np.float32)
+                v = np.where(s > 0.0, self.reset, v)
+                v = np.maximum(v, self.minimum_potential)
+                y[:, t, node] = v
+                spikes[:t, node] = spike
 
         logits = spikes[:, :, self.output_nodes].mean(axis=1)
-        return logits, spikes, pre_acts, current_mem
+        return logits, spikes, v_pre, y
 
     def backward(
         self,
         y_one_hot: np.ndarray,
         spikes: np.ndarray,
-        pre_acts: np.ndarray,
-        _state: np.ndarray,
+        v_pre: np.ndarray,
+        y: np.ndarray,
         logits: np.ndarray,
+        w_scale: float,
+        tau_rho: float,
+        scale_rho: float,
     ) -> float:
         batch_size, steps, _ = spikes.shape
         loss, dlogits = cross_entropy(logits, y_one_hot)
-        output_spike_grad = dlogits / float(steps)
+        dL_dy = dlogits / float(steps)
 
         grad_weights = np.zeros_like(self.weights)
-        future_mem_grad = np.zeros((batch_size, self.num_nodes), dtype=np.float32)
-        spike_grad_history = np.zeros(
-            (batch_size, steps, self.num_nodes), dtype=np.float32
-        )
+
+        tau_rho_scaled = tau_rho * w_scale
+
+        dL_dV_next = np.zeros((batch_size, self.num_nodes), dtype=np.float32)
 
         for t in range(steps - 1, -1, -1):
-            same_time_grad = spike_grad_history[:, t, :].copy()
-            for output_offset, node in enumerate(self.output_nodes):
-                same_time_grad[:, node] += output_spike_grad[:, output_offset]
+            for node in range(self.num_nodes - 1, -1, -1):
+                dL_dV = dL_dy[node]
+                dL_dV = dL_dV + dL_dV_next[node]
 
-            next_future_mem_grad = np.zeros_like(future_mem_grad)
+                v_pre_t = v_pre[t, idx]
 
-            for node in range(self.num_nodes - 1, self.input_size - 1, -1):
-                s = spikes[:, t, node]
-                u = pre_acts[:, t, node]
-                ds_du = self.spike_surrogate(u, self.thresholds[node])
-                g_u = (
-                    future_mem_grad[:, node] * (1.0 - s)
-                    + same_time_grad[:, node] * ds_du
+                # Pipeline 1
+                dy_t_dV_post = 1.0 / w_scale
+                dV_post_dV_pre = 1.0 - (spikes[t, node])
+                dV_pre_dx_t = w_scale
+                dV_post_ds_t = (
+                    ((self.min_potential - v_pre_t) * w_scale)
+                    if (self.min_potential * w_scale > 0)
+                    else (-v_pre_t * w_scale)
+                )
+                ds_t_dV_pre = (scale_rho / (2.0 * tau_rho_scaled)) * np.exp(
+                    -np.abs(w_scale * (v_pre_t - self.threshold[node])) / tau_rho_scaled
                 )
 
-                for source in self.incoming[node]:
-                    delay = self.delays[source, node]
-                    source_time = t - delay
-                    if source_time < 0:
-                        continue
-                    source_spikes = spikes[:, source_time, source]
-                    grad_weights[source, node] += np.sum(source_spikes * g_u)
-                    spike_grad_history[:, source_time, source] += (
-                        g_u * self.weights[source, node]
-                    )
+                # Pipeline 2
+                dV_pre_dV_leak = 1.0
+                dV_leak_dV_t1 = (
+                    (1.0 - self.alpha)
+                    if (v_pre_t * w_scale >= self.min_potential * w_scale)
+                    else (0.0)
+                )
 
-                next_future_mem_grad[:, node] = self.alpha * g_u
+        # spike_grad_history = np.zeros(
+        #     (batch_size, steps, self.num_nodes), dtype=np.float32
+        # )
 
-            future_mem_grad = next_future_mem_grad
+        # for t in range(steps - 1, -1, -1):
+        #     same_time_grad = spike_grad_history[:, t, :].copy()
+        #     for output_offset, node in enumerate(self.output_nodes):
+        #         same_time_grad[:, node] += dL_dy[:, output_offset]
+
+        #     next_dL_dV_next = np.zeros_like(dL_dV_next)
+
+        #     for node in range(self.num_nodes - 1, -1, -1):
+        #         s = spikes[:, t, node]
+        #         u = pre_acts[:, t, node]
+        #         ds_du = self.spike_surrogate(u, self.thresholds[node])
+        #         g_u = (
+        #             dL_dV_next[:, node] * (1.0 - s)
+        #             + same_time_grad[:, node] * ds_du
+        #         )
+
+        #         for source in self.incoming[node]:
+        #             delay = self.delays[source, node]
+        #             source_time = t - delay
+        #             if source_time < 0:
+        #                 continue
+        #             source_spikes = spikes[:, source_time, source]
+        #             grad_weights[source, node] += np.sum(source_spikes * g_u)
+        #             spike_grad_history[:, source_time, source] += (
+        #                 g_u * self.weights[source, node]
+        #             )
+
+        #         leaked_mem = self.alpha * mem_history[:, t, node]
+        #         leak_mask = (leaked_mem > self.minimum_potential).astype(np.float32)
+        #         next_dL_dV_next[:, node] = self.alpha * g_u * leak_mask
+
+        #     dL_dV_next = next_dL_dV_next
 
         self._apply_gradients(grad_weights)
         return loss
@@ -269,8 +311,8 @@ class GlobalGraphSNN:
         self.weights -= self.lr * mW_hat / (np.sqrt(vW_hat) + self.eps)
 
     def train_batch(self, X: np.ndarray, y_one_hot: np.ndarray) -> float:
-        logits, spikes, pre_acts, mem = self.forward(X)
-        out = self.backward(y_one_hot, spikes, pre_acts, mem, logits)
+        logits, spikes, v_pre, y = self.forward(X)
+        out = self.backward(y_one_hot, spikes, v_pre, y, logits)
         return out
 
     def predict(self, X: np.ndarray) -> np.ndarray:
@@ -335,6 +377,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--time-steps", type=int, default=32)
     parser.add_argument("--max-rate", type=float, default=0.35)
     parser.add_argument("--hidden-size", type=int, default=24)
+    parser.add_argument(
+        "--minimum-potential",
+        type=float,
+        default=-1.0,
+        help="Lowest membrane potential allowed after leak at the start of each timestep.",
+    )
     return parser.parse_args()
 
 
@@ -358,6 +406,7 @@ def main() -> None:
         hidden_size=args.hidden_size,
         output_size=3,
         tau=args.tau,
+        minimum_potential=args.minimum_potential,
         lr=args.lr,
         seed=args.seed,
     )
@@ -368,7 +417,10 @@ def main() -> None:
         f"steps={X_train.shape[1]} input_neurons={X_train.shape[2]} "
         f"hidden_neurons={args.hidden_size} output_neurons=3"
     )
-    print(f"leak_alpha={model.alpha:.4f} tau={args.tau}")
+    print(
+        f"leak_alpha={model.alpha:.4f} tau={args.tau} "
+        f"minimum_potential={model.minimum_potential:.3f}"
+    )
     active_delays = model.delays[model.delays > 0]
     if active_delays.size:
         print(

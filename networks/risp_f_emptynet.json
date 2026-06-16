@@ -12,7 +12,7 @@
             "min_threshold": 0.1,
             "min_weight": -1000.0,
             "run_time_inclusive": false,
-            "spike_value_factor": 1.0,
+            "spike_value_factor": 10.0,
             "threshold_inclusive": true
         }
     },
