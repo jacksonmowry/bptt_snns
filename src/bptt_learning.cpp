@@ -1,7 +1,6 @@
 #include "csv.h"
 #include "framework.hpp"
 #include <cassert>
-#include <cfloat>
 #include <cstddef>
 #include <fstream>
 
@@ -11,24 +10,24 @@ using nlohmann::json;
 
 // Adam/Learning Parameters
 #define LEARNING_RATE (8.0e-3)
-#define C_DECAY (0.0000000001)
+#define C_DECAY (0.0000000000)
 #define BETA1 (0.9)
 #define BETA2 (0.999)
 #define ADAM_EPS (1.0e-8)
-#define EPOCHS (10000)
-#define BATCH_SIZE (15)
+#define EPOCHS (1000)
+#define BATCH_SIZE (1)
 #define SCALE_RHO (1.0)
 #define TAU_RHO_SCALED (1.0)
-#define W (1.0)
+#define W (1)
 
 // Network Topo/Size
 #define INPUT_NEURONS (4)
-#define HIDDEN_NEURONS (4)
+#define HIDDEN_NEURONS (128)
 #define OUTPUT_NEURONS (3)
 #define TOTAL_NEURONS (INPUT_NEURONS + HIDDEN_NEURONS + OUTPUT_NEURONS)
 
 // Dataset/Inference Parameters
-#define TIMESTEPS (64)
+#define TIMESTEPS (32)
 #define NUM_FEATURES (4)
 
 void load_network(Processor** pp, Network* net) {
@@ -149,7 +148,7 @@ int main(int argc, char* argv[]) {
 
     for (size_t i = 0; i < num_layers; i++) {
         for (size_t j = 0; j < layer_sizes[i]; j++) {
-            n->add_node(neuron_count)->set("Threshold", normal(1.0, 0.05));
+            n->add_node(neuron_count)->set("Threshold", normal(0.15, 0.05));
 
             if (i == 0) {
                 // Input
@@ -163,25 +162,39 @@ int main(int argc, char* argv[]) {
         }
     }
 
-    // Sparse recurrent connections within hidden layer (75% probability)
-    for (size_t i = 0; i < TOTAL_NEURONS; i++) {
-        for (size_t j = 0; j < TOTAL_NEURONS; j++) {
-            // if (i == j)
-            //     continue; // Skip self-loops
-            if (drand48() < 0.75) {
-                n->add_edge(i, j);
+    for (size_t i = 1; i < num_layers; i++) {
+        for (size_t source = layer_cumulitive_sizes[i - 1];
+             source < layer_cumulitive_sizes[i]; source++) {
+            for (size_t dest = layer_cumulitive_sizes[i];
+                 dest < layer_cumulitive_sizes[i] + layer_sizes[i]; dest++) {
+                Edge* e = n->add_edge(source, dest);
 
-                double scale = 0.5 / max(1.0, sqrt(TOTAL_NEURONS));
-
-                // 75% chance of being an excitatory synapse
-                double rand_weight = normal(0.0, scale);
-                n->get_edge(i, j)->set(n->get_edge_property("Weight")->index,
-                                       rand_weight);
-                n->get_edge(i, j)->set(n->get_edge_property("Delay")->index,
-                                       rand() % 7 + 1);
+                e->set(n->get_edge_property("Weight")->index,
+                       normal(0.0, 0.5 / max(1.0, sqrt(TOTAL_NEURONS))));
+                e->set(n->get_edge_property("Delay")->index, 1);
             }
         }
     }
+
+    // Sparse recurrent connections within hidden layer (75% probability)
+    // for (size_t i = 0; i < TOTAL_NEURONS; i++) {
+    //     for (size_t j = 0; j < TOTAL_NEURONS; j++) {
+    //         // if (i == j)
+    //         //     continue; // Skip self-loops
+    //         if (drand48() < 0.999) {
+    //             n->add_edge(i, j);
+
+    //             double scale = 0.5 / max(1.0, sqrt(TOTAL_NEURONS));
+
+    //             // 75% chance of being an excitatory synapse
+    //             double rand_weight = normal(0.0, scale);
+    //             n->get_edge(i, j)->set(n->get_edge_property("Weight")->index,
+    //                                    rand_weight);
+    //             n->get_edge(i, j)->set(n->get_edge_property("Delay")->index,
+    //                                    rand() % 1 + 1);
+    //         }
+    //     }
+    // }
 
     // Encode Data/Labels
     puts("Encoding data");
@@ -194,16 +207,16 @@ int main(int argc, char* argv[]) {
                        (d.max_vals[j] - d.min_vals[j]);
             x        = x < 0.0 ? 0.0 : (x > 1.0 ? 1.0 : x);
 
-            if (x > 0.0) {
-                for (double k = 0.0; k < (double)TIMESTEPS; k += 1.0 / x) {
-                    data_spikes[i][j][(size_t)k] = true;
-                }
-            }
-            // for (size_t k = 0; k < TIMESTEPS; k++) {
-            //     if (drand48() < x) {
-            //         data_spikes[i][j][k] = true;
+            // if (x > 0.0) {
+            //     for (double k = 0.0; k < (double)TIMESTEPS; k += 1.0 / x) {
+            //         data_spikes[i][j][(size_t)k] = true;
             //     }
             // }
+            for (size_t k = 0; k < TIMESTEPS; k++) {
+                if (drand48() < x) {
+                    data_spikes[i][j][k] = true;
+                }
+            }
         }
     }
 
@@ -262,7 +275,7 @@ int main(int argc, char* argv[]) {
                 bool spikes[TOTAL_NEURONS][TIMESTEPS]   = {{0}};
                 double v_pre[TOTAL_NEURONS][TIMESTEPS]  = {{0.0}};
                 double v_post[TOTAL_NEURONS][TIMESTEPS] = {{0.0}};
-                double output_counts[OUTPUT_NEURONS]    = {0};
+                double spike_logits[OUTPUT_NEURONS]     = {0};
 
                 // 1. Forward Pass
                 for (size_t t = 0; t < TIMESTEPS; t++) {
@@ -287,9 +300,9 @@ int main(int argc, char* argv[]) {
 
                         // Keep track of output fire counts for decoding later
                         if (neuron >= layer_cumulitive_sizes[num_layers - 1]) {
-                            output_counts[neuron -
-                                          layer_cumulitive_sizes[num_layers -
-                                                                 1]] +=
+                            spike_logits[neuron -
+                                         layer_cumulitive_sizes[num_layers -
+                                                                1]] +=
                                 neuron_counts[neuron];
                         }
                     }
@@ -299,11 +312,11 @@ int main(int argc, char* argv[]) {
                 size_t max_idx = 0;
                 double max_val = 0;
                 for (size_t neuron = 0; neuron < OUTPUT_NEURONS; neuron++) {
-                    output_counts[neuron] /= (double)TIMESTEPS;
+                    spike_logits[neuron] /= (double)TIMESTEPS;
 
-                    if (output_counts[neuron] > max_val) {
+                    if (spike_logits[neuron] > max_val) {
                         max_idx = neuron;
-                        max_val = output_counts[neuron];
+                        max_val = spike_logits[neuron];
                     }
                 }
 
@@ -311,51 +324,82 @@ int main(int argc, char* argv[]) {
                     batch_correct++;
                 }
 
-                // Now we have logits, spikes, charges, and final charges
-                // Beginning backward pass
-
                 // 2. Backward pass
-                // y_one_hot -> target
-                // spikes -> spikes
-                // pre_acts -> charges
-                // _state -> last col of charges
-                // logits -> output_counts
-
-                double target[OUTPUT_NEURONS]             = {0};
-                target[(size_t)d.labels[observation_idx]] = 1.0;
-
-                double output_spike_gradient[OUTPUT_NEURONS] = {0.0};
-                batch_loss +=
-                    cross_entropy(output_counts, target, output_spike_gradient,
-                                  OUTPUT_NEURONS);
+                double target[OUTPUT_NEURONS] = {0};
                 for (size_t i = 0; i < OUTPUT_NEURONS; i++) {
-                    output_spike_gradient[i] /= (double)TIMESTEPS;
+                    if (i == (size_t)d.labels[observation_idx]) {
+                        target[i] = 0.25;
+                    } else {
+                        target[i] = 0.03;
+                    }
                 }
+                double dL_ds[OUTPUT_NEURONS] = {0.0};
+                double loss_spike =
+                    cross_entropy(spike_logits, target, dL_ds, OUTPUT_NEURONS);
 
-                // grad_weights(python) -> delta_W[source][dest]
-                double future_mem_grad[TOTAL_NEURONS]               = {0.0};
-                double spike_grad_history[TOTAL_NEURONS][TIMESTEPS] = {{0.0}};
+                double voltage_logits[OUTPUT_NEURONS] = {0.0};
+                for (size_t n = 0; n < OUTPUT_NEURONS; n++) {
+                    for (size_t t = 0; t < TIMESTEPS; t++) {
+                        voltage_logits[n] += v_pre[n][t];
+                    }
+                    voltage_logits[n] /= TIMESTEPS;
+                }
+                double dL_dy[OUTPUT_NEURONS] = {0.0};
+                double loss_voltage = cross_entropy(voltage_logits, target,
+                                                    dL_dy, OUTPUT_NEURONS);
+
+                batch_loss += loss_spike + 0.3 * loss_voltage;
+
+                double future_mem_grad[TOTAL_NEURONS]                 = {0.0};
+                double spike_grad_history[TOTAL_NEURONS][TIMESTEPS]   = {{0.0}};
+                double voltage_grad_history[TOTAL_NEURONS][TIMESTEPS] = {{0.0}};
 
                 for (int t = TIMESTEPS - 1; t >= 0; t--) {
-                    double same_time_grad[TOTAL_NEURONS] = {0.0};
-                    for (size_t neuron = 0; neuron < TOTAL_NEURONS; neuron++) {
-                        same_time_grad[neuron] = spike_grad_history[neuron][t];
+                    for (size_t output = 0; output < OUTPUT_NEURONS; output++) {
+                        voltage_grad_history[layer_cumulitive_sizes[num_layers -
+                                                                    1] +
+                                             output][t] +=
+                            (dL_dy[output] / TIMESTEPS);
+                        spike_grad_history[layer_cumulitive_sizes[num_layers -
+                                                                  1] +
+                                           output][t] +=
+                            (dL_ds[output] / TIMESTEPS);
                     }
 
-                    for (size_t output = 0; output < OUTPUT_NEURONS; output++) {
-                        same_time_grad[layer_cumulitive_sizes[num_layers - 1] +
-                                       output] += output_spike_gradient[output];
-                    }
+                    // Y is the output of a neuron
+                    // X is the input to that neuron
 
                     double next_future_mem_grad[TOTAL_NEURONS] = {0.0};
 
                     for (int dest = TOTAL_NEURONS - 1; dest >= 0; dest--) {
-                        double s     = spikes[dest][t];
-                        double u     = v_pre[dest][t];
-                        double ds_du = spike_surrogate(
-                            u, thresholds[dest], SCALE_RHO, TAU_RHO_SCALED, W);
-                        double g_u = future_mem_grad[dest] * (1.0 - s) +
-                                     same_time_grad[dest] * ds_du;
+                        // Start Slayer copy
+                        double dL_dV = voltage_grad_history[dest][t] / W;
+                        dL_dV += future_mem_grad[dest];
+
+                        double v_pre_t = v_pre[dest][t];
+
+                        double dV_post_dV_pre =
+                            1.0 - (spikes[dest][t] > 0 ? 1.0 : 0.0);
+                        double dV_pre_dx_t = W;
+                        double dV_post_ds_t =
+                            (min_potential * W > 0)
+                                ? ((min_potential - v_pre_t) * W)
+                                : (-v_pre_t * W);
+                        double ds_t_dV_pre =
+                            spike_surrogate(v_pre_t, thresholds[dest],
+                                            SCALE_RHO, TAU_RHO_SCALED, 15);
+
+                        double dV_pre_dV_leak = 1.0;
+                        double dV_leak_dV_t1 =
+                            (v_pre_t * W >= min_potential * W) ? (1.0 - leak)
+                                                               : 0.0;
+
+                        double grad =
+                            (dL_dV * dV_post_dV_pre * dV_pre_dx_t) +
+                            (dL_dV * dV_post_ds_t * ds_t_dV_pre * dV_pre_dx_t) +
+                            ((spike_grad_history[dest][t] * ds_t_dV_pre *
+                              dV_pre_dx_t));
+                        // End Slayer copy
 
                         for (size_t source = 0; source < TOTAL_NEURONS;
                              source++) {
@@ -370,16 +414,21 @@ int main(int argc, char* argv[]) {
                             }
 
                             double source_spike = spikes[source][source_time];
-                            delta_W[source][dest] += source_spike * g_u;
+                            delta_W[source][dest] +=
+                                source_spike * weights[source][dest] * grad;
                             spike_grad_history[source][source_time] +=
-                                g_u * weights[source][dest];
+                                grad * weights[source][dest];
+                            voltage_grad_history[source][source_time] +=
+                                grad * weights[source][dest];
                         }
 
-                        double leaked_mem = alpha(leak) * v_post[dest][t];
-                        bool leak_mask    = leaked_mem > min_potential;
-
                         next_future_mem_grad[dest] =
-                            alpha(leak) * g_u * leak_mask;
+                            (dL_dV * dV_post_dV_pre * dV_pre_dV_leak *
+                             dV_leak_dV_t1) +
+                            (dL_dV * dV_post_ds_t * ds_t_dV_pre *
+                             dV_pre_dV_leak * dV_leak_dV_t1) +
+                            (spike_grad_history[dest][t] * ds_t_dV_pre *
+                             dV_pre_dV_leak * dV_leak_dV_t1);
                     }
 
                     memcpy(future_mem_grad, next_future_mem_grad,

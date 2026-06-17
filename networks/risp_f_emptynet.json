@@ -9,7 +9,7 @@
             "max_threshold": 10.0,
             "max_weight": 1000.0,
             "min_potential": -1.0,
-            "min_threshold": 0.1,
+            "min_threshold": 0.01,
             "min_weight": -1000.0,
             "run_time_inclusive": false,
             "spike_value_factor": 10.0,
@@ -45,7 +45,7 @@
             {
                 "index": 0,
                 "max_value": 10.0,
-                "min_value": 0.1,
+                "min_value": 0.01,
                 "name": "Threshold",
                 "size": 1,
                 "type": 68
