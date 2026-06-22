@@ -8,7 +8,7 @@
             "max_delay": 7,
             "max_threshold": 10.0,
             "max_weight": 1000.0,
-            "min_potential": -1.0,
+            "min_potential": -1000.0,
             "min_threshold": 0.01,
             "min_weight": -1000.0,
             "run_time_inclusive": false,

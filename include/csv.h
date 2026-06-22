@@ -9,4 +9,5 @@ typedef struct {
     int cols;
 } Dataset;
 
-Dataset load_dataset(const char* data_path, const char* labels_path);
+void load_dataset(const char* data_path, const char* labels_path,
+                  double train_percent, Dataset* train, Dataset* test);

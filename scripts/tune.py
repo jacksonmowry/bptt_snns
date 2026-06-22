@@ -12,11 +12,16 @@ from concurrent.futures import ProcessPoolExecutor
 # YOUR TARGET PROGRAM GOES HERE
 # ==============================================================================
 def my_target_program(params):
-    command = ["bin/eprop_learning", "networks/risp_f_emptynet.json"]
-    command.append("0.0001")
-    command.append("0.0")
-    command.append(f"{params["gamma"]}")
-    command.append(f"{params["spike_rate_regularization"]}")
+    command = [
+        "bin/bptt_learning",
+        "networks/risp_f_emptynet.json",
+        "/home/jackson/framework/cpp-apps/applications/classify/datasets/regular/iris_data.csv",
+        "/home/jackson/framework/cpp-apps/applications/classify/datasets/regular/iris_label.csv",
+    ]
+    command.append(f"{params["learning_rate"]}")
+    command.append(f"{params["decay_rate"]}")
+    command.append(f"{params["tau"]}")
+    command.append(f"{params["rho"]}")
     avg_score = 0.0
 
     trials = 5
