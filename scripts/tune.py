@@ -24,7 +24,7 @@ def my_target_program(params):
     command.append(f"{params["rho"]}")
     avg_score = 0.0
 
-    trials = 5
+    trials = 10
     for i in range(trials):
         try:
             result = subprocess.run(command, capture_output=True, text=True, check=True)
