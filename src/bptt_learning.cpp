@@ -1,11 +1,14 @@
 #include "csv.h"
 #include "framework.hpp"
+#include <Eigen/Dense>
 #include <algorithm>
 #include <cassert>
 #include <cfloat>
 #include <cstddef>
 #include <fstream>
 #include <getopt.h>
+#include <iostream>
+#include <stddef.h>
 #include <unordered_set>
 
 using namespace std;
@@ -476,8 +479,8 @@ int main(int argc, char* argv[]) {
     vector<double> thresholds(total_neurons);
     vector<vector<double>> m_weights(total_neurons);
     vector<vector<double>> v_weights(total_neurons);
-    vector<vector<bool>> spikes(total_neurons, vector<bool>(timesteps));
-    vector<vector<double>> v_pre(total_neurons, vector<double>(timesteps));
+    vector<vector<double>> spikes(timesteps, vector<double>(total_neurons));
+    vector<vector<double>> v_pre(timesteps, vector<double>(total_neurons));
     vector<double> spike_logits(output_neurons);
     vector<double> target(output_neurons);
     vector<double> dL_ds(output_neurons);
@@ -546,8 +549,8 @@ int main(int argc, char* argv[]) {
 
                 p->clear_activity();
 
-                for (size_t i = 0; i < total_neurons; i++) {
-                    fill(spikes[i].begin(), spikes[i].end(), false);
+                for (size_t i = 0; i < timesteps; i++) {
+                    fill(spikes[i].begin(), spikes[i].end(), 0.0);
                     fill(v_pre[i].begin(), v_pre[i].end(), 0.0);
                 }
                 fill(spike_logits.begin(), spike_logits.end(), 0.0);
@@ -566,8 +569,8 @@ int main(int argc, char* argv[]) {
                     const vector<double>& neuron_pre_charges =
                         p->neuron_pre_charges();
                     for (size_t neuron = 0; neuron < total_neurons; neuron++) {
-                        spikes[neuron][t] = neuron_counts[neuron];
-                        v_pre[neuron][t]  = neuron_pre_charges[neuron];
+                        spikes[t][neuron] = neuron_counts[neuron];
+                        v_pre[t][neuron]  = neuron_pre_charges[neuron];
 
                         // Keep track of output fire counts for decoding later
                         if (neuron >= layer_cumulitive_sizes[num_layers - 1]) {
@@ -618,7 +621,40 @@ int main(int argc, char* argv[]) {
                          voltage_grad_history[i].end(), 0.0);
                 }
 
+                Eigen::VectorXd future_mem_grad_(total_neurons);
+                Eigen::Matrix<double, Eigen::Dynamic, Eigen::Dynamic,
+                              Eigen::RowMajor>
+                    sgh(total_neurons, timesteps);
+                Eigen::Matrix<double, Eigen::Dynamic, Eigen::Dynamic,
+                              Eigen::RowMajor>
+                    vgh(total_neurons, timesteps);
+                Eigen::VectorXd dL_dV_(total_neurons);
+                Eigen::VectorXd v_pre_t_(total_neurons);
+                Eigen::VectorXd dV_post_dV_pre_(total_neurons);
+                Eigen::VectorXd dV_post_ds_t_(total_neurons);
+                Eigen::VectorXd ds_t_dV_pre_(total_neurons);
+                Eigen::VectorXd dV_leak_dV_t1_(total_neurons);
+                Eigen::VectorXd grad_(total_neurons);
+
+                future_mem_grad_.setZero();
+                sgh.setZero();
+                vgh.setZero();
+                dL_dV_.setZero();
+                v_pre_t_.setZero();
+                dV_post_dV_pre_.setZero();
+                dV_post_ds_t_.setZero();
+                ds_t_dV_pre_.setZero();
+                dV_leak_dV_t1_.setZero();
+                grad_.setZero();
+
                 for (int t = timesteps - 1; t >= 0; t--) {
+                    sgh.col(t).segment(layer_cumulitive_sizes[2],
+                                       output_neurons) +=
+                        Eigen::Map<const Eigen::VectorXd>(&dL_ds[0],
+                                                          output_neurons) /
+                        timesteps;
+
+                    // Old for loop
                     for (size_t output = 0; output < output_neurons; output++) {
                         spike_grad_history[layer_cumulitive_sizes[num_layers -
                                                                   1] +
@@ -626,31 +662,52 @@ int main(int argc, char* argv[]) {
                             (dL_ds[output] / timesteps);
                     }
 
+                    dL_dV_ = vgh.col(t);
+                    dL_dV_ += future_mem_grad_;
+                    v_pre_t_ = Eigen::Map<const Eigen::VectorXd>(&v_pre[t][0],
+                                                                 total_neurons);
+
+                    dV_post_dV_pre_ = (Eigen::Map<const Eigen::VectorXd>(
+                                           &spikes[t][0], total_neurons)
+                                           .array() <= 0)
+                                          .cast<double>();
+
+                    dV_post_ds_t_ = -v_pre_t_;
+                    if (min_potential > 0) {
+                        (dV_post_ds_t_.array() + min_potential).matrix();
+                    }
+
+                    ds_t_dV_pre_ =
+                        (rho / (2.0 * tau)) *
+                        (-(v_pre_t_ - Eigen::Map<const Eigen::VectorXd>(
+                                          &thresholds[0], total_neurons))
+                              .array()
+                              .abs()
+                              .matrix() /
+                         tau)
+                            .array()
+                            .exp()
+                            .matrix();
+
+                    dV_leak_dV_t1_ =
+                        (v_pre_t_.array() >= min_potential).cast<double>() *
+                        (1.0 - leak);
+
+                    grad_ = (dL_dV_.array() * dV_post_dV_pre_.array()) +
+                            (dL_dV_.array() * dV_post_ds_t_.array() *
+                             ds_t_dV_pre_.array()) +
+                            (sgh.col(t).array() * ds_t_dV_pre_.array());
+
+                    future_mem_grad_ =
+                        (dL_dV_.array() * dV_post_dV_pre_.array() *
+                         dV_leak_dV_t1_.array()) +
+                        (dL_dV_.array() * dV_post_ds_t_.array() *
+                         ds_t_dV_pre_.array() * dV_leak_dV_t1_.array()) +
+                        (sgh.col(t).array() * ds_t_dV_pre_.array() *
+                         dV_leak_dV_t1_.array());
+
                     for (int dest = total_neurons - 1; dest >= 0; dest--) {
-                        // Start Slayer copy
-                        double dL_dV = voltage_grad_history[dest][t];
-                        dL_dV += future_mem_grad[dest];
-
-                        double v_pre_t = v_pre[dest][t];
-
-                        double dV_post_dV_pre =
-                            1.0 - (spikes[dest][t] > 0 ? 1.0 : 0.0);
-                        double dV_post_ds_t = (min_potential > 0)
-                                                  ? ((min_potential - v_pre_t))
-                                                  : (-v_pre_t);
-                        double ds_t_dV_pre  = spike_surrogate(
-                            v_pre_t, thresholds[dest], rho, tau);
-
-                        double dV_leak_dV_t1 =
-                            (v_pre_t >= min_potential) ? (1.0 - leak) : 0.0;
-
-                        double grad =
-                            (dL_dV * dV_post_dV_pre) +
-                            (dL_dV * dV_post_ds_t * ds_t_dV_pre) +
-                            ((spike_grad_history[dest][t] * ds_t_dV_pre));
-                        // End Slayer copy
                         for (size_t source_idx = 0;
-                             grad != 0.0 &&
                              source_idx < n->get_node(dest)->incoming.size();
                              source_idx++) {
                             size_t source = n->get_node(dest)
@@ -663,19 +720,67 @@ int main(int argc, char* argv[]) {
                                 continue;
                             }
 
-                            double source_spike = spikes[source][source_time];
-                            delta_W[dest][source_idx] += source_spike * grad;
-                            spike_grad_history[source][source_time] +=
-                                grad * weights[dest][source_idx];
+                            double source_spike = spikes[source_time][source];
+                            delta_W[dest][source_idx] +=
+                                source_spike * grad_(dest);
+                            sgh(source, source_time) +=
+                                grad_(dest) * weights[dest][source_idx];
                         }
-
-                        future_mem_grad[dest] =
-                            (dL_dV * dV_post_dV_pre * dV_leak_dV_t1) +
-                            (dL_dV * dV_post_ds_t * ds_t_dV_pre *
-                             dV_leak_dV_t1) +
-                            (spike_grad_history[dest][t] * ds_t_dV_pre *
-                             dV_leak_dV_t1);
                     }
+
+                    // exit(1);
+
+                    // for (int dest = total_neurons - 1; dest >= 0; dest--) {
+                    //     // Start Slayer copy
+                    //     double dL_dV = voltage_grad_history[dest][t];
+                    //     dL_dV += future_mem_grad[dest];
+
+                    //     double v_pre_t = v_pre[t][dest];
+
+                    //     double dV_post_dV_pre =
+                    //         1.0 - (spikes[t][dest] > 0 ? 1.0 : 0.0);
+                    //     double dV_post_ds_t = (min_potential > 0)
+                    //                               ? ((min_potential -
+                    //                               v_pre_t)) : (-v_pre_t);
+                    //     double ds_t_dV_pre  = spike_surrogate(
+                    //         v_pre_t, thresholds[dest], rho, tau);
+
+                    //     double dV_leak_dV_t1 =
+                    //         (v_pre_t >= min_potential) ? (1.0 - leak) : 0.0;
+
+                    //     double grad =
+                    //         (dL_dV * dV_post_dV_pre) +
+                    //         (dL_dV * dV_post_ds_t * ds_t_dV_pre) +
+                    //         ((spike_grad_history[dest][t] * ds_t_dV_pre));
+                    //     // End Slayer copy
+                    //     for (size_t source_idx = 0;
+                    //          grad != 0.0 &&
+                    //          source_idx < n->get_node(dest)->incoming.size();
+                    //          source_idx++) {
+                    //         size_t source = n->get_node(dest)
+                    //                             ->incoming[source_idx]
+                    //                             ->from->id;
+
+                    //         int delay       = delays[dest][source_idx];
+                    //         int source_time = t - delay;
+                    //         if (source_time < 0) {
+                    //             continue;
+                    //         }
+
+                    //         double source_spike =
+                    //         spikes[source_time][source];
+                    //         delta_W[dest][source_idx] += source_spike * grad;
+                    //         spike_grad_history[source][source_time] +=
+                    //             grad * weights[dest][source_idx];
+                    //     }
+
+                    //     future_mem_grad[dest] =
+                    //         (dL_dV * dV_post_dV_pre * dV_leak_dV_t1) +
+                    //         (dL_dV * dV_post_ds_t * ds_t_dV_pre *
+                    //          dV_leak_dV_t1) +
+                    //         (spike_grad_history[dest][t] * ds_t_dV_pre *
+                    //          dV_leak_dV_t1);
+                    // }
                 }
             }
 
@@ -794,5 +899,9 @@ int main(int argc, char* argv[]) {
     free(train.labels);
     free(train.min_vals);
     free(train.max_vals);
+    free(test.data);
+    free(test.labels);
+    free(test.min_vals);
+    free(test.max_vals);
     free(batch_order);
 }
