@@ -493,8 +493,8 @@ int main(int argc, char* argv[]) {
 
     for (size_t i = 0; i < total_neurons; i++) {
         thresholds[i] = n->get_node(i)->get("Threshold");
-        weights[i].resize(n->get_node(i)->incoming.size());
-        delays[i].resize(n->get_node(i)->incoming.size());
+        weights[i].reserve(n->get_node(i)->incoming.size());
+        delays[i].reserve(n->get_node(i)->incoming.size());
         delta_W[i].resize(n->get_node(i)->incoming.size());
         m_weights[i].resize(n->get_node(i)->incoming.size());
         v_weights[i].resize(n->get_node(i)->incoming.size());
