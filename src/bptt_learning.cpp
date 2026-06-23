@@ -537,10 +537,6 @@ int main(int argc, char* argv[]) {
             double batch_loss    = 0.0;
             size_t batch_correct = 0;
 
-            for (size_t i = 0; i < total_neurons; i++) {
-                fill(delta_W[i].begin(), delta_W[i].end(), 0.0);
-            }
-
             // Process batch samples
             for (int b = 0; (size_t)b < batch_size &&
                             (batch_start + b) < train.observations;
@@ -608,8 +604,6 @@ int main(int argc, char* argv[]) {
                     }
                 }
 
-                fill(dL_ds.begin(), dL_ds.end(), 0.0);
-
                 double loss_spike =
                     cross_entropy(spike_logits.data(), target.data(),
                                   dL_ds.data(), output_neurons);
@@ -670,7 +664,6 @@ int main(int argc, char* argv[]) {
                             }
 
                             double source_spike = spikes[source][source_time];
-                            // delta_W[source][dest] += source_spike * grad;
                             delta_W[dest][source_idx] += source_spike * grad;
                             spike_grad_history[source][source_time] +=
                                 grad * weights[dest][source_idx];
@@ -701,7 +694,6 @@ int main(int argc, char* argv[]) {
             for (size_t i = 0; i < total_neurons; i++) {
                 for (size_t j = 0; j < n->get_node(i)->incoming.size(); j++) {
                     Edge* e = n->get_node(i)->incoming[j];
-                    // int k   = e->to->id;
 
                     delta_W[i][j] *= inv_batch;
 
@@ -757,9 +749,8 @@ int main(int argc, char* argv[]) {
 
             p->run(timesteps);
             const vector<int>& output_counts = p->output_counts();
-            fill(spike_logits.begin(), spike_logits.end(), 0.0);
-            size_t max_idx = 0;
-            int max_val    = 0;
+            size_t max_idx                   = 0;
+            int max_val                      = 0;
             for (size_t output = 0; output < output_neurons; output++) {
                 spike_logits[output] =
                     output_counts[output] / (double)timesteps;
@@ -770,14 +761,12 @@ int main(int argc, char* argv[]) {
                 }
             }
 
-            fill(softmax_out.begin(), softmax_out.end(), 0.0);
             softmax(spike_logits.data(), softmax_out.data(), output_neurons);
 
             test_loss -= log(softmax_out[(size_t)test.labels[i]]);
-            if (max_idx == (size_t)test.labels[i]) {
-                test_correct++;
-            }
+            test_correct += (max_idx == (size_t)test.labels[i]);
         }
+
         delete p;
 
         test_correct /= test.observations;
