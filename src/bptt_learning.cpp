@@ -470,16 +470,12 @@ int main(int argc, char* argv[]) {
         }
     }
 
-    vector<vector<double>> weights(total_neurons,
-                                   vector<double>(total_neurons));
-    vector<vector<double>> delta_W(total_neurons,
-                                   vector<double>(total_neurons));
-    vector<vector<int>> delays(total_neurons, vector<int>(total_neurons));
+    vector<vector<double>> weights(total_neurons);
+    vector<vector<double>> delta_W(total_neurons);
+    vector<vector<int>> delays(total_neurons);
     vector<double> thresholds(total_neurons);
-    vector<vector<double>> m_weights(total_neurons,
-                                     vector<double>(total_neurons));
-    vector<vector<double>> v_weights(total_neurons,
-                                     vector<double>(total_neurons));
+    vector<vector<double>> m_weights(total_neurons);
+    vector<vector<double>> v_weights(total_neurons);
     vector<vector<bool>> spikes(total_neurons, vector<bool>(timesteps));
     vector<vector<double>> v_pre(total_neurons, vector<double>(timesteps));
     vector<double> spike_logits(output_neurons);
@@ -497,11 +493,17 @@ int main(int argc, char* argv[]) {
 
     for (size_t i = 0; i < total_neurons; i++) {
         thresholds[i] = n->get_node(i)->get("Threshold");
+        weights[i].resize(n->get_node(i)->incoming.size());
+        delays[i].resize(n->get_node(i)->incoming.size());
+        delta_W[i].resize(n->get_node(i)->incoming.size());
+        m_weights[i].resize(n->get_node(i)->incoming.size());
+        v_weights[i].resize(n->get_node(i)->incoming.size());
 
-        for (size_t j = 0; j < n->get_node(i)->outgoing.size(); j++) {
-            Edge* e               = n->get_node(i)->outgoing[j];
-            weights[i][e->to->id] = e->get("Weight");
-            delays[i][e->to->id]  = e->get("Delay");
+        for (size_t j = 0; j < n->get_node(i)->incoming.size(); j++) {
+            Edge* e = n->get_node(i)->incoming[j];
+
+            weights[i].push_back(e->get("Weight"));
+            delays[i].push_back(e->get("Delay"));
         }
     }
 
@@ -661,16 +663,17 @@ int main(int argc, char* argv[]) {
                                                 ->incoming[source_idx]
                                                 ->from->id;
 
-                            int delay       = delays[source][dest];
+                            int delay       = delays[dest][source_idx];
                             int source_time = t - delay;
                             if (source_time < 0) {
                                 continue;
                             }
 
                             double source_spike = spikes[source][source_time];
-                            delta_W[source][dest] += source_spike * grad;
+                            // delta_W[source][dest] += source_spike * grad;
+                            delta_W[dest][source_idx] += source_spike * grad;
                             spike_grad_history[source][source_time] +=
-                                grad * weights[source][dest];
+                                grad * weights[dest][source_idx];
                         }
 
                         future_mem_grad[dest] =
@@ -696,20 +699,21 @@ int main(int argc, char* argv[]) {
             b2_t *= BETA2;
 
             for (size_t i = 0; i < total_neurons; i++) {
-                for (size_t j = 0; j < n->get_node(i)->outgoing.size(); j++) {
-                    Edge* e = n->get_node(i)->outgoing[j];
-                    int k   = e->to->id;
+                for (size_t j = 0; j < n->get_node(i)->incoming.size(); j++) {
+                    Edge* e = n->get_node(i)->incoming[j];
+                    // int k   = e->to->id;
 
-                    delta_W[i][k] *= inv_batch;
+                    delta_W[i][j] *= inv_batch;
 
-                    m_weights[i][k] =
-                        BETA1 * m_weights[i][k] + (1.0 - BETA1) * delta_W[i][k];
-                    v_weights[i][k] =
-                        BETA2 * v_weights[i][k] +
-                        (1.0 - BETA2) * (delta_W[i][k] * delta_W[i][k]);
+                    m_weights[i][j] =
+                        BETA1 * m_weights[i][j] + (1.0 - BETA1) * delta_W[i][j];
+                    v_weights[i][j] =
+                        BETA2 * v_weights[i][j] +
+                        (1.0 - BETA2) * (delta_W[i][j] * delta_W[i][j]);
+                    delta_W[i][j] = 0.0;
 
-                    double mW_hat = m_weights[i][k] / (1.0 - b1_t);
-                    double vW_hat = v_weights[i][k] / (1.0 - b2_t);
+                    double mW_hat = m_weights[i][j] / (1.0 - b1_t);
+                    double vW_hat = v_weights[i][j] / (1.0 - b2_t);
 
                     double lr = learning_rate;
                     if (epoch == 0) {
@@ -718,9 +722,9 @@ int main(int argc, char* argv[]) {
                              learning_rate;
                     }
 
-                    weights[i][k] -= lr * mW_hat / (sqrt(vW_hat + ADAM_EPS));
-                    weights[i][k] -= lr * decay_rate * weights[i][k];
-                    e->set("Weight", weights[i][k]);
+                    weights[i][j] -= lr * mW_hat / (sqrt(vW_hat + ADAM_EPS));
+                    weights[i][j] -= lr * decay_rate * weights[i][j];
+                    e->set("Weight", weights[i][j]);
                 }
             }
 
