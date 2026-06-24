@@ -4,3 +4,4 @@ include
 framework-open/include
 -Wall
 -Wextra
+-std=c++11

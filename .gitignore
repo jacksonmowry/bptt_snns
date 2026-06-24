@@ -5,3 +5,5 @@ bin/*
 obj/*
 !obj/.keep
 data/*
+perf.data
+perf.data.old
