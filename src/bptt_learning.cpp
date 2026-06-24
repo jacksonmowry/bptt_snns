@@ -107,27 +107,6 @@ size_t label_count(const Dataset* d) {
     return us.size();
 }
 
-static void print_usage(const char* prog) {
-    fprintf(stderr, "Usage: %s [OPTIONS]...\n", prog);
-    fprintf(stderr, "  -n, --network_json     FILE    Network JSON path\n");
-    fprintf(stderr, "  -d, --data_file        FILE    Data file path\n");
-    fprintf(stderr, "  -l, --label_file       FILE    Label file path\n");
-    fprintf(stderr,
-            "  -b, --timeseries               Enable timeseries mode\n");
-    fprintf(stderr, "  -S, --connectivity     FLOAT   Chance each neuron is "
-                    "connected to another (0,1]\n");
-    fprintf(stderr, "  -r, --learning_rate    FLOAT   Learning rate (0,1]\n");
-    fprintf(stderr, "  -e, --decay_rate       FLOAT   Decay rate (0,1]\n");
-    fprintf(stderr, "  -u, --tau              FLOAT   Tau (>0)\n");
-    fprintf(stderr, "  -o, --rho              FLOAT   Rho (>0)\n");
-    fprintf(stderr, "  -t, --timesteps        UINT    Timestep count\n");
-    fprintf(stderr, "  -H, --hidden_neurons   UINT    Hidden layer size\n");
-    fprintf(stderr, "  -s, --seed             UINT    Random seed\n");
-    fprintf(stderr, "  -p, --epochs           UINT    Training epochs\n");
-    fprintf(stderr, "  -B, --batch_size       UINT    Training batch size\n");
-    fprintf(stderr, "  -h, --help                     Show this help\n");
-}
-
 void encode_spikes(Processor* p, const Dataset* d, size_t index,
                    size_t timesteps, bool timeseries, size_t input_neurons) {
     if (timeseries) {
@@ -181,6 +160,30 @@ void encode_spikes(Processor* p, const Dataset* d, size_t index,
     }
 }
 
+static void print_usage(const char* prog) {
+    fprintf(stderr, "Usage: %s [OPTIONS]...\n", prog);
+    fprintf(stderr, "  -n, --network_json     FILE    Network JSON path\n");
+    fprintf(stderr, "  -d, --data_file        FILE    Data file path\n");
+    fprintf(stderr, "  -l, --label_file       FILE    Label file path\n");
+    fprintf(stderr,
+            "  -b, --timeseries               Enable timeseries mode\n");
+    fprintf(stderr, "  -S, --connectivity     FLOAT   Chance each neuron is "
+                    "connected to another (0,1]\n");
+    fprintf(stderr, "  -r, --learning_rate    FLOAT   Learning rate (0,1]\n");
+    fprintf(stderr, "  -e, --decay_rate       FLOAT   Decay rate (0,1]\n");
+    fprintf(stderr, "  -u, --tau              FLOAT   Tau (>0)\n");
+    fprintf(stderr, "  -o, --rho              FLOAT   Rho (>0)\n");
+    fprintf(stderr, "  -t, --timesteps        UINT    Timestep count\n");
+    fprintf(stderr, "  -H, --hidden_neurons   UINT    Hidden layer size\n");
+    fprintf(stderr, "  -s, --seed             UINT    Random seed\n");
+    fprintf(stderr, "  -p, --epochs           UINT    Training epochs\n");
+    fprintf(stderr, "  -B, --batch_size       UINT    Training batch size\n");
+    fprintf(
+        stderr,
+        "  -p, --training_percent FLOAT   Training percent of total data\n");
+    fprintf(stderr, "  -h, --help                     Show this help\n");
+}
+
 int main(int argc, char* argv[]) {
     char* network_json_file = NULL;
     char* data_file         = NULL;
@@ -196,6 +199,7 @@ int main(int argc, char* argv[]) {
     unsigned long seed      = (unsigned long)time(NULL);
     size_t epochs           = 10;
     size_t batch_size       = 1;
+    double training_percent = 0.8;
 
     static struct option long_options[] = {
         {"network_json", required_argument, 0, 'n'},
@@ -212,6 +216,7 @@ int main(int argc, char* argv[]) {
         {"seed", required_argument, 0, 's'},
         {"epochs", required_argument, 0, 'p'},
         {"batch_size", required_argument, 0, 'B'},
+        {"training_percent", required_argument, 0, 'P'},
         {"help", no_argument, 0, 'h'},
         {0, 0, 0, 0},
     };
@@ -219,7 +224,7 @@ int main(int argc, char* argv[]) {
     int c;
     char* endptr;
 
-    while ((c = getopt_long(argc, argv, "n:d:l:b:c:r:e:u:o:t:H:s:hp:B:",
+    while ((c = getopt_long(argc, argv, "n:d:l:b:c:r:e:u:o:t:H:s:hp:B:P:",
                             long_options, NULL)) != -1) {
         switch (c) {
         case 'n':
@@ -309,6 +314,15 @@ int main(int argc, char* argv[]) {
                 return 1;
             }
             break;
+        case 'P':
+            training_percent = strtod(optarg, &endptr);
+            if (*endptr != '\0' || training_percent <= 0.0 ||
+                training_percent > 1.0) {
+                fprintf(stderr,
+                        "Error: Invalid or out-of-range --training_percent\n");
+                return 1;
+            }
+            break;
         case 'h':
             print_usage(argv[0]);
             return 0;
@@ -332,9 +346,9 @@ int main(int argc, char* argv[]) {
     Dataset test;
 
     if (timeseries) {
-        load_dataset_2d(data_file, label_file, 0.8, &train, &test);
+        load_dataset_2d(data_file, label_file, training_percent, &train, &test);
     } else {
-        load_dataset(data_file, label_file, 0.8, &train, &test);
+        load_dataset(data_file, label_file, training_percent, &train, &test);
     }
 
     size_t train_labels = label_count(&train);
