@@ -25,7 +25,7 @@ void load_dataset(const char* data_path, const char* labels_path,
         return;
     }
 
-    char line[4096];
+    char line[4096 * 16];
     int rows = 0;
     while (fgets(line, sizeof(line), f_labels) != NULL) {
         rows++;
@@ -146,8 +146,10 @@ void load_dataset(const char* data_path, const char* labels_path,
         .timeseries           = false};
     memcpy(test->min_vals, ds.min_vals, cols * sizeof(*test->min_vals));
     memcpy(test->max_vals, ds.max_vals, cols * sizeof(*test->max_vals));
-    memcpy(test->data, ds.data, test_len * cols * sizeof(*test->data));
-    memcpy(test->labels, ds.labels, test_len * sizeof(*test->labels));
+    memcpy(test->data, ds.data + (train_len * cols),
+           test_len * cols * sizeof(*test->data));
+    memcpy(test->labels, ds.labels + (train_len),
+           test_len * sizeof(*test->labels));
 
     free(ds.min_vals);
     free(ds.max_vals);

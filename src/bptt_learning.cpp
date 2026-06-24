@@ -7,7 +7,6 @@
 #include <cstddef>
 #include <fstream>
 #include <getopt.h>
-#include <iostream>
 #include <stddef.h>
 #include <unordered_set>
 
@@ -127,6 +126,59 @@ static void print_usage(const char* prog) {
     fprintf(stderr, "  -p, --epochs           UINT    Training epochs\n");
     fprintf(stderr, "  -B, --batch_size       UINT    Training batch size\n");
     fprintf(stderr, "  -h, --help                     Show this help\n");
+}
+
+void encode_spikes(Processor* p, const Dataset* d, size_t index,
+                   size_t timesteps, bool timeseries, size_t input_neurons) {
+    if (timeseries) {
+        size_t encoding_window = timesteps / d->cols;
+        assert(encoding_window > 0);
+
+        for (size_t input = 0; input < input_neurons / 2; input++) {
+            for (int column_t = 0; column_t < d->cols; column_t++) {
+                double encoding_start = column_t * encoding_window;
+                double encoding_end   = encoding_start + encoding_window;
+
+                double x =
+                    (d->data[(index * d->rows_per_observation * d->cols) +
+                             (input * d->cols) + column_t] -
+                     d->min_vals[input]) /
+                    (d->max_vals[input] - d->min_vals[input]);
+                double inv_x = 1.0 - x;
+
+                if (x > 0.0) {
+                    for (double j = encoding_start; j < encoding_end;
+                         j += 1.0 / x) {
+                        p->apply_spike({(int)input * 2, (double)(int)j, 1.0});
+                    }
+                }
+                if (inv_x > 0.0) {
+                    for (double j = encoding_start; j < encoding_end;
+                         j += 1.0 / inv_x) {
+                        p->apply_spike(
+                            {(int)input * 2 + 1, (double)(int)j, 1.0});
+                    }
+                }
+            }
+        }
+    } else {
+        for (size_t input = 0; input < input_neurons / 2; input++) {
+            double x = (d->data[index * d->cols + input] - d->min_vals[input]) /
+                       (d->max_vals[input] - d->min_vals[input]);
+            double inv_x = 1.0 - x;
+            if (x > 0.0) {
+                for (double j = 0; j < (double)timesteps; j += 1.0 / x) {
+                    p->apply_spike({(int)input * 2, (double)(size_t)j, 1.0});
+                }
+            }
+            if (inv_x > 0.0) {
+                for (double j = 0; j < (double)timesteps; j += 1.0 / inv_x) {
+                    p->apply_spike(
+                        {(int)input * 2 + 1, (double)(size_t)j, 1.0});
+                }
+            }
+        }
+    }
 }
 
 int main(int argc, char* argv[]) {
@@ -287,7 +339,7 @@ int main(int argc, char* argv[]) {
 
     size_t train_labels = label_count(&train);
     size_t test_labels  = label_count(&test);
-    assert(train_labels == test_labels);
+    assert(test.observations == 0 || train_labels == test_labels);
 
     size_t input_neurons =
         (timeseries) ? train.rows_per_observation * 2 : train.cols * 2;
@@ -353,126 +405,6 @@ int main(int argc, char* argv[]) {
 
     printf("Neurons: %zu, Synapses: %zu\n", neuron_count, synapse_count);
 
-    // Encode Data (uses a 2 neuron encoding where x and 1/x are encoded on
-    // sequential neurons (argyle-like))
-    puts("Encoding data");
-    vector<vector<vector<bool>>> train_spikes(
-        train.observations,
-        vector<vector<bool>>(input_neurons, vector<bool>(timesteps, false)));
-    if (timeseries) {
-        size_t encoding_window = timesteps / train.cols;
-        assert(encoding_window > 0);
-
-        for (int i = 0; i < train.observations; i++) {
-            for (size_t j = 0; j < input_neurons / 2; j++) {
-                for (int column_t = 0; column_t < train.cols; column_t++) {
-                    double encoding_start = column_t * encoding_window;
-                    double encoding_end   = encoding_start + encoding_window;
-
-                    double x     = (train.data[(i * train.rows_per_observation *
-                                                train.cols) +
-                                               (j * train.cols) + column_t] -
-                                    train.min_vals[j]) /
-                                   (train.max_vals[j] - train.min_vals[j]);
-                    double inv_x = 1.0 - x;
-
-                    if (x > 0.0) {
-                        for (double k = encoding_start; k < encoding_end;
-                             k += 1.0 / x) {
-                            train_spikes[i][j * 2][(size_t)k] = true;
-                        }
-                    }
-                    if (inv_x > 0.0) {
-                        for (double k = encoding_start; k < encoding_end;
-                             k += 1.0 / inv_x) {
-                            train_spikes[i][j * 2][(size_t)k] = true;
-                        }
-                    }
-                }
-            }
-        }
-    } else {
-        for (int i = 0; i < train.observations; i++) {
-            for (size_t j = 0; j < input_neurons / 2; j++) {
-                double x =
-                    (train.data[i * train.cols + j] - train.min_vals[j]) /
-                    (train.max_vals[j] - train.min_vals[j]);
-                x            = x < 0.0 ? 0.0 : (x > 1.0 ? 1.0 : x);
-                double inv_x = 1.0 - x;
-
-                if (x > 0.0) {
-                    for (double k = 0.0; k < (double)timesteps; k += 1.0 / x) {
-                        train_spikes[i][j * 2][(size_t)k] = true;
-                    }
-                }
-                if (inv_x > 0.0) {
-                    for (double k = 0.0; k < (double)timesteps;
-                         k += 1.0 / inv_x) {
-                        train_spikes[i][j * 2 + 1][(size_t)k] = true;
-                    }
-                }
-            }
-        }
-    }
-
-    vector<vector<vector<bool>>> test_spikes(
-        test.observations,
-        vector<vector<bool>>(input_neurons, vector<bool>(timesteps, false)));
-    if (timeseries) {
-        size_t encoding_window = timesteps / test.cols;
-        assert(encoding_window > 0);
-
-        for (int i = 0; i < test.observations; i++) {
-            for (size_t j = 0; j < input_neurons / 2; j++) {
-                for (int column_t = 0; column_t < test.cols; column_t++) {
-                    double encoding_start = column_t * encoding_window;
-                    double encoding_end   = encoding_start + encoding_window;
-
-                    double x =
-                        (test.data[(i * test.rows_per_observation * test.cols) +
-                                   (j * test.cols) + column_t] -
-                         test.min_vals[j]) /
-                        (test.max_vals[j] - test.min_vals[j]);
-                    double inv_x = 1.0 - x;
-
-                    if (x > 0.0) {
-                        for (double k = encoding_start; k < encoding_end;
-                             k += 1.0 / x) {
-                            test_spikes[i][j * 2][(size_t)k] = true;
-                        }
-                    }
-                    if (inv_x > 0.0) {
-                        for (double k = encoding_start; k < encoding_end;
-                             k += 1.0 / inv_x) {
-                            test_spikes[i][j * 2][(size_t)k] = true;
-                        }
-                    }
-                }
-            }
-        }
-    } else {
-        for (int i = 0; i < test.observations; i++) {
-            for (size_t j = 0; j < input_neurons / 2; j++) {
-                double x = (test.data[i * test.cols + j] - test.min_vals[j]) /
-                           (test.max_vals[j] - test.min_vals[j]);
-                x        = x < 0.0 ? 0.0 : (x > 1.0 ? 1.0 : x);
-                double inv_x = 1.0 - x;
-
-                if (x > 0.0) {
-                    for (double k = 0.0; k < (double)timesteps; k += 1.0 / x) {
-                        test_spikes[i][j * 2][(size_t)k] = true;
-                    }
-                }
-                if (inv_x > 0.0) {
-                    for (double k = 0.0; k < (double)timesteps;
-                         k += 1.0 / inv_x) {
-                        test_spikes[i][j * 2 + 1][(size_t)k] = true;
-                    }
-                }
-            }
-        }
-    }
-
     vector<vector<double>> weights(total_neurons);
     vector<vector<double>> delta_W(total_neurons);
     vector<vector<int>> delays(total_neurons);
@@ -490,6 +422,19 @@ int main(int argc, char* argv[]) {
     vector<vector<double>> voltage_grad_history(total_neurons,
                                                 vector<double>(timesteps));
     vector<double> softmax_out(output_neurons);
+
+    Eigen::VectorXd future_mem_grad_(total_neurons);
+    Eigen::Matrix<double, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor> sgh(
+        total_neurons, timesteps);
+    Eigen::Matrix<double, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor> vgh(
+        total_neurons, timesteps);
+    Eigen::VectorXd dL_dV_(total_neurons);
+    Eigen::VectorXd v_pre_t_(total_neurons);
+    Eigen::VectorXd dV_post_dV_pre_(total_neurons);
+    Eigen::VectorXd dV_post_ds_t_(total_neurons);
+    Eigen::VectorXd ds_t_dV_pre_(total_neurons);
+    Eigen::VectorXd dV_leak_dV_t1_(total_neurons);
+    Eigen::VectorXd grad_(total_neurons);
 
     double b1_t = 1.0;
     double b2_t = 1.0;
@@ -555,14 +500,11 @@ int main(int argc, char* argv[]) {
                 }
                 fill(spike_logits.begin(), spike_logits.end(), 0.0);
 
+                encode_spikes(p, &train, observation_idx, timesteps, timeseries,
+                              input_neurons);
+
                 // 1. Forward Pass
                 for (size_t t = 0; t < timesteps; t++) {
-                    for (size_t input = 0; input < input_neurons; input++) {
-                        if (train_spikes[observation_idx][input][t]) {
-                            p->apply_spike({(int)input, 0, 1.0});
-                        }
-                    }
-
                     p->run(1);
 
                     const vector<int>& neuron_counts = p->neuron_counts();
@@ -620,21 +562,6 @@ int main(int argc, char* argv[]) {
                     fill(voltage_grad_history[i].begin(),
                          voltage_grad_history[i].end(), 0.0);
                 }
-
-                Eigen::VectorXd future_mem_grad_(total_neurons);
-                Eigen::Matrix<double, Eigen::Dynamic, Eigen::Dynamic,
-                              Eigen::RowMajor>
-                    sgh(total_neurons, timesteps);
-                Eigen::Matrix<double, Eigen::Dynamic, Eigen::Dynamic,
-                              Eigen::RowMajor>
-                    vgh(total_neurons, timesteps);
-                Eigen::VectorXd dL_dV_(total_neurons);
-                Eigen::VectorXd v_pre_t_(total_neurons);
-                Eigen::VectorXd dV_post_dV_pre_(total_neurons);
-                Eigen::VectorXd dV_post_ds_t_(total_neurons);
-                Eigen::VectorXd ds_t_dV_pre_(total_neurons);
-                Eigen::VectorXd dV_leak_dV_t1_(total_neurons);
-                Eigen::VectorXd grad_(total_neurons);
 
                 future_mem_grad_.setZero();
                 sgh.setZero();
@@ -727,60 +654,6 @@ int main(int argc, char* argv[]) {
                                 grad_(dest) * weights[dest][source_idx];
                         }
                     }
-
-                    // exit(1);
-
-                    // for (int dest = total_neurons - 1; dest >= 0; dest--) {
-                    //     // Start Slayer copy
-                    //     double dL_dV = voltage_grad_history[dest][t];
-                    //     dL_dV += future_mem_grad[dest];
-
-                    //     double v_pre_t = v_pre[t][dest];
-
-                    //     double dV_post_dV_pre =
-                    //         1.0 - (spikes[t][dest] > 0 ? 1.0 : 0.0);
-                    //     double dV_post_ds_t = (min_potential > 0)
-                    //                               ? ((min_potential -
-                    //                               v_pre_t)) : (-v_pre_t);
-                    //     double ds_t_dV_pre  = spike_surrogate(
-                    //         v_pre_t, thresholds[dest], rho, tau);
-
-                    //     double dV_leak_dV_t1 =
-                    //         (v_pre_t >= min_potential) ? (1.0 - leak) : 0.0;
-
-                    //     double grad =
-                    //         (dL_dV * dV_post_dV_pre) +
-                    //         (dL_dV * dV_post_ds_t * ds_t_dV_pre) +
-                    //         ((spike_grad_history[dest][t] * ds_t_dV_pre));
-                    //     // End Slayer copy
-                    //     for (size_t source_idx = 0;
-                    //          grad != 0.0 &&
-                    //          source_idx < n->get_node(dest)->incoming.size();
-                    //          source_idx++) {
-                    //         size_t source = n->get_node(dest)
-                    //                             ->incoming[source_idx]
-                    //                             ->from->id;
-
-                    //         int delay       = delays[dest][source_idx];
-                    //         int source_time = t - delay;
-                    //         if (source_time < 0) {
-                    //             continue;
-                    //         }
-
-                    //         double source_spike =
-                    //         spikes[source_time][source];
-                    //         delta_W[dest][source_idx] += source_spike * grad;
-                    //         spike_grad_history[source][source_time] +=
-                    //             grad * weights[dest][source_idx];
-                    //     }
-
-                    //     future_mem_grad[dest] =
-                    //         (dL_dV * dV_post_dV_pre * dV_leak_dV_t1) +
-                    //         (dL_dV * dV_post_ds_t * ds_t_dV_pre *
-                    //          dV_leak_dV_t1) +
-                    //         (spike_grad_history[dest][t] * ds_t_dV_pre *
-                    //          dV_leak_dV_t1);
-                    // }
                 }
             }
 
@@ -845,12 +718,7 @@ int main(int argc, char* argv[]) {
         for (int i = 0; i < test.observations; i++) {
             p->clear_activity();
 
-            for (size_t input = 0; input < input_neurons; input++) {
-                for (size_t t = 0; t < timesteps; t++) {
-                    p->apply_spike({(int)input, (double)t,
-                                    (double)test_spikes[i][input][t]});
-                }
-            }
+            encode_spikes(p, &test, i, timesteps, timeseries, input_neurons);
 
             p->run(timesteps);
             const vector<int>& output_counts = p->output_counts();
@@ -874,18 +742,20 @@ int main(int argc, char* argv[]) {
 
         delete p;
 
-        test_correct /= test.observations;
-        test_loss /= test.observations;
+        if (test.observations > 0) {
+            test_correct /= test.observations;
+            test_loss /= test.observations;
 
-        if (test_correct > best_test_acc) {
-            best_test_acc = test_correct;
-        }
-        if (test_loss < best_test_loss) {
-            best_test_loss = test_loss;
+            if (test_correct > best_test_acc) {
+                best_test_acc = test_correct;
+            }
+            if (test_loss < best_test_loss) {
+                best_test_loss = test_loss;
+            }
         }
 
         printf(
-            "Epoch: %zu/%zu, Loss: %10g (Best: %10g), Acc: %10g (Best: %10g), "
+            "Epoch: %4zu/%zu, Loss: %10g (Best: %10g), Acc: %10g (Best: %10g), "
             "TestLoss: %10g (Best: %10g), TestAcc: %10g (Best: %10g)\n",
             epoch + 1, epochs, epoch_loss / (double)train.observations,
             best_train_loss, correct / (double)train.observations,
