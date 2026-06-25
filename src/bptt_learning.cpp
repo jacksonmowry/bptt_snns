@@ -1,10 +1,12 @@
 #include "csv.h"
 #include "framework.hpp"
+#include <CL/cl.h>
 #include <Eigen/Dense>
 #include <algorithm>
 #include <cassert>
 #include <cfloat>
 #include <cstddef>
+#include <cstdio>
 #include <fstream>
 #include <getopt.h>
 #include <stddef.h>
@@ -80,13 +82,13 @@ struct EvaluationResults {
 struct NetworkConfiguration {
     Network* n;
 
-    size_t input_neurons;
-    size_t hidden_neurons;
-    size_t output_neurons;
-    size_t layer_offsets[3];
-    size_t total_neurons;
+    int input_neurons;
+    int hidden_neurons;
+    int output_neurons;
+    int layer_offsets[3];
+    int total_neurons;
 
-    size_t timesteps;
+    int timesteps;
     bool timeseries;
 
     double min_potential;
@@ -181,35 +183,51 @@ size_t label_count(const Dataset* d) {
     return us.size();
 }
 
+void preprocess_data(Dataset* d) {
+    assert(d->rows_per_observation == -1);
+    for (int i = 0; i < d->observations; i++) {
+        for (int j = 0; j < d->cols; j++) {
+            double x     = (d->data[i * d->cols + j] - d->min_vals[j]) /
+                           (d->max_vals[j] - d->min_vals[j]);
+            double inv_x = 1.0 - x;
+
+            d->processed_data[i * (d->cols * 2) + j * 2] =
+                (x > 0.0) ? 1.0 / x : 0.0;
+            d->processed_data[i * (d->cols * 2) + j * 2 + 1] =
+                (inv_x > 0.0) ? 1.0 / inv_x : 0.0;
+        }
+    }
+}
+
 void encode_spikes(Processor* p, const Dataset* d, size_t index,
-                   size_t timesteps, bool timeseries, size_t input_neurons) {
+                   size_t timesteps, bool timeseries, size_t input_neurons,
+                   int* encoded_spikes) {
     if (timeseries) {
         size_t encoding_window = timesteps / d->cols;
         assert(encoding_window > 0);
 
         for (size_t input = 0; input < input_neurons / 2; input++) {
             for (int column_t = 0; column_t < d->cols; column_t++) {
-                double encoding_start = column_t * encoding_window;
-                double encoding_end   = encoding_start + encoding_window;
+                float encoding_start = column_t * encoding_window;
+                float encoding_end   = encoding_start + encoding_window;
 
-                double x =
-                    (d->data[(index * d->rows_per_observation * d->cols) +
-                             (input * d->cols) + column_t] -
-                     d->min_vals[input]) /
-                    (d->max_vals[input] - d->min_vals[input]);
-                double inv_x = 1.0 - x;
+                float x = (d->data[(index * d->rows_per_observation * d->cols) +
+                                   (input * d->cols) + column_t] -
+                           d->min_vals[input]) /
+                          (d->max_vals[input] - d->min_vals[input]);
+                float inv_x = 1.0 - x;
 
                 if (x > 0.0) {
-                    for (double j = encoding_start; j < encoding_end;
+                    for (float j = encoding_start; j < encoding_end;
                          j += 1.0 / x) {
-                        p->apply_spike({(int)input * 2, (double)(int)j, 1.0});
+                        p->apply_spike({(int)input * 2, (float)(int)j, 1.0});
                     }
                 }
                 if (inv_x > 0.0) {
-                    for (double j = encoding_start; j < encoding_end;
+                    for (float j = encoding_start; j < encoding_end;
                          j += 1.0 / inv_x) {
                         p->apply_spike(
-                            {(int)input * 2 + 1, (double)(int)j, 1.0});
+                            {(int)input * 2 + 1, (float)(int)j, 1.0});
                     }
                 }
             }
@@ -219,15 +237,19 @@ void encode_spikes(Processor* p, const Dataset* d, size_t index,
             double x = (d->data[index * d->cols + input] - d->min_vals[input]) /
                        (d->max_vals[input] - d->min_vals[input]);
             double inv_x = 1.0 - x;
-            if (x > 0.0) {
-                for (double j = 0; j < (double)timesteps; j += 1.0 / x) {
+            if (x > 0.0f) {
+                x = 1.0f / x;
+                for (float j = 0; j < (float)timesteps; j += x) {
                     p->apply_spike({(int)input * 2, (double)(size_t)j, 1.0});
+                    encoded_spikes[((input * 2) * timesteps) + (int)j] = 1;
                 }
             }
-            if (inv_x > 0.0) {
-                for (double j = 0; j < (double)timesteps; j += 1.0 / inv_x) {
+            if (inv_x > 0.0f) {
+                inv_x = 1.0f / inv_x;
+                for (float j = 0; j < (float)timesteps; j += inv_x) {
                     p->apply_spike(
                         {(int)input * 2 + 1, (double)(size_t)j, 1.0});
+                    encoded_spikes[((input * 2 + 1) * timesteps) + (int)j] = 1;
                 }
             }
         }
@@ -235,7 +257,8 @@ void encode_spikes(Processor* p, const Dataset* d, size_t index,
 }
 
 EvaluationResults forward(TrainingBundle* tb, Processor* p, const Dataset* d,
-                          size_t index, const NetworkConfiguration* nc) {
+                          size_t index, const NetworkConfiguration* nc,
+                          int* encoded_spikes) {
     EvaluationResults er = {0.0, 0.0};
 
     p->clear_activity();
@@ -246,8 +269,8 @@ EvaluationResults forward(TrainingBundle* tb, Processor* p, const Dataset* d,
     }
     fill(tb->spike_logits.begin(), tb->spike_logits.end(), 0.0);
 
-    encode_spikes(p, d, index, nc->timesteps, nc->timeseries,
-                  nc->input_neurons);
+    encode_spikes(p, d, index, nc->timesteps, nc->timeseries, nc->input_neurons,
+                  encoded_spikes);
 
     for (size_t t = 0; t < nc->timesteps; t++) {
         p->run(1);
@@ -416,6 +439,206 @@ void weight_updates(TrainingBundle* tb, const NetworkConfiguration* nc,
     }
 }
 
+char* load_kernel(const char* path) {
+    FILE* f = fopen(path, "r");
+    if (f == NULL) {
+        fprintf(stderr, "Unable to open kernel for reading: %s\n", path);
+        return NULL;
+    }
+
+    fseek(f, 0, SEEK_END);
+    long len = ftell(f);
+    fseek(f, 0, SEEK_SET);
+
+    char* src = (char*)malloc(len + 1);
+    fread(src, 1, len, f);
+    src[len] = '\0';
+    fclose(f);
+    return src;
+}
+
+void opencl_perror(int err) {
+    switch (err) {
+    case 0:
+        puts("CL_SUCCESS");
+        break;
+    case -1:
+        puts("CL_DEVICE_NOT_FOUND                        ");
+        break;
+    case -2:
+        puts("CL_DEVICE_NOT_AVAILABLE                    ");
+        break;
+    case -3:
+        puts("CL_COMPILER_NOT_AVAILABLE                  ");
+        break;
+    case -4:
+        puts("CL_MEM_OBJECT_ALLOCATION_FAILURE           ");
+        break;
+    case -5:
+        puts("CL_OUT_OF_RESOURCES                        ");
+        break;
+    case -6:
+        puts("CL_OUT_OF_HOST_MEMORY                      ");
+        break;
+    case -7:
+        puts("CL_PROFILING_INFO_NOT_AVAILABLE            ");
+        break;
+    case -8:
+        puts("CL_MEM_COPY_OVERLAP                        ");
+        break;
+    case -9:
+        puts("CL_IMAGE_FORMAT_MISMATCH                   ");
+        break;
+    case -10:
+        puts("CL_IMAGE_FORMAT_NOT_SUPPORTED              ");
+        break;
+    case -11:
+        puts("CL_BUILD_PROGRAM_FAILURE                   ");
+        break;
+    case -12:
+        puts("CL_MAP_FAILURE                             ");
+        break;
+    case -13:
+        puts("CL_MISALIGNED_SUB_BUFFER_OFFSET            ");
+        break;
+    case -14:
+        puts("CL_EXEC_STATUS_ERROR_FOR_EVENTS_IN_WAIT_LIST");
+        break;
+    case -15:
+        puts("CL_COMPILE_PROGRAM_FAILURE");
+        break;
+    case -16:
+        puts("CL_LINKER_NOT_AVAILABLE                    ");
+        break;
+    case -17:
+        puts("CL_LINK_PROGRAM_FAILURE                    ");
+        break;
+    case -18:
+        puts("CL_DEVICE_PARTITION_FAILED                 ");
+        break;
+    case -19:
+        puts("CL_KERNEL_ARG_INFO_NOT_AVAILABLE           ");
+        break;
+    case -30:
+        puts("CL_INVALID_VALUE                           ");
+        break;
+    case -31:
+        puts("CL_INVALID_DEVICE_TYPE                     ");
+        break;
+    case -32:
+        puts("CL_INVALID_PLATFORM                        ");
+        break;
+    case -33:
+        puts("CL_INVALID_DEVICE                          ");
+        break;
+    case -34:
+        puts("CL_INVALID_CONTEXT                         ");
+        break;
+    case -35:
+        puts("CL_INVALID_QUEUE_PROPERTIES                ");
+        break;
+    case -36:
+        puts("CL_INVALID_COMMAND_QUEUE                   ");
+        break;
+    case -37:
+        puts("CL_INVALID_HOST_PTR                        ");
+        break;
+    case -38:
+        puts("CL_INVALID_MEM_OBJECT                      ");
+        break;
+    case -39:
+        puts("CL_INVALID_IMAGE_FORMAT_DESCRIPTOR         ");
+        break;
+    case -40:
+        puts("CL_INVALID_IMAGE_SIZE                      ");
+        break;
+    case -41:
+        puts("CL_INVALID_SAMPLER                         ");
+        break;
+    case -42:
+        puts("CL_INVALID_BINARY                          ");
+        break;
+    case -43:
+        puts("CL_INVALID_BUILD_OPTIONS                   ");
+        break;
+    case -44:
+        puts("CL_INVALID_PROGRAM                         ");
+        break;
+    case -45:
+        puts("CL_INVALID_PROGRAM_EXECUTABLE              ");
+        break;
+    case -46:
+        puts("CL_INVALID_KERNEL_NAME                     ");
+        break;
+    case -47:
+        puts("CL_INVALID_KERNEL_DEFINITION               ");
+        break;
+    case -48:
+        puts("CL_INVALID_KERNEL                          ");
+        break;
+    case -49:
+        puts("CL_INVALID_ARG_INDEX                       ");
+        break;
+    case -50:
+        puts("CL_INVALID_ARG_VALUE                       ");
+        break;
+    case -51:
+        puts("CL_INVALID_ARG_SIZE                        ");
+        break;
+    case -52:
+        puts("CL_INVALID_KERNEL_ARGS                     ");
+        break;
+    case -53:
+        puts("CL_INVALID_WORK_DIMENSION                  ");
+        break;
+    case -54:
+        puts("CL_INVALID_WORK_GROUP_SIZE                 ");
+        break;
+    case -55:
+        puts("CL_INVALID_WORK_ITEM_SIZE                  ");
+        break;
+    case -56:
+        puts("CL_INVALID_GLOBAL_OFFSET                   ");
+        break;
+    case -57:
+        puts("CL_INVALID_EVENT_WAIT_LIST                 ");
+        break;
+    case -58:
+        puts("CL_INVALID_EVENT                           ");
+        break;
+    case -59:
+        puts("CL_INVALID_OPERATION                       ");
+        break;
+    case -60:
+        puts("CL_INVALID_GL_OBJECT                       ");
+        break;
+    case -61:
+        puts("CL_INVALID_BUFFER_SIZE                     ");
+        break;
+    case -62:
+        puts("CL_INVALID_MIP_LEVEL                       ");
+        break;
+    case -63:
+        puts("CL_INVALID_GLOBAL_WORK_SIZE                ");
+        break;
+    case -64:
+        puts("CL_INVALID_PROPERTY                        ");
+        break;
+    case -65:
+        puts("CL_INVALID_IMAGE_DESCRIPTOR                ");
+        break;
+    case -66:
+        puts("CL_INVALID_COMPILER_OPTIONS                ");
+        break;
+    case -67:
+        puts("CL_INVALID_LINKER_OPTIONS                  ");
+        break;
+    case -68:
+        puts("CL_INVALID_DEVICE_PARTITION_COUNT          ");
+        break;
+    }
+}
+
 static void print_usage(const char* prog) {
     fprintf(stderr, "Usage: %s [OPTIONS]...\n", prog);
     fprintf(stderr, "  -n, --network_json     FILE    Network JSON path\n");
@@ -450,8 +673,8 @@ int main(int argc, char* argv[]) {
     double decay_rate       = 0.0001;
     double tau              = 0.95;
     double rho              = 1.4;
-    size_t timesteps        = 32;
-    size_t hidden_neurons   = 16;
+    int timesteps           = 32;
+    int hidden_neurons      = 16;
     unsigned long seed      = (unsigned long)time(NULL);
     size_t epochs           = 10;
     size_t batch_size       = 1;
@@ -606,15 +829,23 @@ int main(int argc, char* argv[]) {
     } else {
         load_dataset(data_file, label_file, training_percent, &train, &test);
     }
+    train.processed_data = (float*)malloc(train.observations * train.cols * 2 *
+                                          sizeof(*train.processed_data));
+    test.processed_data  = (float*)malloc(test.observations * test.cols * 2 *
+                                          sizeof(*test.processed_data));
+    printf("Train rows: %d\n", train.observations);
+    preprocess_data(&train);
+    printf("Train rows: %d\n", train.observations);
+    preprocess_data(&test);
 
     size_t train_labels = label_count(&train);
     size_t test_labels  = label_count(&test);
     assert(test.observations == 0 || train_labels == test_labels);
 
-    size_t input_neurons =
+    int input_neurons =
         (timeseries) ? train.rows_per_observation * 2 : train.cols * 2;
-    size_t output_neurons = train_labels;
-    size_t total_neurons  = input_neurons + hidden_neurons + output_neurons;
+    int output_neurons = train_labels;
+    int total_neurons  = input_neurons + hidden_neurons + output_neurons;
 
     json emptynet;
     ifstream fin(network_json_file);
@@ -624,9 +855,11 @@ int main(int argc, char* argv[]) {
     Network* n = new Network();
     n->from_json(emptynet);
 
-    string leak_prop     = n->get_data("proc_params")["leak_mode"];
-    bool leak            = leak_prop == "all";
-    double min_potential = n->get_data("proc_params")["min_potential"];
+    string leak_prop         = n->get_data("proc_params")["leak_mode"];
+    bool leak                = leak_prop == "all";
+    float neuron_decay       = alpha(leak);
+    float spike_value_factor = n->get_data("proc_params")["spike_value_factor"];
+    float min_potential      = n->get_data("proc_params")["min_potential"];
 
     if (!n) {
         fprintf(stderr, "%s:%s:%d: Unable to create network.\n", __FILE__,
@@ -634,8 +867,7 @@ int main(int argc, char* argv[]) {
         exit(1);
     }
 
-    const size_t layer_sizes[3] = {input_neurons, hidden_neurons,
-                                   output_neurons};
+    const int layer_sizes[3] = {input_neurons, hidden_neurons, output_neurons};
 
     NetworkConfiguration nc = {
         .n = n,
@@ -657,7 +889,7 @@ int main(int argc, char* argv[]) {
     size_t synapse_count = 0;
 
     for (size_t i = 0; i < NUM_LAYERS; i++) {
-        for (size_t j = 0; j < layer_sizes[i]; j++) {
+        for (int j = 0; j < layer_sizes[i]; j++) {
             n->add_node(neuron_count)->set("Threshold", 1.0);
 
             if (i == 0) {
@@ -672,7 +904,9 @@ int main(int argc, char* argv[]) {
         }
     }
 
+    int max_incoming = 0;
     for (size_t i = 0; i < total_neurons; i++) {
+        int incoming = 0;
         for (size_t j = 0; j < total_neurons; j++) {
             if (drand48() < (1.0 - connectivity)) {
                 continue;
@@ -680,19 +914,36 @@ int main(int argc, char* argv[]) {
 
             Edge* e = n->add_edge(i, j);
             synapse_count++;
+            incoming++;
 
             e->set(n->get_edge_property("Weight")->index, normal(0.0, 0.1));
             e->set(n->get_edge_property("Delay")->index, rand() % 7 + 1);
         }
+
+        max_incoming = max(max_incoming, incoming);
     }
 
     printf("Neurons: %zu, Synapses: %zu\n", neuron_count, synapse_count);
+
+    float* thresh = (float*)calloc(total_neurons, sizeof(*thresh));
+    float* weights =
+        (float*)calloc(total_neurons * max_incoming, sizeof(*weights));
+    int* delays   = (int*)calloc(total_neurons * max_incoming, sizeof(*delays));
+    int* incoming = (int*)calloc(total_neurons, sizeof(*incoming));
+    int* incoming_ids =
+        (int*)calloc(total_neurons * max_incoming, sizeof(*incoming_ids));
+    int* is_input = (int*)calloc(total_neurons, sizeof(*is_input));
 
     TrainingBundle tb(total_neurons, timesteps, output_neurons, tau, rho,
                       learning_rate, decay_rate);
 
     for (size_t i = 0; i < total_neurons; i++) {
         tb.thresholds[i] = n->get_node(i)->get("Threshold");
+        thresh[i]        = n->get_node(i)->get("Threshold");
+
+        incoming[i] = n->get_node(i)->incoming.size();
+        is_input[i] = i < input_neurons;
+
         tb.weights[i].reserve(n->get_node(i)->incoming.size());
         tb.delays[i].reserve(n->get_node(i)->incoming.size());
         tb.delta_W[i].resize(n->get_node(i)->incoming.size());
@@ -704,8 +955,166 @@ int main(int argc, char* argv[]) {
 
             tb.weights[i].push_back(e->get("Weight"));
             tb.delays[i].push_back(e->get("Delay"));
+
+            weights[i * max_incoming + j]      = e->get("Weight");
+            delays[i * max_incoming + j]       = e->get("Delay");
+            incoming_ids[i * max_incoming + j] = e->from->id;
         }
     }
+
+    cl_int err;
+    cl_platform_id platform;
+    err = clGetPlatformIDs(1, &platform, NULL);
+    if (err != CL_SUCCESS) {
+        fprintf(stderr, "clGetPlatformIDs failed: ");
+        opencl_perror(err);
+        exit(1);
+    }
+
+    cl_device_id device;
+    err = clGetDeviceIDs(platform, CL_DEVICE_TYPE_GPU, 1, &device, NULL);
+    if (err != CL_SUCCESS) {
+        fprintf(stderr, "clGetDeviceIDs failed for GPU: ");
+        opencl_perror(err);
+        exit(1);
+    }
+    if (device == NULL) {
+        clGetDeviceIDs(platform, CL_DEVICE_TYPE_CPU, 1, &device, NULL);
+        if (err != CL_SUCCESS) {
+            fprintf(stderr, "clGetDeviceIDs failed for CPU: ");
+            opencl_perror(err);
+            exit(1);
+        }
+    }
+
+    cl_context ctx = clCreateContext(NULL, 1, &device, NULL, NULL, &err);
+    if (err != CL_SUCCESS) {
+        fprintf(stderr, "clCreateContext failed: ");
+        opencl_perror(err);
+        exit(1);
+    }
+    cl_command_queue queue = clCreateCommandQueue(ctx, device, 0, &err);
+    if (err != CL_SUCCESS) {
+        fprintf(stderr, "clCreateCommandQueue failed: ");
+        opencl_perror(err);
+        exit(1);
+    }
+
+    char* src              = load_kernel("kernels/risp.cl");
+    const char* sources[1] = {src};
+
+    cl_program prog = clCreateProgramWithSource(ctx, 1, sources, NULL, &err);
+    if (err != CL_SUCCESS) {
+        fprintf(stderr, "clCreateProgramWithSource failed: ");
+        opencl_perror(err);
+        exit(1);
+    }
+    err = clBuildProgram(prog, 1, &device, NULL, NULL, NULL);
+    if (err != CL_SUCCESS) {
+        fprintf(stderr, "clBuildProgram failed: ");
+        opencl_perror(err);
+
+        size_t log_size;
+        clGetProgramBuildInfo(prog, device, CL_PROGRAM_BUILD_LOG, 0, NULL,
+                              &log_size);
+        char* log = (char*)malloc(log_size + 1);
+        clGetProgramBuildInfo(prog, device, CL_PROGRAM_BUILD_LOG, log_size, log,
+                              NULL);
+        log[log_size] = '\0';
+        fprintf(stderr, "%s\n", log);
+        free(log);
+
+        exit(1);
+    }
+
+    cl_kernel fwd = clCreateKernel(prog, "RispDynamicsFwdKernel", &err);
+    if (err != CL_SUCCESS) {
+        fprintf(stderr, "clCreateKernel for RispDynamicsFwdKernel failed: ");
+        opencl_perror(err);
+        exit(1);
+    }
+    cl_kernel loss = clCreateKernel(prog, "RispSpikeLoss", &err);
+    if (err != CL_SUCCESS) {
+        fprintf(stderr, "clCreateKernel for RispSpikeLoss failed: ");
+        opencl_perror(err);
+        exit(1);
+    }
+    cl_kernel bwd = clCreateKernel(prog, "RispDynamicsBwdKernel", &err);
+    if (err != CL_SUCCESS) {
+        fprintf(stderr, "clCreateKernel for RispDynamicsBwdKernel failed: ");
+        opencl_perror(err);
+        exit(1);
+    }
+    cl_kernel update = clCreateKernel(prog, "RispWeightUpdates", &err);
+    if (err != CL_SUCCESS) {
+        fprintf(stderr, "clCreateKernel for RispWeightUpdates failed: ");
+        opencl_perror(err);
+        exit(1);
+    }
+    cl_kernel encode = clCreateKernel(prog, "RispEncodeInputs", &err);
+    if (err != CL_SUCCESS) {
+        fprintf(stderr, "clCreateKernel for RispEncodeInputs failed: ");
+        opencl_perror(err);
+        exit(1);
+    }
+
+    free(src);
+
+    cl_mem x_buf = clCreateBuffer(
+        ctx, CL_MEM_READ_WRITE | CL_MEM_ALLOC_HOST_PTR,
+        input_neurons * timesteps * sizeof(cl_float), NULL, &err);
+    cl_mem thresh_buf =
+        clCreateBuffer(ctx, CL_MEM_READ_ONLY | CL_MEM_COPY_HOST_PTR,
+                       total_neurons * sizeof(cl_float), thresh, &err);
+    cl_mem weights_buf = clCreateBuffer(
+        ctx, CL_MEM_READ_WRITE | CL_MEM_COPY_HOST_PTR,
+        total_neurons * max_incoming * sizeof(cl_float), weights, &err);
+    cl_mem delays_buf = clCreateBuffer(
+        ctx, CL_MEM_READ_ONLY | CL_MEM_COPY_HOST_PTR,
+        total_neurons * max_incoming * sizeof(cl_int), delays, &err);
+    cl_mem incoming_buf =
+        clCreateBuffer(ctx, CL_MEM_READ_ONLY | CL_MEM_COPY_HOST_PTR,
+                       total_neurons * sizeof(cl_int), incoming, &err);
+    cl_mem incoming_ids_buf = clCreateBuffer(
+        ctx, CL_MEM_READ_ONLY | CL_MEM_COPY_HOST_PTR,
+        total_neurons * max_incoming * sizeof(cl_int), incoming_ids, &err);
+    cl_mem is_input_buf =
+        clCreateBuffer(ctx, CL_MEM_READ_ONLY | CL_MEM_COPY_HOST_PTR,
+                       total_neurons * sizeof(cl_int), is_input, &err);
+    cl_mem v_buf =
+        clCreateBuffer(ctx, CL_MEM_READ_WRITE | CL_MEM_ALLOC_HOST_PTR,
+                       input_neurons * sizeof(cl_float), NULL, &err);
+    cl_mem s_buf =
+        clCreateBuffer(ctx, CL_MEM_READ_WRITE | CL_MEM_ALLOC_HOST_PTR,
+                       input_neurons * timesteps * sizeof(cl_long), NULL, &err);
+    cl_mem v_pre_buf = clCreateBuffer(
+        ctx, CL_MEM_READ_WRITE | CL_MEM_ALLOC_HOST_PTR,
+        input_neurons * timesteps * sizeof(cl_float), NULL, &err);
+    cl_mem dL_ds_buf =
+        clCreateBuffer(ctx, CL_MEM_READ_WRITE | CL_MEM_ALLOC_HOST_PTR,
+                       output_neurons * sizeof(cl_float), NULL, &err);
+    cl_mem spike_grad_history_buf = clCreateBuffer(
+        ctx, CL_MEM_READ_WRITE | CL_MEM_ALLOC_HOST_PTR,
+        total_neurons * timesteps * sizeof(cl_float), NULL, &err);
+    cl_mem voltage_grad_history_buf = clCreateBuffer(
+        ctx, CL_MEM_READ_WRITE | CL_MEM_ALLOC_HOST_PTR,
+        total_neurons * timesteps * sizeof(cl_float), NULL, &err);
+    cl_mem future_mem_grad_buf =
+        clCreateBuffer(ctx, CL_MEM_READ_WRITE | CL_MEM_ALLOC_HOST_PTR,
+                       total_neurons * sizeof(cl_float), NULL, &err);
+    cl_mem delta_W_buf = clCreateBuffer(
+        ctx, CL_MEM_READ_WRITE | CL_MEM_ALLOC_HOST_PTR,
+        total_neurons * max_incoming * sizeof(cl_float), NULL, &err);
+    cl_mem m_weights_buf = clCreateBuffer(
+        ctx, CL_MEM_READ_WRITE | CL_MEM_ALLOC_HOST_PTR,
+        total_neurons * max_incoming * sizeof(cl_float), NULL, &err);
+    cl_mem v_weights_buf = clCreateBuffer(
+        ctx, CL_MEM_READ_WRITE | CL_MEM_ALLOC_HOST_PTR,
+        total_neurons * max_incoming * sizeof(cl_float), NULL, &err);
+    cl_mem train_data_buf =
+        clCreateBuffer(ctx, CL_MEM_READ_ONLY | CL_MEM_COPY_HOST_PTR,
+                       train.observations * train.cols * 2 * sizeof(cl_float),
+                       train.processed_data, &err);
 
     puts("Beginning training");
     double best_train_loss = DBL_MAX;
@@ -743,12 +1152,143 @@ int main(int argc, char* argv[]) {
                  ++b) {
                 size_t observation_idx = batch_order[batch_start + b];
 
-                EvaluationResults er =
-                    forward(&tb, p, &train, observation_idx, &nc);
+                int* encoded_spikes  = (int*)calloc(input_neurons * timesteps,
+                                                    sizeof(*encoded_spikes));
+                EvaluationResults er = forward(&tb, p, &train, observation_idx,
+                                               &nc, encoded_spikes);
                 batch_loss += er.loss;
                 batch_correct += er.correct;
 
                 backward(&tb, &nc);
+
+                // OpenCL impl
+                {
+                    size_t encode_size = input_neurons;
+                    clSetKernelArg(encode, 0, sizeof(cl_mem), &x_buf);
+                    clSetKernelArg(encode, 1, sizeof(cl_mem), &train_data_buf);
+                    clSetKernelArg(encode, 2, sizeof(int), &train.cols);
+                    clSetKernelArg(encode, 3, sizeof(int), &input_neurons);
+                    clSetKernelArg(encode, 4, sizeof(int), &timesteps);
+                    clSetKernelArg(encode, 5, sizeof(int), &observation_idx);
+                    clSetKernelArg(encode, 6, sizeof(float),
+                                   &spike_value_factor);
+
+                    cl_int err = clEnqueueNDRangeKernel(queue, encode, 1, NULL,
+                                                        &encode_size, NULL, 0,
+                                                        NULL, NULL);
+                    if (err != CL_SUCCESS) {
+                        fprintf(stderr, "Encode kernel failed: %d ", err);
+                        opencl_perror(err);
+                        exit(1);
+                    }
+
+                    float* host_ptr = (float*)clEnqueueMapBuffer(
+                        queue, x_buf, CL_TRUE, CL_MAP_READ, 0,
+                        input_neurons * timesteps * sizeof(float), 0, NULL,
+                        NULL, &err);
+
+                    puts("Existing encoder");
+                    for (int i = 0; i < input_neurons; i++) {
+                        for (int t = 0; t < timesteps; t++) {
+                            printf("%d", encoded_spikes[i * timesteps + t]);
+                        }
+                        puts("");
+                    }
+                    puts("OpenCL encoder");
+                    for (int i = 0; i < input_neurons; i++) {
+                        for (int t = 0; t < timesteps; t++) {
+                            printf("%g", host_ptr[i * timesteps + t]);
+                        }
+                        puts("");
+                    }
+                    for (int i = 0; i < input_neurons; i++) {
+                        for (int t = 0; t < timesteps; t++) {
+                            if ((int)host_ptr[i * timesteps + t] !=
+                                encoded_spikes[i * timesteps + t]) {
+                                fprintf(stderr,
+                                        "Encoding mismatch @ input=%d t=%d\n",
+                                        i, t);
+                                exit(1);
+                            }
+                        }
+                    }
+
+                    size_t fwd_size = total_neurons;
+                    clSetKernelArg(fwd, 0, sizeof(cl_mem), &x_buf);
+                    clSetKernelArg(fwd, 1, sizeof(cl_mem), &thresh_buf);
+                    clSetKernelArg(fwd, 2, sizeof(cl_mem), &weights_buf);
+                    clSetKernelArg(fwd, 3, sizeof(cl_mem), &delays_buf);
+                    clSetKernelArg(fwd, 4, sizeof(cl_mem), &incoming_buf);
+                    clSetKernelArg(fwd, 5, sizeof(cl_mem), &incoming_ids_buf);
+                    clSetKernelArg(fwd, 6, sizeof(float), &neuron_decay);
+                    clSetKernelArg(fwd, 7, sizeof(float), &min_potential);
+                    clSetKernelArg(fwd, 8, sizeof(cl_mem), &is_input_buf);
+                    clSetKernelArg(fwd, 9, sizeof(cl_mem), &v_buf);
+                    clSetKernelArg(fwd, 10, sizeof(cl_mem), &s_buf);
+                    clSetKernelArg(fwd, 11, sizeof(cl_mem), &v_pre_buf);
+                    clSetKernelArg(fwd, 12, sizeof(int), &total_neurons);
+                    clSetKernelArg(fwd, 13, sizeof(int), &timesteps);
+                    clSetKernelArg(fwd, 15, sizeof(int), &max_incoming);
+                    for (int t = 0; t < timesteps; t++) {
+                        clSetKernelArg(fwd, 14, sizeof(int), &t);
+
+                        err = clEnqueueNDRangeKernel(queue, fwd, 1, NULL,
+                                                     &fwd_size, NULL, 0, NULL,
+                                                     NULL);
+                        if (err != CL_SUCCESS) {
+                            fprintf(stderr, "Fwd kernel failed @t=%d: ", t);
+                            opencl_perror(err);
+                            exit(1);
+                        }
+                    }
+
+                    long* long_ptr = (long*)clEnqueueMapBuffer(
+                        queue, s_buf, CL_TRUE, CL_MAP_READ, 0,
+                        total_neurons * timesteps * sizeof(long), 0, NULL, NULL,
+                        &err);
+
+                    host_ptr = (float*)clEnqueueMapBuffer(
+                        queue, v_pre_buf, CL_TRUE, CL_MAP_READ, 0,
+                        total_neurons * timesteps * sizeof(long), 0, NULL, NULL,
+                        &err);
+
+                    puts("Existing v_pre:");
+                    for (size_t i = 0; i < total_neurons; i++) {
+                        for (size_t t = 0; t < timesteps; t++) {
+                            printf("%g ", tb.v_pre[t][i]);
+                        }
+                        puts("");
+                    }
+                    puts("OpenCL v_pre:");
+                    for (size_t i = 0; i < total_neurons; i++) {
+                        for (size_t t = 0; t < timesteps; t++) {
+                            printf("%g ", host_ptr[i * timesteps + t]);
+                        }
+                        puts("");
+                    }
+
+                    puts("Existing:");
+                    for (size_t i = 0; i < total_neurons; i++) {
+                        for (size_t t = 0; t < timesteps; t++) {
+                            printf("%d", (int)tb.spikes[t][i]);
+                        }
+                        puts("");
+                    }
+                    puts("OpenCL:");
+                    for (size_t i = 0; i < total_neurons; i++) {
+                        for (size_t t = 0; t < timesteps; t++) {
+                            printf("%d", (int)long_ptr[i * timesteps + t]);
+                            if ((int)long_ptr[i * timesteps + t] !=
+                                (int)tb.spikes[t][i]) {
+                                printf("\nMismatch\n");
+                                exit(1);
+                            }
+                        }
+                        puts("");
+                    }
+
+                    exit(1);
+                }
             }
 
             epoch_loss += batch_loss;
@@ -780,7 +1320,8 @@ int main(int argc, char* argv[]) {
         for (int i = 0; i < test.observations; i++) {
             p->clear_activity();
 
-            encode_spikes(p, &test, i, timesteps, timeseries, input_neurons);
+            encode_spikes(p, &test, i, timesteps, timeseries, input_neurons,
+                          NULL);
 
             p->run(timesteps);
             const vector<int>& output_counts = p->output_counts();
@@ -832,9 +1373,11 @@ int main(int argc, char* argv[]) {
     free(train.labels);
     free(train.min_vals);
     free(train.max_vals);
+    free(train.processed_data);
     free(test.data);
     free(test.labels);
     free(test.min_vals);
     free(test.max_vals);
+    free(test.processed_data);
     free(batch_order);
 }

@@ -8,7 +8,7 @@
 #include <string.h>
 
 void load_dataset(const char* data_path, const char* labels_path,
-                  double train_percent, Dataset* train, Dataset* test) {
+                  float train_percent, Dataset* train, Dataset* test) {
     assert(train_percent >= 0.00 && train_percent <= 1.00);
     Dataset ds     = {NULL, NULL, NULL, NULL, 0, 0, 0, 0};
     FILE* f_data   = fopen(data_path, "r");
@@ -43,10 +43,10 @@ void load_dataset(const char* data_path, const char* labels_path,
     }
     ds.cols = cols;
 
-    ds.data     = (double*)malloc(rows * cols * sizeof(double));
-    ds.labels   = (double*)malloc(rows * sizeof(double));
-    ds.min_vals = (double*)malloc(cols * sizeof(double));
-    ds.max_vals = (double*)malloc(cols * sizeof(double));
+    ds.data     = (float*)malloc(rows * cols * sizeof(float));
+    ds.labels   = (float*)malloc(rows * sizeof(float));
+    ds.min_vals = (float*)malloc(cols * sizeof(float));
+    ds.max_vals = (float*)malloc(cols * sizeof(float));
     if (ds.data == NULL || ds.labels == NULL || ds.min_vals == NULL ||
         ds.max_vals == NULL) {
         free(ds.data);
@@ -86,7 +86,7 @@ void load_dataset(const char* data_path, const char* labels_path,
     }
     for (int i = 1; i < rows; i++) {
         for (int j = 0; j < cols; j++) {
-            double val = ds.data[i * cols + j];
+            float val = ds.data[i * cols + j];
             if (val < ds.min_vals[j]) {
                 ds.min_vals[j] = val;
             }
@@ -98,7 +98,7 @@ void load_dataset(const char* data_path, const char* labels_path,
 
     // Shuffle
     assert(rows >= 1);
-    double* tmp = (double*)malloc(cols * sizeof(*tmp));
+    float* tmp = (float*)malloc(cols * sizeof(*tmp));
     for (size_t i = 1; i < (size_t)rows; i++) {
         size_t swap_idx = rand() % i;
 
@@ -110,10 +110,11 @@ void load_dataset(const char* data_path, const char* labels_path,
                cols * sizeof(*ds.data));
         memcpy(ds.data + (swap_idx * cols), tmp, cols * sizeof(*ds.data));
 
-        double tmp_label    = ds.labels[i];
+        float tmp_label     = ds.labels[i];
         ds.labels[i]        = ds.labels[swap_idx];
         ds.labels[swap_idx] = tmp_label;
     }
+    free(tmp);
 
     // Train/Test Split
     int train_len = train_percent * rows;
@@ -121,12 +122,12 @@ void load_dataset(const char* data_path, const char* labels_path,
 
     // Train DS
     *train = (Dataset){
-        .data     = (double*)malloc(train_len * cols * sizeof(*train->data)),
-        .labels   = (double*)malloc(train_len * sizeof(*train->labels)),
-        .min_vals = (double*)malloc(cols * sizeof(*train->min_vals)),
-        .max_vals = (double*)malloc(cols * sizeof(*train->max_vals)),
-        .observations         = train_len,
-        .cols                 = cols,
+        .data         = (float*)malloc(train_len * cols * sizeof(*train->data)),
+        .labels       = (float*)malloc(train_len * sizeof(*train->labels)),
+        .min_vals     = (float*)malloc(cols * sizeof(*train->min_vals)),
+        .max_vals     = (float*)malloc(cols * sizeof(*train->max_vals)),
+        .observations = train_len,
+        .cols         = cols,
         .rows_per_observation = -1,
         .timeseries           = false};
     memcpy(train->min_vals, ds.min_vals, cols * sizeof(*train->min_vals));
@@ -135,15 +136,15 @@ void load_dataset(const char* data_path, const char* labels_path,
     memcpy(train->labels, ds.labels, train_len * sizeof(*train->labels));
 
     // Test DS
-    *test = (Dataset){
-        .data         = (double*)malloc(test_len * cols * sizeof(*test->data)),
-        .labels       = (double*)malloc(test_len * sizeof(*test->labels)),
-        .min_vals     = (double*)malloc(cols * sizeof(*test->min_vals)),
-        .max_vals     = (double*)malloc(cols * sizeof(*test->max_vals)),
-        .observations = test_len,
-        .cols         = cols,
-        .rows_per_observation = -1,
-        .timeseries           = false};
+    *test =
+        (Dataset){.data = (float*)malloc(test_len * cols * sizeof(*test->data)),
+                  .labels   = (float*)malloc(test_len * sizeof(*test->labels)),
+                  .min_vals = (float*)malloc(cols * sizeof(*test->min_vals)),
+                  .max_vals = (float*)malloc(cols * sizeof(*test->max_vals)),
+                  .observations         = test_len,
+                  .cols                 = cols,
+                  .rows_per_observation = -1,
+                  .timeseries           = false};
     memcpy(test->min_vals, ds.min_vals, cols * sizeof(*test->min_vals));
     memcpy(test->max_vals, ds.max_vals, cols * sizeof(*test->max_vals));
     memcpy(test->data, ds.data + (train_len * cols),
@@ -160,7 +161,7 @@ void load_dataset(const char* data_path, const char* labels_path,
 }
 
 void load_dataset_2d(const char* data_path, const char* labels_path,
-                     double train_percent, Dataset* train, Dataset* test) {
+                     float train_percent, Dataset* train, Dataset* test) {
     assert(train_percent >= 0.0 && train_percent <= 1.0);
     Dataset ds     = {NULL, NULL, NULL, NULL, 0, 0, 0, 0};
     FILE* f_data   = fopen(data_path, "r");
@@ -237,10 +238,10 @@ void load_dataset_2d(const char* data_path, const char* labels_path,
 
     int block_size = N * D;
     int total_data = num_obs * block_size;
-    ds.data        = (double*)malloc(total_data * sizeof(double));
-    ds.labels      = (double*)malloc(num_obs * sizeof(double));
-    ds.min_vals    = (double*)malloc(N * sizeof(double));
-    ds.max_vals    = (double*)malloc(N * sizeof(double));
+    ds.data        = (float*)malloc(total_data * sizeof(float));
+    ds.labels      = (float*)malloc(num_obs * sizeof(float));
+    ds.min_vals    = (float*)malloc(N * sizeof(float));
+    ds.max_vals    = (float*)malloc(N * sizeof(float));
 
     if (ds.data == NULL || ds.labels == NULL || ds.min_vals == NULL ||
         ds.max_vals == NULL) {
@@ -305,7 +306,7 @@ void load_dataset_2d(const char* data_path, const char* labels_path,
     for (int obs = 0; obs < num_obs; obs++) {
         for (int feature = 0; feature < N; feature++) {
             for (int column = 0; column < D; column++) {
-                double val =
+                float val =
                     ds.data[(obs * block_size) + (feature * D) + column];
 
                 if (val < ds.min_vals[feature]) {
@@ -318,17 +319,17 @@ void load_dataset_2d(const char* data_path, const char* labels_path,
         }
     }
 
-    double* tmp_block = (double*)malloc(block_size * sizeof(double));
+    float* tmp_block = (float*)malloc(block_size * sizeof(float));
     for (int i = 1; i < num_obs; i++) {
         int swap_idx = rand() % i;
         memcpy(tmp_block, ds.data + (i * block_size),
-               block_size * sizeof(double));
+               block_size * sizeof(float));
         memcpy(ds.data + (i * block_size), ds.data + (swap_idx * block_size),
-               block_size * sizeof(double));
+               block_size * sizeof(float));
         memcpy(ds.data + (swap_idx * block_size), tmp_block,
-               block_size * sizeof(double));
+               block_size * sizeof(float));
 
-        double tmp_label    = ds.labels[i];
+        float tmp_label     = ds.labels[i];
         ds.labels[i]        = ds.labels[swap_idx];
         ds.labels[swap_idx] = tmp_label;
     }
@@ -338,33 +339,33 @@ void load_dataset_2d(const char* data_path, const char* labels_path,
     int test_len  = num_obs - train_len;
 
     *train = (Dataset){
-        .data     = (double*)malloc(train_len * block_size * sizeof(double)),
-        .labels   = (double*)malloc(train_len * sizeof(double)),
-        .min_vals = (double*)malloc(D * sizeof(double)),
-        .max_vals = (double*)malloc(D * sizeof(double)),
-        .observations         = train_len,
-        .cols                 = D,
-        .rows_per_observation = N,
-        .timeseries           = true};
-    memcpy(train->data, ds.data, train_len * block_size * sizeof(double));
-    memcpy(train->labels, ds.labels, train_len * sizeof(double));
-    memcpy(train->min_vals, ds.min_vals, N * sizeof(double));
-    memcpy(train->max_vals, ds.max_vals, N * sizeof(double));
-
-    *test = (Dataset){
-        .data         = (double*)malloc(test_len * block_size * sizeof(double)),
-        .labels       = (double*)malloc(test_len * sizeof(double)),
-        .min_vals     = (double*)malloc(N * sizeof(double)),
-        .max_vals     = (double*)malloc(N * sizeof(double)),
-        .observations = test_len,
+        .data         = (float*)malloc(train_len * block_size * sizeof(float)),
+        .labels       = (float*)malloc(train_len * sizeof(float)),
+        .min_vals     = (float*)malloc(D * sizeof(float)),
+        .max_vals     = (float*)malloc(D * sizeof(float)),
+        .observations = train_len,
         .cols         = D,
         .rows_per_observation = N,
         .timeseries           = true};
+    memcpy(train->data, ds.data, train_len * block_size * sizeof(float));
+    memcpy(train->labels, ds.labels, train_len * sizeof(float));
+    memcpy(train->min_vals, ds.min_vals, N * sizeof(float));
+    memcpy(train->max_vals, ds.max_vals, N * sizeof(float));
+
+    *test =
+        (Dataset){.data = (float*)malloc(test_len * block_size * sizeof(float)),
+                  .labels       = (float*)malloc(test_len * sizeof(float)),
+                  .min_vals     = (float*)malloc(N * sizeof(float)),
+                  .max_vals     = (float*)malloc(N * sizeof(float)),
+                  .observations = test_len,
+                  .cols         = D,
+                  .rows_per_observation = N,
+                  .timeseries           = true};
     memcpy(test->data, ds.data + train_len * block_size,
-           test_len * block_size * sizeof(double));
-    memcpy(test->labels, ds.labels + train_len, test_len * sizeof(double));
-    memcpy(test->min_vals, ds.min_vals, N * sizeof(double));
-    memcpy(test->max_vals, ds.max_vals, N * sizeof(double));
+           test_len * block_size * sizeof(float));
+    memcpy(test->labels, ds.labels + train_len, test_len * sizeof(float));
+    memcpy(test->min_vals, ds.min_vals, N * sizeof(float));
+    memcpy(test->max_vals, ds.max_vals, N * sizeof(float));
 
     free(ds.data);
     free(ds.labels);
