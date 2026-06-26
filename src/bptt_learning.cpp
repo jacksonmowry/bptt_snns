@@ -437,6 +437,8 @@ static void print_usage(const char* prog) {
     fprintf(
         stderr,
         "  -p, --training_percent FLOAT   Training percent of total data\n");
+    fprintf(stderr,
+            "  -N, --network_json_out FILE    Network json out filename\n");
     fprintf(stderr, "  -h, --help                     Show this help\n");
 }
 
@@ -456,6 +458,7 @@ int main(int argc, char* argv[]) {
     size_t epochs           = 10;
     size_t batch_size       = 1;
     double training_percent = 0.8;
+    char* network_json_out  = NULL;
 
     static struct option long_options[] = {
         {"network_json", required_argument, 0, 'n'},
@@ -473,6 +476,7 @@ int main(int argc, char* argv[]) {
         {"epochs", required_argument, 0, 'p'},
         {"batch_size", required_argument, 0, 'B'},
         {"training_percent", required_argument, 0, 'P'},
+        {"network_json_out", required_argument, 0, 'N'},
         {"help", no_argument, 0, 'h'},
         {0, 0, 0, 0},
     };
@@ -480,7 +484,7 @@ int main(int argc, char* argv[]) {
     int c;
     char* endptr;
 
-    while ((c = getopt_long(argc, argv, "n:d:l:b:c:r:e:u:o:t:H:s:hp:B:P:",
+    while ((c = getopt_long(argc, argv, "n:d:l:b:c:r:e:u:o:t:H:s:hp:B:P:N:",
                             long_options, NULL)) != -1) {
         switch (c) {
         case 'n':
@@ -578,6 +582,9 @@ int main(int argc, char* argv[]) {
                         "Error: Invalid or out-of-range --training_percent\n");
                 return 1;
             }
+            break;
+        case 'N':
+            network_json_out = optarg;
             break;
         case 'h':
             print_usage(argv[0]);
@@ -824,6 +831,20 @@ int main(int argc, char* argv[]) {
             best_train_loss, correct / (double)train.observations,
             best_train_acc, test_loss, best_test_loss, test_correct,
             best_test_acc);
+
+        if (network_json_out) {
+            json j;
+            n->to_json(j);
+            ofstream fout(network_json_out);
+            if (!fout) {
+                fprintf(stderr,
+                        "Failed to open networks/trained.json for writing\n");
+                exit(1);
+            }
+
+            fout << j << endl;
+            fout.close();
+        }
         // printf("%g\n", best_test_loss);
     }
 
