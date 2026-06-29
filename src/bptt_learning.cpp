@@ -22,12 +22,11 @@ using nlohmann::json;
 #define NUM_LAYERS (3)
 
 struct TrainingBundle {
-    vector<vector<double>> weights;
+    const vector<vector<double>>* weights;
     vector<vector<double>> delta_W;
-    vector<vector<int>> delays;
-    vector<double> thresholds;
-    vector<vector<double>> m_weights;
-    vector<vector<double>> v_weights;
+    const vector<vector<int>>* delays;
+    const vector<double>* thresholds;
+
     vector<vector<double>> spikes;
     vector<vector<double>> v_pre;
     vector<double> spike_logits;
@@ -46,21 +45,16 @@ struct TrainingBundle {
     Eigen::VectorXd dV_leak_dV_t1_;
     Eigen::VectorXd grad_;
 
-    double b1_t = 1.0;
-    double b2_t = 1.0;
-
-    double tau;
     double rho;
-
-    double learning_rate;
-    double decay_rate;
+    double tau;
 
     TrainingBundle(size_t total_neurons, size_t timesteps,
-                   size_t output_neurons, double tau, double rho,
-                   double learning_rate, double decay_rate)
-        : weights(total_neurons), delta_W(total_neurons), delays(total_neurons),
-          thresholds(total_neurons), m_weights(total_neurons),
-          v_weights(total_neurons),
+                   size_t output_neurons, double rho, double tau,
+                   const vector<vector<double>>* weights,
+                   const vector<vector<int>>* delays,
+                   const vector<double>* thresholds)
+        : weights(weights), delta_W(total_neurons), delays(delays),
+          thresholds(thresholds),
           spikes(timesteps, vector<double>(total_neurons)),
           v_pre(timesteps, vector<double>(total_neurons)),
           spike_logits(output_neurons), target(output_neurons),
@@ -69,8 +63,8 @@ struct TrainingBundle {
           vgh(total_neurons, timesteps), dL_dV_(total_neurons),
           v_pre_t_(total_neurons), dV_post_dV_pre_(total_neurons),
           dV_post_ds_t_(total_neurons), ds_t_dV_pre_(total_neurons),
-          dV_leak_dV_t1_(total_neurons), grad_(total_neurons), tau(tau),
-          rho(rho), learning_rate(learning_rate), decay_rate(decay_rate) {}
+          dV_leak_dV_t1_(total_neurons), grad_(total_neurons), rho(rho),
+          tau(tau) {}
 };
 
 struct EvaluationResults {
@@ -105,15 +99,29 @@ struct ThreadArgs {
     int* work_idx;
     int* done;
 
-    double loss;
-    size_t correct;
-    size_t processed;
+    double loss      = 0;
+    size_t correct   = 0;
+    size_t processed = 0;
 
     pthread_mutex_t* mut;
     pthread_cond_t* have_work;
     pthread_cond_t* done_work;
     bool* train_p;
     bool* die;
+
+    ThreadArgs(size_t total_neurons, size_t timesteps, size_t output_neurons,
+               double rho, double tau, const vector<vector<double>>* weights,
+               const vector<vector<int>>* delays,
+               const vector<double>* thresholds, NetworkConfiguration* nc,
+               const size_t* order, const Dataset* train, const Dataset* test,
+               int* max_idx, int* work_idx, int* done, pthread_mutex_t* mut,
+               pthread_cond_t* have_work, pthread_cond_t* done_work,
+               bool* train_p, bool* die)
+        : tb(total_neurons, timesteps, output_neurons, rho, tau, weights,
+             delays, thresholds),
+          nc(nc), order(order), train(train), test(test), max_idx(max_idx),
+          work_idx(work_idx), done(done), mut(mut), have_work(have_work),
+          done_work(done_work), train_p(train_p), die(die) {}
 };
 
 void load_network(Processor** pp, Network* net) {
@@ -354,7 +362,7 @@ void backward(TrainingBundle* tb, const NetworkConfiguration* nc) {
         tb->ds_t_dV_pre_ =
             (tb->rho / (2.0 * tb->tau)) *
             (-(tb->v_pre_t_ - Eigen::Map<const Eigen::VectorXd>(
-                                  &tb->thresholds[0], nc->total_neurons))
+                                  &((*tb->thresholds)[0]), nc->total_neurons))
                   .array()
                   .abs()
                   .matrix() /
@@ -387,7 +395,7 @@ void backward(TrainingBundle* tb, const NetworkConfiguration* nc) {
                 size_t source =
                     nc->n->get_node(dest)->incoming[source_idx]->from->id;
 
-                int delay       = tb->delays[dest][source_idx];
+                int delay       = (*tb->delays)[dest][source_idx];
                 int source_time = t - delay;
                 if (source_time < 0) {
                     continue;
@@ -396,45 +404,48 @@ void backward(TrainingBundle* tb, const NetworkConfiguration* nc) {
                 double source_spike = tb->spikes[source_time][source];
                 tb->delta_W[dest][source_idx] += source_spike * tb->grad_(dest);
                 tb->sgh(source, source_time) +=
-                    tb->grad_(dest) * tb->weights[dest][source_idx];
+                    tb->grad_(dest) * (*tb->weights)[dest][source_idx];
             }
         }
     }
 }
 
-void weight_updates(TrainingBundle* tb, const NetworkConfiguration* nc,
-                    const Dataset* d, size_t current_batch_size,
-                    size_t batch_size, size_t batch_start, size_t epoch) {
+void weight_updates(const NetworkConfiguration* nc, const Dataset* d,
+                    size_t current_batch_size, size_t batch_size,
+                    size_t batch_start, size_t epoch, double& b1_t,
+                    double& b2_t, vector<vector<double>>& m_weights,
+                    vector<vector<double>>& v_weights, double learning_rate,
+                    double decay_rate, vector<vector<double>>& weights,
+                    vector<vector<double>>& delta_W) {
     double inv_batch = 1.0 / ((double)current_batch_size * nc->timesteps);
 
-    tb->b1_t *= BETA1;
-    tb->b2_t *= BETA2;
+    b1_t *= BETA1;
+    b2_t *= BETA2;
 
     for (size_t i = 0; i < nc->total_neurons; i++) {
         for (size_t j = 0; j < nc->n->get_node(i)->incoming.size(); j++) {
             Edge* e = nc->n->get_node(i)->incoming[j];
 
-            tb->delta_W[i][j] *= inv_batch;
+            delta_W[i][j] *= inv_batch;
 
-            tb->m_weights[i][j] =
-                BETA1 * tb->m_weights[i][j] + (1.0 - BETA1) * tb->delta_W[i][j];
-            tb->v_weights[i][j] =
-                BETA2 * tb->v_weights[i][j] +
-                (1.0 - BETA2) * (tb->delta_W[i][j] * tb->delta_W[i][j]);
-            tb->delta_W[i][j] = 0.0;
+            m_weights[i][j] =
+                BETA1 * m_weights[i][j] + (1.0 - BETA1) * delta_W[i][j];
+            v_weights[i][j] = BETA2 * v_weights[i][j] +
+                              (1.0 - BETA2) * (delta_W[i][j] * delta_W[i][j]);
+            delta_W[i][j]   = 0.0;
 
-            double mW_hat = tb->m_weights[i][j] / (1.0 - tb->b1_t);
-            double vW_hat = tb->v_weights[i][j] / (1.0 - tb->b2_t);
+            double mW_hat = m_weights[i][j] / (1.0 - b1_t);
+            double vW_hat = v_weights[i][j] / (1.0 - b2_t);
 
-            double lr = tb->learning_rate;
+            double lr = learning_rate;
             if (epoch == 0) {
                 lr = ((batch_start + batch_size) / (double)d->observations) *
-                     tb->learning_rate;
+                     learning_rate;
             }
 
-            tb->weights[i][j] -= lr * mW_hat / (sqrt(vW_hat + ADAM_EPS));
-            tb->weights[i][j] -= lr * tb->decay_rate * tb->weights[i][j];
-            e->set("Weight", tb->weights[i][j]);
+            weights[i][j] -= lr * mW_hat / (sqrt(vW_hat + ADAM_EPS));
+            weights[i][j] -= lr * decay_rate * weights[i][j];
+            e->set("Weight", weights[i][j]);
         }
     }
 }
@@ -792,22 +803,29 @@ int main(int argc, char* argv[]) {
     printf("Neurons: %zu, Synapses: %zu\n", neuron_count, synapse_count);
     n->make_sorted_node_vector();
 
-    TrainingBundle tb(total_neurons, timesteps, output_neurons, tau, rho,
-                      learning_rate, decay_rate);
+    vector<vector<double>> weights(total_neurons);
+    vector<vector<int>> delays(total_neurons);
+    vector<double> thresholds(total_neurons);
+    vector<vector<double>> m_weights(total_neurons);
+    vector<vector<double>> v_weights(total_neurons);
+    vector<vector<double>> delta_W(total_neurons);
+    double b1_t = 1.0;
+    double b2_t = 1.0;
 
     for (size_t i = 0; i < total_neurons; i++) {
-        tb.thresholds[i] = n->get_node(i)->get("Threshold");
-        tb.weights[i].reserve(n->get_node(i)->incoming.size());
-        tb.delays[i].reserve(n->get_node(i)->incoming.size());
-        tb.delta_W[i].resize(n->get_node(i)->incoming.size());
-        tb.m_weights[i].resize(n->get_node(i)->incoming.size());
-        tb.v_weights[i].resize(n->get_node(i)->incoming.size());
+        thresholds[i] = n->get_node(i)->get("Threshold");
+        weights[i].reserve(n->get_node(i)->incoming.size());
+        delays[i].reserve(n->get_node(i)->incoming.size());
+
+        m_weights[i].resize(n->get_node(i)->incoming.size());
+        v_weights[i].resize(n->get_node(i)->incoming.size());
+        delta_W[i].resize(n->get_node(i)->incoming.size());
 
         for (size_t j = 0; j < n->get_node(i)->incoming.size(); j++) {
             Edge* e = n->get_node(i)->incoming[j];
 
-            tb.weights[i].push_back(e->get("Weight"));
-            tb.delays[i].push_back(e->get("Delay"));
+            weights[i].push_back(e->get("Weight"));
+            delays[i].push_back(e->get("Delay"));
         }
     }
 
@@ -825,47 +843,14 @@ int main(int argc, char* argv[]) {
     int done_count = 0;
 
     for (size_t i = 0; i < threads; i++) {
-        tas[i] = {TrainingBundle(total_neurons, timesteps, output_neurons, tau,
-                                 rho, learning_rate, decay_rate),
-                  &nc,
-                  batch_order,
-
-                  &train,
-                  &test,
-                  &max_idx,
-                  &work_idx,
-                  &done_count,
-
-                  0,
-                  0,
-                  0,
-
-                  &mut,
-                  &have_work,
-                  &done_work,
-                  &train_p,
-                  &die};
+        tas[i] = ThreadArgs(total_neurons, timesteps, output_neurons, rho, tau,
+                            &weights, &delays, &thresholds, &nc, batch_order,
+                            &train, &test, &max_idx, &work_idx, &done_count,
+                            &mut, &have_work, &done_work, &train_p, &die);
 
         for (size_t neuron = 0; neuron < total_neurons; neuron++) {
-            tas[i].tb.thresholds[neuron] =
-                n->get_node(neuron)->get("Threshold");
-            tas[i].tb.weights[neuron].reserve(
-                n->get_node(neuron)->incoming.size());
-            tas[i].tb.delays[neuron].reserve(
-                n->get_node(neuron)->incoming.size());
             tas[i].tb.delta_W[neuron].resize(
                 n->get_node(neuron)->incoming.size());
-            tas[i].tb.m_weights[neuron].resize(
-                n->get_node(neuron)->incoming.size());
-            tas[i].tb.v_weights[neuron].resize(
-                n->get_node(neuron)->incoming.size());
-
-            for (size_t j = 0; j < n->get_node(neuron)->incoming.size(); j++) {
-                Edge* e = n->get_node(neuron)->incoming[j];
-
-                tas[i].tb.weights[neuron].push_back(e->get("Weight"));
-                tas[i].tb.delays[neuron].push_back(e->get("Delay"));
-            }
         }
     }
 
@@ -928,7 +913,7 @@ int main(int argc, char* argv[]) {
                 for (size_t row = 0; row < total_neurons; row++) {
                     for (size_t incoming = 0;
                          incoming < tas[i].tb.delta_W[row].size(); incoming++) {
-                        tb.delta_W[row][incoming] +=
+                        delta_W[row][incoming] +=
                             tas[i].tb.delta_W[row][incoming];
                         tas[i].tb.delta_W[row][incoming] = 0.0;
                     }
@@ -936,22 +921,9 @@ int main(int argc, char* argv[]) {
             }
 
             // Average gradients over the actual batch size.
-            weight_updates(&tb, &nc, &train, current_batch_size, batch_size,
-                           batch_start, epoch);
-
-            // TODO fix this
-            // Go through and apply weight updates to each of the threads
-            pthread_mutex_lock(&mut);
-            for (size_t i = 0; i < threads; i++) {
-                for (size_t row = 0; row < total_neurons; row++) {
-                    for (size_t incoming = 0;
-                         incoming < tas[i].tb.weights[row].size(); incoming++) {
-                        tas[i].tb.weights[row][incoming] =
-                            tb.weights[row][incoming];
-                    }
-                }
-            }
-            pthread_mutex_unlock(&mut);
+            weight_updates(&nc, &train, current_batch_size, batch_size,
+                           batch_start, epoch, b1_t, b2_t, m_weights, v_weights,
+                           learning_rate, decay_rate, weights, delta_W);
         }
 
         // Training Metrics
