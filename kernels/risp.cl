@@ -23,7 +23,7 @@ __kernel void RispDynamicsFwdKernel(
 
     float V_thresh = v_thresh[neuron_id];
     float V_rest = v_rest;
-    float V = v[neuron_id];
+    float V = timestep == 0 ? 0.0f : v[neuron_id];
     int idx = neuron_id * num_steps + timestep;
 
     // Binary leak (v_decay of 1 -> leak_mode "all")
@@ -43,15 +43,15 @@ __kernel void RispDynamicsFwdKernel(
 
     // Check incoming synapses for spikes
     for (int i = 0; i < incoming[neuron_id]; i++) {
-        int incoming_id = incoming_ids[neuron_id * max_incoming + i];
-        int source_ts = timestep - delays[neuron_id * max_incoming + i];
-        float weight = weights[neuron_id * max_incoming + i];
+        const int incoming_id = incoming_ids[neuron_id * max_incoming + i];
+        const float weight = weights[neuron_id * max_incoming + i];
+        const int source_ts = timestep - delays[neuron_id * max_incoming + i];
 
         if (source_ts < 0) {
             continue;
         }
 
-        float source_spike = s[incoming_id * num_steps + source_ts];
+        const float source_spike = s[incoming_id * num_steps + source_ts];
         V += source_spike * weight;
     }
 

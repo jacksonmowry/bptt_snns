@@ -7,3 +7,4 @@ obj/*
 data/*
 perf.data
 perf.data.old
+networks/*
