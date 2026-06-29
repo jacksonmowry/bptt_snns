@@ -784,10 +784,10 @@ int main(int argc, char* argv[]) {
 
         Processor* p = nullptr;
         load_network(&p, n);
-        for (int i = 0; i < test.observations; i++) {
+        for (int i = 0; i < train.observations; i++) {
             p->clear_activity();
 
-            encode_spikes(p, &test, i, timesteps, timeseries, input_neurons);
+            encode_spikes(p, &train, i, timesteps, timeseries, input_neurons);
 
             p->run(timesteps);
             const vector<int>& output_counts = p->output_counts();
@@ -806,15 +806,15 @@ int main(int argc, char* argv[]) {
             softmax(tb.spike_logits.data(), tb.softmax_out.data(),
                     output_neurons);
 
-            test_loss -= log(tb.softmax_out[(size_t)test.labels[i]]);
-            test_correct += (max_idx == (size_t)test.labels[i]);
+            test_loss -= log(tb.softmax_out[(size_t)train.labels[i]]);
+            test_correct += (max_idx == (size_t)train.labels[i]);
         }
 
         delete p;
 
-        if (test.observations > 0) {
-            test_correct /= test.observations;
-            test_loss /= test.observations;
+        if (train.observations > 0) {
+            test_correct /= train.observations;
+            test_loss /= train.observations;
 
             if (test_correct > best_test_acc) {
                 best_test_acc = test_correct;
@@ -844,6 +844,10 @@ int main(int argc, char* argv[]) {
 
             fout << j << endl;
             fout.close();
+        }
+
+        if (best_test_acc == 1.0) {
+            return 0;
         }
         // printf("%g\n", best_test_loss);
     }
