@@ -7,6 +7,7 @@
 #include <cstddef>
 #include <fstream>
 #include <getopt.h>
+#include <pthread.h>
 #include <stddef.h>
 #include <unordered_set>
 
@@ -91,6 +92,28 @@ struct NetworkConfiguration {
 
     double min_potential;
     bool leak;
+};
+
+struct ThreadArgs {
+    TrainingBundle tb;
+    NetworkConfiguration* nc;
+    const size_t* order;
+
+    const Dataset* train;
+    const Dataset* test;
+    int* max_idx;
+    int* work_idx;
+    int* done;
+
+    double loss;
+    size_t correct;
+    size_t processed;
+
+    pthread_mutex_t* mut;
+    pthread_cond_t* have_work;
+    pthread_cond_t* done_work;
+    bool* train_p;
+    bool* die;
 };
 
 void load_network(Processor** pp, Network* net) {
@@ -416,6 +439,70 @@ void weight_updates(TrainingBundle* tb, const NetworkConfiguration* nc,
     }
 }
 
+void* worker(void* arg) {
+    if (!arg) {
+        fprintf(stderr, "Thread spawned with NULL arg\n");
+        exit(1);
+    }
+
+    ThreadArgs* ta         = (ThreadArgs*)arg;
+    Processor* p           = NULL;
+    bool do_backwards_pass = false;
+    int my_max;
+
+    while (true) {
+        pthread_mutex_lock(ta->mut);
+        if (*ta->die) {
+            pthread_mutex_unlock(ta->mut);
+            pthread_exit(NULL);
+        }
+
+        while (*ta->work_idx >= *ta->max_idx) {
+            pthread_cond_wait(ta->have_work, ta->mut);
+            if (*ta->die) {
+                pthread_mutex_unlock(ta->mut);
+                pthread_exit(NULL);
+            }
+        }
+        int my_work_idx   = *ta->work_idx;
+        *ta->work_idx     = my_work_idx + 1;
+        my_max            = *ta->max_idx;
+        do_backwards_pass = *ta->train_p;
+        pthread_mutex_unlock(ta->mut);
+
+        load_network(&p, ta->nc->n);
+
+        while (my_work_idx < my_max) {
+            EvaluationResults er = forward(
+                &ta->tb, p, ta->train_p ? ta->train : ta->test,
+                ta->train_p ? ta->order[my_work_idx] : my_work_idx, ta->nc);
+            ta->loss += er.loss;
+            ta->correct += er.correct;
+            ta->processed++;
+
+            if (do_backwards_pass) {
+                backward(&ta->tb, ta->nc);
+            }
+
+            pthread_mutex_lock(ta->mut);
+            my_work_idx   = *ta->work_idx;
+            *ta->work_idx = my_work_idx + 1;
+            assert(*ta->max_idx == my_max);
+            do_backwards_pass = *ta->train_p;
+            pthread_mutex_unlock(ta->mut);
+        }
+
+        pthread_mutex_lock(ta->mut);
+        *ta->done = *ta->done + ta->processed;
+        pthread_cond_signal(ta->done_work);
+        pthread_mutex_unlock(ta->mut);
+        delete p;
+        p = NULL;
+    }
+
+    return NULL;
+}
+
 static void print_usage(const char* prog) {
     fprintf(stderr, "Usage: %s [OPTIONS]...\n", prog);
     fprintf(stderr, "  -n, --network_json     FILE    Network JSON path\n");
@@ -459,6 +546,7 @@ int main(int argc, char* argv[]) {
     size_t batch_size       = 1;
     double training_percent = 0.8;
     char* network_json_out  = NULL;
+    size_t threads          = 1;
 
     static struct option long_options[] = {
         {"network_json", required_argument, 0, 'n'},
@@ -477,6 +565,7 @@ int main(int argc, char* argv[]) {
         {"batch_size", required_argument, 0, 'B'},
         {"training_percent", required_argument, 0, 'P'},
         {"network_json_out", required_argument, 0, 'N'},
+        {"threads", required_argument, 0, 'T'},
         {"help", no_argument, 0, 'h'},
         {0, 0, 0, 0},
     };
@@ -484,7 +573,7 @@ int main(int argc, char* argv[]) {
     int c;
     char* endptr;
 
-    while ((c = getopt_long(argc, argv, "n:d:l:b:c:r:e:u:o:t:H:s:hp:B:P:N:",
+    while ((c = getopt_long(argc, argv, "n:d:l:b:c:r:e:u:o:t:H:s:hp:B:P:N:T:",
                             long_options, NULL)) != -1) {
         switch (c) {
         case 'n':
@@ -585,6 +674,13 @@ int main(int argc, char* argv[]) {
             break;
         case 'N':
             network_json_out = optarg;
+            break;
+        case 'T':
+            threads = strtoull(optarg, &endptr, 0);
+            if (*endptr != '\0') {
+                fprintf(stderr, "Error: Invalid --threads\n");
+                return 1;
+            }
             break;
         case 'h':
             print_usage(argv[0]);
@@ -694,6 +790,7 @@ int main(int argc, char* argv[]) {
     }
 
     printf("Neurons: %zu, Synapses: %zu\n", neuron_count, synapse_count);
+    n->make_sorted_node_vector();
 
     TrainingBundle tb(total_neurons, timesteps, output_neurons, tau, rho,
                       learning_rate, decay_rate);
@@ -714,17 +811,83 @@ int main(int argc, char* argv[]) {
         }
     }
 
+    ThreadArgs* tas          = (ThreadArgs*)calloc(threads, sizeof(*tas));
+    pthread_t* tids          = (pthread_t*)calloc(threads, sizeof(*tids));
+    int max_idx              = -1;
+    pthread_mutex_t mut      = PTHREAD_MUTEX_INITIALIZER;
+    pthread_cond_t have_work = PTHREAD_COND_INITIALIZER;
+    pthread_cond_t done_work = PTHREAD_COND_INITIALIZER;
+    bool train_p             = true;
+    bool die                 = false;
+    size_t* batch_order =
+        (size_t*)calloc(train.observations, sizeof(*batch_order));
+    int work_idx   = 0;
+    int done_count = 0;
+
+    for (size_t i = 0; i < threads; i++) {
+        tas[i] = {TrainingBundle(total_neurons, timesteps, output_neurons, tau,
+                                 rho, learning_rate, decay_rate),
+                  &nc,
+                  batch_order,
+
+                  &train,
+                  &test,
+                  &max_idx,
+                  &work_idx,
+                  &done_count,
+
+                  0,
+                  0,
+                  0,
+
+                  &mut,
+                  &have_work,
+                  &done_work,
+                  &train_p,
+                  &die};
+
+        for (size_t neuron = 0; neuron < total_neurons; neuron++) {
+            tas[i].tb.thresholds[neuron] =
+                n->get_node(neuron)->get("Threshold");
+            tas[i].tb.weights[neuron].reserve(
+                n->get_node(neuron)->incoming.size());
+            tas[i].tb.delays[neuron].reserve(
+                n->get_node(neuron)->incoming.size());
+            tas[i].tb.delta_W[neuron].resize(
+                n->get_node(neuron)->incoming.size());
+            tas[i].tb.m_weights[neuron].resize(
+                n->get_node(neuron)->incoming.size());
+            tas[i].tb.v_weights[neuron].resize(
+                n->get_node(neuron)->incoming.size());
+
+            for (size_t j = 0; j < n->get_node(neuron)->incoming.size(); j++) {
+                Edge* e = n->get_node(neuron)->incoming[j];
+
+                tas[i].tb.weights[neuron].push_back(e->get("Weight"));
+                tas[i].tb.delays[neuron].push_back(e->get("Delay"));
+            }
+        }
+    }
+
+    for (size_t i = 0; i < threads; i++) {
+        pthread_create(tids + i, NULL, worker, (void*)(tas + i));
+    }
+
     puts("Beginning training");
     double best_train_loss = DBL_MAX;
     double best_test_loss  = DBL_MAX;
     double best_train_acc  = 0.0;
     double best_test_acc   = 0.0;
-    size_t* batch_order =
-        (size_t*)calloc(train.observations, sizeof(*batch_order));
     for (size_t epoch = 0; epoch < epochs; epoch++) {
         double epoch_loss = 0.0;
         size_t correct    = 0;
 
+        // Reset work index before each epoch
+        pthread_mutex_lock(&mut);
+        work_idx = 0;
+        train_p  = true;
+
+        // Shuffle the batch order for randomness
         for (int i = 0; i < train.observations; i++) {
             batch_order[i] = i;
         }
@@ -734,40 +897,61 @@ int main(int argc, char* argv[]) {
             batch_order[i] = batch_order[j];
             batch_order[j] = tmp;
         }
+        pthread_mutex_unlock(&mut);
 
         // Batch processing loop
         for (int batch_start = 0; batch_start < train.observations;
              batch_start += batch_size) {
-            Processor* p = nullptr;
-            load_network(&p, n);
-
-            double batch_loss    = 0.0;
-            size_t batch_correct = 0;
-
-            // Process batch samples
-            for (int b = 0; (size_t)b < batch_size &&
-                            (batch_start + b) < train.observations;
-                 ++b) {
-                size_t observation_idx = batch_order[batch_start + b];
-
-                EvaluationResults er =
-                    forward(&tb, p, &train, observation_idx, &nc);
-                batch_loss += er.loss;
-                batch_correct += er.correct;
-
-                backward(&tb, &nc);
-            }
-
-            epoch_loss += batch_loss;
-            correct += batch_correct;
-
-            // Average gradients over the actual batch size.
             size_t current_batch_size = min(
                 (size_t)batch_size, train.observations - (size_t)batch_start);
+
+            pthread_mutex_lock(&mut);
+            work_idx   = batch_start;
+            done_count = 0;
+            max_idx    = batch_start + current_batch_size;
+            pthread_cond_broadcast(&have_work);
+            pthread_mutex_unlock(&mut);
+
+            pthread_mutex_lock(&mut);
+            while (done_count < (int)current_batch_size) {
+                pthread_cond_wait(&done_work, &mut);
+            }
+            pthread_mutex_unlock(&mut);
+
+            for (size_t i = 0; i < threads; i++) {
+                epoch_loss += tas[i].loss;
+                correct += tas[i].correct;
+                tas[i].loss      = 0;
+                tas[i].correct   = 0;
+                tas[i].processed = 0;
+
+                for (size_t row = 0; row < total_neurons; row++) {
+                    for (size_t incoming = 0;
+                         incoming < tas[i].tb.delta_W[row].size(); incoming++) {
+                        tb.delta_W[row][incoming] +=
+                            tas[i].tb.delta_W[row][incoming];
+                        tas[i].tb.delta_W[row][incoming] = 0.0;
+                    }
+                }
+            }
+
+            // Average gradients over the actual batch size.
             weight_updates(&tb, &nc, &train, current_batch_size, batch_size,
                            batch_start, epoch);
 
-            delete p;
+            // TODO fix this
+            // Go through and apply weight updates to each of the threads
+            pthread_mutex_lock(&mut);
+            for (size_t i = 0; i < threads; i++) {
+                for (size_t row = 0; row < total_neurons; row++) {
+                    for (size_t incoming = 0;
+                         incoming < tas[i].tb.weights[row].size(); incoming++) {
+                        tas[i].tb.weights[row][incoming] =
+                            tb.weights[row][incoming];
+                    }
+                }
+            }
+            pthread_mutex_unlock(&mut);
         }
 
         // Training Metrics
@@ -782,35 +966,30 @@ int main(int argc, char* argv[]) {
         double test_correct = 0.0;
         double test_loss    = 0.0;
 
-        Processor* p = nullptr;
-        load_network(&p, n);
-        for (int i = 0; i < test.observations; i++) {
-            p->clear_activity();
+        pthread_mutex_lock(&mut);
+        work_idx   = 0;
+        done_count = 0;
+        max_idx    = test.observations;
+        train_p    = false;
+        pthread_cond_broadcast(&have_work);
+        pthread_mutex_unlock(&mut);
 
-            encode_spikes(p, &test, i, timesteps, timeseries, input_neurons);
-
-            p->run(timesteps);
-            const vector<int>& output_counts = p->output_counts();
-            size_t max_idx                   = 0;
-            int max_val                      = 0;
-            for (size_t output = 0; output < output_neurons; output++) {
-                tb.spike_logits[output] =
-                    output_counts[output] / (double)timesteps;
-
-                if (output_counts[output] > max_val) {
-                    max_val = output_counts[output];
-                    max_idx = output;
-                }
-            }
-
-            softmax(tb.spike_logits.data(), tb.softmax_out.data(),
-                    output_neurons);
-
-            test_loss -= log(tb.softmax_out[(size_t)test.labels[i]]);
-            test_correct += (max_idx == (size_t)test.labels[i]);
+        pthread_mutex_lock(&mut);
+        while (done_count < test.observations) {
+            pthread_cond_wait(&done_work, &mut);
         }
+        pthread_mutex_unlock(&mut);
 
-        delete p;
+        pthread_mutex_lock(&mut);
+        for (size_t i = 0; i < threads; i++) {
+            test_loss += tas[i].loss;
+            test_correct += tas[i].correct;
+            tas[i].loss      = 0;
+            tas[i].correct   = 0;
+            tas[i].processed = 0;
+        }
+        max_idx = -1;
+        pthread_mutex_unlock(&mut);
 
         if (test.observations > 0) {
             test_correct /= test.observations;
@@ -848,6 +1027,15 @@ int main(int argc, char* argv[]) {
         // printf("%g\n", best_test_loss);
     }
 
+    pthread_mutex_lock(&mut);
+    die = true;
+    pthread_mutex_unlock(&mut);
+    pthread_cond_broadcast(&have_work);
+
+    for (size_t i = 0; i < threads; i++) {
+        pthread_join(tids[i], NULL);
+    }
+
     delete n;
     free(train.data);
     free(train.labels);
@@ -858,4 +1046,6 @@ int main(int argc, char* argv[]) {
     free(test.min_vals);
     free(test.max_vals);
     free(batch_order);
+    free(tas);
+    free(tids);
 }

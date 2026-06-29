@@ -114,6 +114,7 @@ void load_dataset(const char* data_path, const char* labels_path,
         ds.labels[i]        = ds.labels[swap_idx];
         ds.labels[swap_idx] = tmp_label;
     }
+    free(tmp);
 
     // Train/Test Split
     int train_len = train_percent * rows;
