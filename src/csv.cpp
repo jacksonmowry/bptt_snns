@@ -1,4 +1,5 @@
 #include "csv.h"
+#include <algorithm>
 #include <assert.h>
 #include <cfloat>
 #include <cstddef>
@@ -135,6 +136,25 @@ void load_dataset(const char* data_path, const char* labels_path,
     memcpy(train->data, ds.data, train_len * cols * sizeof(*train->data));
     memcpy(train->labels, ds.labels, train_len * sizeof(*train->labels));
 
+    // Min/Max calcs for train only
+    for (int col = 0; col < cols; col++) {
+        train->min_vals[col] = train->data[col];
+        train->max_vals[col] = train->data[col];
+    }
+
+    for (int row = 1; row < train_len; row++) {
+        for (int col = 0; col < cols; col++) {
+            double val = train->data[row * cols + col];
+
+            if (val < train->min_vals[col]) {
+                train->min_vals[col] = val;
+            }
+            if (val > train->max_vals[col]) {
+                train->max_vals[col] = val;
+            }
+        }
+    }
+
     // Test DS
     *test = (Dataset){
         .data         = (double*)malloc(test_len * cols * sizeof(*test->data)),
@@ -151,6 +171,25 @@ void load_dataset(const char* data_path, const char* labels_path,
            test_len * cols * sizeof(*test->data));
     memcpy(test->labels, ds.labels + (train_len),
            test_len * sizeof(*test->labels));
+
+    // Min/Max calcs for test only
+    for (int col = 0; col < cols; col++) {
+        test->min_vals[col] = test->data[col];
+        test->max_vals[col] = test->data[col];
+    }
+
+    for (int row = 0; row < test_len; row++) {
+        for (int col = 0; col < cols; col++) {
+            double val = test->data[row * cols + col];
+
+            if (val < test->min_vals[col]) {
+                test->min_vals[col] = val;
+            }
+            if (val > test->max_vals[col]) {
+                test->max_vals[col] = val;
+            }
+        }
+    }
 
     free(ds.min_vals);
     free(ds.max_vals);

@@ -14,13 +14,32 @@ from concurrent.futures import ProcessPoolExecutor
 def my_target_program(params):
     command = [
         "bin/bptt_learning",
+        "--network_json",
         "networks/risp_f_emptynet.json",
-        "/home/jackson/framework/cpp-apps/applications/classify/datasets/regular/iris_data.csv",
-        "/home/jackson/framework/cpp-apps/applications/classify/datasets/regular/iris_label.csv",
+        "--data_file",
+        "./data/1000_mnist_data.csv",
+        "--label_file",
+        "./data/1000_mnist_label.csv",
+        "--timesteps",
+        "16",
+        "--hidden_neurons",
+        "96",
+        "--epochs",
+        "10",
+        "--threads",
+        "1",
+        "--batch_size",
+        "100",
+        "--connectivity",
+        "0.05",
     ]
+    command.append("--learning_rate")
     command.append(f"{params["learning_rate"]}")
+    command.append("--decay_rate")
     command.append(f"{params["decay_rate"]}")
+    command.append("--tau")
     command.append(f"{params["tau"]}")
+    command.append("--rho")
     command.append(f"{params["rho"]}")
     avg_score = 0.0
 

@@ -1,3 +1,8 @@
+// Best Parameters:
+//   learning_rate: 0.00911106696288836
+//   decay_rate: 2.4817122209750068e-05
+//   tau: 0.8163744927232162
+//   rho: 0.5486399999186418
 #include "csv.h"
 #include "framework.hpp"
 #include <Eigen/Dense>
