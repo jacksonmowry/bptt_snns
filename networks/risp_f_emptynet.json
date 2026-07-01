@@ -6,13 +6,13 @@
             "fire_like_ravens": false,
             "leak_mode": "none",
             "max_delay": 7,
-            "max_threshold": 10.0,
-            "max_weight": 1000.0,
+            "max_threshold": 1.0,
+            "max_weight": 1.0,
             "min_potential": -1.0,
             "min_threshold": 0.01,
-            "min_weight": -1000.0,
+            "min_weight": -1.0,
             "run_time_inclusive": false,
-            "spike_value_factor": 0.9921875,
+            "spike_value_factor": 1.0,
             "threshold_inclusive": true
         }
     },
@@ -33,8 +33,8 @@
             },
             {
                 "index": 0,
-                "max_value": 1000.0,
-                "min_value": -1000.0,
+                "max_value": 1.0,
+                "min_value": -1.0,
                 "name": "Weight",
                 "size": 1,
                 "type": 68
@@ -44,7 +44,7 @@
         "node_properties": [
             {
                 "index": 0,
-                "max_value": 10.0,
+                "max_value": 1.0,
                 "min_value": 0.01,
                 "name": "Threshold",
                 "size": 1,

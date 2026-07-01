@@ -92,6 +92,8 @@ struct NetworkConfiguration {
 
     double min_potential;
     bool leak;
+    double scale_factor;
+    bool discrete;
 };
 
 struct ThreadArgs {
@@ -305,7 +307,8 @@ EvaluationResults forward(TrainingBundle* tb, Processor* p, const Dataset* d,
         const vector<double>& neuron_pre_charges = p->neuron_pre_charges();
         for (size_t neuron = 0; neuron < nc->total_neurons; neuron++) {
             tb->spikes[t][neuron] = neuron_counts[neuron];
-            tb->v_pre[t][neuron] = (neuron_pre_charges[neuron] * (2.0 / 256.0));
+            tb->v_pre[t][neuron]  = (neuron_pre_charges[neuron] *
+                                     (nc->discrete ? nc->scale_factor : 1.0));
 
             if (neuron >= nc->layer_offsets[2]) {
                 tb->spike_logits[neuron - nc->layer_offsets[2]] +=
@@ -468,8 +471,13 @@ void weight_updates(const NetworkConfiguration* nc, const Dataset* d,
             } else if (weights[i][j] < -1.0) {
                 weights[i][j] = -1.0;
             }
-            weights[i][j] = quantize(weights[i][j], 256, -127, 127);
-            e->set("Weight", weights[i][j] / (2.0 / 256.0));
+
+            if (nc->discrete) {
+                weights[i][j] = quantize(weights[i][j], 256, -127, 127);
+            }
+
+            e->set("Weight",
+                   weights[i][j] / (nc->discrete ? nc->scale_factor : 1.0));
         }
     }
 }
@@ -804,29 +812,38 @@ int main(int argc, char* argv[]) {
 
     Network* n = new Network();
     n->from_json(emptynet);
-
-    json discrete_net;
-    ifstream discrete_fin("networks/risp_127.json");
-    discrete_fin >> discrete_net;
-
-    Network* n_discrete = new Network();
-    n_discrete->from_json(discrete_net);
-
-    string leak_prop     = n->get_data("proc_params")["leak_mode"];
-    bool leak            = leak_prop == "all";
-    double min_potential = n->get_data("proc_params")["min_potential"];
-
     if (!n) {
         fprintf(stderr, "%s:%s:%d: Unable to create network.\n", __FILE__,
                 __FUNCTION__, __LINE__);
         exit(1);
     }
 
+    bool discrete        = n->get_data("proc_params")["discrete"];
+    string leak_prop     = n->get_data("proc_params")["leak_mode"];
+    bool leak            = leak_prop == "all";
+    double min_potential = n->get_data("proc_params")["min_potential"];
+    double min_weight    = n->get_data("proc_params")["min_weight"];
+    double max_weight    = n->get_data("proc_params")["max_weight"];
+    double max_threshold = n->get_data("proc_params")["max_threshold"];
+    int scale            = 0;
+
+    if (discrete) {
+        // Symmetric scale around zero, rounded up to next bit
+        scale = max(abs(min_weight), abs(max_weight)) * 2 + 1;
+        scale = pow(2.0, ceil(log2(scale)));
+    }
+
+    double scale_factor = 2.0 / scale;
+
+    if (discrete) {
+        min_potential *= scale_factor;
+    }
+
     const size_t layer_sizes[3] = {input_neurons, hidden_neurons,
                                    output_neurons};
 
     NetworkConfiguration nc = {
-        .n = n_discrete,
+        .n = n,
 
         .input_neurons  = input_neurons,
         .hidden_neurons = hidden_neurons,
@@ -839,6 +856,8 @@ int main(int argc, char* argv[]) {
 
         .min_potential = min_potential,
         .leak          = leak,
+        .scale_factor  = scale_factor,
+        .discrete      = discrete,
     };
 
     size_t neuron_count  = 0;
@@ -846,17 +865,12 @@ int main(int argc, char* argv[]) {
 
     for (size_t i = 0; i < NUM_LAYERS; i++) {
         for (size_t j = 0; j < layer_sizes[i]; j++) {
-            n->add_node(neuron_count)->set("Threshold", 0.9921875);
-            n_discrete->add_node(neuron_count)->set("Threshold", 127);
+            n->add_node(neuron_count)->set("Threshold", max_threshold);
 
             if (i == 0) {
-                // Input
                 n->add_input(neuron_count);
-                n_discrete->add_input(neuron_count);
             } else if (i == NUM_LAYERS - 1) {
-                // Output
                 n->add_output(neuron_count);
-                n_discrete->add_output(neuron_count);
             }
 
             neuron_count++;
@@ -869,25 +883,23 @@ int main(int argc, char* argv[]) {
                 continue;
             }
 
-            Edge* e          = n->add_edge(i, j);
-            Edge* e_discrete = n_discrete->add_edge(i, j);
+            Edge* e = n->add_edge(i, j);
             synapse_count++;
 
-            double weight = quantize(normal(0.0, 0.1), 256, -127, 127);
-            int delay     = rand() % 7 + 1;
+            double weight = normal(0.0, 0.1);
+            if (discrete) {
+                weight = quantize(weight, scale, min_weight, max_weight) /
+                         scale_factor;
+            }
+            int delay = rand() % 7 + 1;
 
             e->set(n->get_edge_property("Weight")->index, weight);
             e->set(n->get_edge_property("Delay")->index, delay);
-
-            e_discrete->set(n->get_edge_property("Weight")->index,
-                            weight / (2.0 / 256.0));
-            e_discrete->set(n->get_edge_property("Delay")->index, delay);
         }
     }
 
     printf("Neurons: %zu, Synapses: %zu\n", neuron_count, synapse_count);
     n->make_sorted_node_vector();
-    n_discrete->make_sorted_node_vector();
 
     vector<vector<double>> weights(total_neurons);
     vector<vector<int>> delays(total_neurons);
@@ -899,19 +911,20 @@ int main(int argc, char* argv[]) {
     double b2_t = 1.0;
 
     for (size_t i = 0; i < total_neurons; i++) {
-        thresholds[i] =
-            n_discrete->get_node(i)->get("Threshold") * (2.0 / 256.0);
-        weights[i].reserve(n_discrete->get_node(i)->incoming.size());
-        delays[i].reserve(n_discrete->get_node(i)->incoming.size());
+        thresholds[i] = n->get_node(i)->get("Threshold") *
+                        ((discrete) ? scale_factor : 1.0);
+        weights[i].reserve(n->get_node(i)->incoming.size());
+        delays[i].reserve(n->get_node(i)->incoming.size());
 
-        m_weights[i].resize(n_discrete->get_node(i)->incoming.size());
-        v_weights[i].resize(n_discrete->get_node(i)->incoming.size());
-        delta_W[i].resize(n_discrete->get_node(i)->incoming.size());
+        m_weights[i].resize(n->get_node(i)->incoming.size());
+        v_weights[i].resize(n->get_node(i)->incoming.size());
+        delta_W[i].resize(n->get_node(i)->incoming.size());
 
         for (size_t j = 0; j < n->get_node(i)->incoming.size(); j++) {
-            Edge* e = n_discrete->get_node(i)->incoming[j];
+            Edge* e = n->get_node(i)->incoming[j];
 
-            weights[i].push_back(e->get("Weight") * (2.0 / 256.0));
+            weights[i].push_back(e->get("Weight") *
+                                 ((discrete) ? scale_factor : 1.0));
             delays[i].push_back(e->get("Delay"));
         }
     }
@@ -1062,71 +1075,13 @@ int main(int argc, char* argv[]) {
             }
         }
 
-        double fp_test_loss = 0.0;
-        double fp_test_acc  = 0.0;
-
-        // Floating point
-        {
-            // Update weights
-            for (size_t i = 0; i < nc.total_neurons; i++) {
-                for (size_t j = 0; j < n->get_node(i)->incoming.size(); j++) {
-                    Edge* e = n->get_node(i)->incoming[j];
-
-                    e->set("Weight", weights[i][j]);
-                }
-            }
-
-            Processor* p = NULL;
-            load_network(&p, n);
-
-            for (int i = 0; i < test.observations; i++) {
-                p->clear_activity();
-
-                encode_spikes(p, &test, i, nc.timesteps, nc.timeseries,
-                              nc.input_neurons);
-
-                p->run(nc.timesteps);
-
-                const vector<int>& output_counts = p->output_counts();
-                vector<double> logits(output_counts.size());
-
-                int max_idx = 0;
-                int max_val = 0;
-                for (size_t j = 0; j < output_counts.size(); j++) {
-                    logits[j] = output_counts[j] / (double)nc.timesteps;
-
-                    if (output_counts[j] > max_val) {
-                        max_val = output_counts[j];
-                        max_idx = j;
-                    }
-                }
-
-                if (max_idx == (int)test.labels[i]) {
-                    fp_test_acc++;
-                }
-
-                vector<double> softmax_out(logits.size());
-                softmax(logits.data(), softmax_out.data(), logits.size());
-
-                fp_test_loss -=
-                    log(softmax_out[(size_t)test.labels[i]] + ADAM_EPS);
-            }
-
-            delete p;
-        }
-
-        fp_test_loss /= test.observations;
-        fp_test_acc /= test.observations;
-
         printf(
             "Epoch: %4zu/%zu, Loss: %10g (Best: %10g), Acc: %10g (Best: %10g), "
-            "TestLoss: %10g (Best: %10g), TestAcc: %10g (Best: %10g), DTLoss: "
-            "%10g, DTAcc: %10g\n",
+            "TestLoss: %10g (Best: %10g), TestAcc: %10g (Best: %10g)\n",
             epoch + 1, epochs, epoch_loss / (double)train.observations,
             best_train_loss, correct / (double)train.observations,
             best_train_acc, test_loss, best_test_loss, test_correct,
-            best_test_acc, abs(test_loss - fp_test_loss),
-            abs(test_correct - fp_test_acc));
+            best_test_acc);
 
         if (network_json_out) {
             json j;
