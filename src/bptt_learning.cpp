@@ -12,6 +12,7 @@
 #include <cstddef>
 #include <fstream>
 #include <getopt.h>
+#include <iostream>
 #include <pthread.h>
 #include <stddef.h>
 #include <unordered_set>
@@ -304,7 +305,7 @@ EvaluationResults forward(TrainingBundle* tb, Processor* p, const Dataset* d,
         const vector<double>& neuron_pre_charges = p->neuron_pre_charges();
         for (size_t neuron = 0; neuron < nc->total_neurons; neuron++) {
             tb->spikes[t][neuron] = neuron_counts[neuron];
-            tb->v_pre[t][neuron]  = neuron_pre_charges[neuron];
+            tb->v_pre[t][neuron] = (neuron_pre_charges[neuron] * (2.0 / 256.0));
 
             if (neuron >= nc->layer_offsets[2]) {
                 tb->spike_logits[neuron - nc->layer_offsets[2]] +=
@@ -468,7 +469,7 @@ void weight_updates(const NetworkConfiguration* nc, const Dataset* d,
                 weights[i][j] = -1.0;
             }
             weights[i][j] = quantize(weights[i][j], 256, -127, 127);
-            e->set("Weight", weights[i][j]);
+            e->set("Weight", weights[i][j] / (2.0 / 256.0));
         }
     }
 }
@@ -825,7 +826,7 @@ int main(int argc, char* argv[]) {
                                    output_neurons};
 
     NetworkConfiguration nc = {
-        .n = n,
+        .n = n_discrete,
 
         .input_neurons  = input_neurons,
         .hidden_neurons = hidden_neurons,
@@ -898,18 +899,19 @@ int main(int argc, char* argv[]) {
     double b2_t = 1.0;
 
     for (size_t i = 0; i < total_neurons; i++) {
-        thresholds[i] = n->get_node(i)->get("Threshold");
-        weights[i].reserve(n->get_node(i)->incoming.size());
-        delays[i].reserve(n->get_node(i)->incoming.size());
+        thresholds[i] =
+            n_discrete->get_node(i)->get("Threshold") * (2.0 / 256.0);
+        weights[i].reserve(n_discrete->get_node(i)->incoming.size());
+        delays[i].reserve(n_discrete->get_node(i)->incoming.size());
 
-        m_weights[i].resize(n->get_node(i)->incoming.size());
-        v_weights[i].resize(n->get_node(i)->incoming.size());
-        delta_W[i].resize(n->get_node(i)->incoming.size());
+        m_weights[i].resize(n_discrete->get_node(i)->incoming.size());
+        v_weights[i].resize(n_discrete->get_node(i)->incoming.size());
+        delta_W[i].resize(n_discrete->get_node(i)->incoming.size());
 
         for (size_t j = 0; j < n->get_node(i)->incoming.size(); j++) {
-            Edge* e = n->get_node(i)->incoming[j];
+            Edge* e = n_discrete->get_node(i)->incoming[j];
 
-            weights[i].push_back(e->get("Weight"));
+            weights[i].push_back(e->get("Weight") * (2.0 / 256.0));
             delays[i].push_back(e->get("Delay"));
         }
     }
@@ -1060,23 +1062,22 @@ int main(int argc, char* argv[]) {
             }
         }
 
-        double discrete_test_loss = 0.0;
-        double discrete_test_acc  = 0.0;
+        double fp_test_loss = 0.0;
+        double fp_test_acc  = 0.0;
 
-        // Discrete
+        // Floating point
         {
             // Update weights
             for (size_t i = 0; i < nc.total_neurons; i++) {
-                for (size_t j = 0; j < n_discrete->get_node(i)->incoming.size();
-                     j++) {
-                    Edge* e = n_discrete->get_node(i)->incoming[j];
+                for (size_t j = 0; j < n->get_node(i)->incoming.size(); j++) {
+                    Edge* e = n->get_node(i)->incoming[j];
 
-                    e->set("Weight", weights[i][j] / (2.0 / 256.0));
+                    e->set("Weight", weights[i][j]);
                 }
             }
 
             Processor* p = NULL;
-            load_network(&p, n_discrete);
+            load_network(&p, n);
 
             for (int i = 0; i < test.observations; i++) {
                 p->clear_activity();
@@ -1101,21 +1102,21 @@ int main(int argc, char* argv[]) {
                 }
 
                 if (max_idx == (int)test.labels[i]) {
-                    discrete_test_acc++;
+                    fp_test_acc++;
                 }
 
                 vector<double> softmax_out(logits.size());
                 softmax(logits.data(), softmax_out.data(), logits.size());
 
-                discrete_test_loss -=
+                fp_test_loss -=
                     log(softmax_out[(size_t)test.labels[i]] + ADAM_EPS);
             }
 
             delete p;
         }
 
-        discrete_test_loss /= test.observations;
-        discrete_test_acc /= test.observations;
+        fp_test_loss /= test.observations;
+        fp_test_acc /= test.observations;
 
         printf(
             "Epoch: %4zu/%zu, Loss: %10g (Best: %10g), Acc: %10g (Best: %10g), "
@@ -1124,8 +1125,8 @@ int main(int argc, char* argv[]) {
             epoch + 1, epochs, epoch_loss / (double)train.observations,
             best_train_loss, correct / (double)train.observations,
             best_train_acc, test_loss, best_test_loss, test_correct,
-            best_test_acc, abs(test_loss - discrete_test_loss),
-            abs(test_correct - discrete_test_acc));
+            best_test_acc, abs(test_loss - fp_test_loss),
+            abs(test_correct - fp_test_acc));
 
         if (network_json_out) {
             json j;
