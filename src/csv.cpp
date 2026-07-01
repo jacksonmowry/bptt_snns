@@ -199,6 +199,96 @@ void load_dataset(const char* data_path, const char* labels_path,
     return;
 }
 
+void load_dataset_single(const char* data_path, const char* labels_path,
+                         Dataset* out) {
+    *out           = {NULL, NULL, NULL, NULL, 0, 0, 0, 0};
+    FILE* f_data   = fopen(data_path, "r");
+    FILE* f_labels = fopen(labels_path, "r");
+    if (f_data == NULL || f_labels == NULL) {
+        if (f_data != NULL) {
+            fclose(f_data);
+        }
+        if (f_labels != NULL) {
+            fclose(f_labels);
+        }
+        return;
+    }
+
+    char line[4096 * 16];
+    int rows = 0;
+    while (fgets(line, sizeof(line), f_labels) != NULL) {
+        rows++;
+    }
+    out->observations = rows;
+
+    int cols = 0;
+    if (fgets(line, sizeof(line), f_data) != NULL) {
+        for (int i = 0; line[i] != '\0' && line[i] != '\n'; i++) {
+            if (line[i] == ',') {
+                cols++;
+            }
+        }
+        cols++;
+    }
+    out->cols = cols;
+
+    out->data     = (double*)malloc(rows * cols * sizeof(double));
+    out->labels   = (double*)malloc(rows * sizeof(double));
+    out->min_vals = (double*)malloc(cols * sizeof(double));
+    out->max_vals = (double*)malloc(cols * sizeof(double));
+    if (out->data == NULL || out->labels == NULL || out->min_vals == NULL ||
+        out->max_vals == NULL) {
+        free(out->data);
+        free(out->labels);
+        free(out->min_vals);
+        free(out->max_vals);
+        fclose(f_data);
+        fclose(f_labels);
+        return;
+    }
+
+    rewind(f_labels);
+    rewind(f_data);
+    for (int i = 0; i < rows; i++) {
+        if (fgets(line, sizeof(line), f_labels) != NULL) {
+            out->labels[i] = atof(line);
+        }
+        if (fgets(line, sizeof(line), f_data) != NULL) {
+            char* token = strtok(line, ",");
+            for (int j = 0; j < cols; j++) {
+                if (token != NULL) {
+                    out->data[i * cols + j] = atof(token);
+                    token                   = strtok(NULL, ",");
+                }
+            }
+        }
+    }
+
+    fclose(f_data);
+    fclose(f_labels);
+
+    // Min/Max calcs
+    for (int col = 0; col < cols; col++) {
+        out->min_vals[col] = out->data[col];
+        out->max_vals[col] = out->data[col];
+    }
+
+    for (int row = 1; row < out->observations; row++) {
+        for (int col = 0; col < cols; col++) {
+            double val = out->data[row * cols + col];
+
+            if (val < out->min_vals[col]) {
+                out->min_vals[col] = val;
+            }
+            if (val > out->max_vals[col]) {
+                out->max_vals[col] = val;
+            }
+        }
+    }
+
+    return;
+}
+
 void load_dataset_2d(const char* data_path, const char* labels_path,
                      double train_percent, Dataset* train, Dataset* test) {
     assert(train_percent >= 0.0 && train_percent <= 1.0);

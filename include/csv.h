@@ -16,5 +16,8 @@ typedef struct {
 void load_dataset(const char* data_path, const char* labels_path,
                   double train_percent, Dataset* train, Dataset* test);
 
+void load_dataset_single(const char* data_path, const char* labels_path,
+                         Dataset* out);
+
 void load_dataset_2d(const char* data_path, const char* labels_path,
                      double train_percent, Dataset* train, Dataset* test);

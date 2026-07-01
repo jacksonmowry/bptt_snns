@@ -450,6 +450,11 @@ void weight_updates(const NetworkConfiguration* nc, const Dataset* d,
 
             weights[i][j] -= lr * mW_hat / (sqrt(vW_hat + ADAM_EPS));
             weights[i][j] -= lr * decay_rate * weights[i][j];
+            if (weights[i][j] > 1.0) {
+                weights[i][j] = 1.0;
+            } else if (weights[i][j] < -1.0) {
+                weights[i][j] = -1.0;
+            }
             e->set("Weight", weights[i][j]);
         }
     }
@@ -490,8 +495,8 @@ void* worker(void* arg) {
 
         while (my_work_idx < my_max) {
             EvaluationResults er = forward(
-                &ta->tb, p, ta->train_p ? ta->train : ta->test,
-                ta->train_p ? ta->order[my_work_idx] : my_work_idx, ta->nc);
+                &ta->tb, p, *ta->train_p ? ta->train : ta->test,
+                *ta->train_p ? ta->order[my_work_idx] : my_work_idx, ta->nc);
             ta->loss += er.loss;
             ta->correct += er.correct;
             ta->processed++;
@@ -524,6 +529,10 @@ static void print_usage(const char* prog) {
     fprintf(stderr, "  -n, --network_json     FILE    Network JSON path\n");
     fprintf(stderr, "  -d, --data_file        FILE    Data file path\n");
     fprintf(stderr, "  -l, --label_file       FILE    Label file path\n");
+    fprintf(stderr, "  -l, --train_data_file  FILE    Train data file path\n");
+    fprintf(stderr, "  -l, --train_label_file FILE    Train label file path\n");
+    fprintf(stderr, "  -l, --test_data_file   FILE    Test data file path\n");
+    fprintf(stderr, "  -l, --test_label_file  FILE    Test label file path\n");
     fprintf(stderr,
             "  -b, --timeseries               Enable timeseries mode\n");
     fprintf(stderr, "  -S, --connectivity     FLOAT   Chance each neuron is "
@@ -549,6 +558,10 @@ int main(int argc, char* argv[]) {
     char* network_json_file = NULL;
     char* data_file         = NULL;
     char* label_file        = NULL;
+    char* train_data_file   = NULL;
+    char* train_label_file  = NULL;
+    char* test_data_file    = NULL;
+    char* test_label_file   = NULL;
     bool timeseries         = false;
     double connectivity     = 0.2;
     double learning_rate    = 0.008;
@@ -568,6 +581,10 @@ int main(int argc, char* argv[]) {
         {"network_json", required_argument, 0, 'n'},
         {"data_file", required_argument, 0, 'd'},
         {"label_file", required_argument, 0, 'l'},
+        {"train_data_file", required_argument, 0, 'a'},
+        {"train_label_file", required_argument, 0, 'i'},
+        {"test_data_file", required_argument, 0, 'j'},
+        {"test_label_file", required_argument, 0, 'k'},
         {"timeseries", no_argument, 0, 'b'},
         {"connectivity", required_argument, 0, 'c'},
         {"learning_rate", required_argument, 0, 'r'},
@@ -589,7 +606,8 @@ int main(int argc, char* argv[]) {
     int c;
     char* endptr;
 
-    while ((c = getopt_long(argc, argv, "n:d:l:b:c:r:e:u:o:t:H:s:hp:B:P:N:T:",
+    while ((c = getopt_long(argc, argv,
+                            "n:d:l:a:i:j:k:b:c:r:e:u:o:t:H:s:hp:B:P:N:T:",
                             long_options, NULL)) != -1) {
         switch (c) {
         case 'n':
@@ -600,6 +618,18 @@ int main(int argc, char* argv[]) {
             break;
         case 'l':
             label_file = optarg;
+            break;
+        case 'a':
+            train_data_file = optarg;
+            break;
+        case 'i':
+            train_label_file = optarg;
+            break;
+        case 'j':
+            test_data_file = optarg;
+            break;
+        case 'k':
+            test_label_file = optarg;
             break;
         case 'b':
             timeseries = true;
@@ -707,9 +737,20 @@ int main(int argc, char* argv[]) {
         }
     }
 
-    if (network_json_file == NULL || data_file == NULL || label_file == NULL) {
-        fprintf(stderr, "Error: --network_json, --data_file, and --label_file "
-                        "are required.\n");
+    // Can only have data/label files OR train/test data/label files
+    // This also includes the training_percentage parameter
+    if (network_json_file == NULL) {
+        fprintf(stderr, "Error: --network_json is required.\n");
+        print_usage(argv[0]);
+        return 1;
+    }
+
+    if (!(data_file && label_file) && !(train_data_file && train_label_file &&
+                                        test_data_file && test_label_file)) {
+        fprintf(stderr,
+                "Error: either (--data_file AND --label_file) OR "
+                "(--train_data_file AND --train_label_file AND "
+                "--test_data_file AND --test_label_file) are required.\n");
         print_usage(argv[0]);
         return 1;
     }
@@ -721,9 +762,16 @@ int main(int argc, char* argv[]) {
     Dataset test;
 
     if (timeseries) {
+        assert(false);
         load_dataset_2d(data_file, label_file, training_percent, &train, &test);
     } else {
-        load_dataset(data_file, label_file, training_percent, &train, &test);
+        if (data_file && label_file) {
+            load_dataset(data_file, label_file, training_percent, &train,
+                         &test);
+        } else {
+            load_dataset_single(train_data_file, train_label_file, &train);
+            load_dataset_single(test_data_file, test_label_file, &test);
+        }
     }
 
     size_t train_labels = label_count(&train);
