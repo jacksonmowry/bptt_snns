@@ -17,3 +17,755 @@ You'll need both data/label CSVs, the application will parse everything for you.
 bin/bptt_learning --network_json networks/risp_f_emptynet.json --data_file mnist_data.csv --label_file mnist_label.csv --learning_rate 0.0084 --decay_rate 0.0001 --tau 0.95 --rho 1.4 --timesteps 32 --hidden_neurons 64 --epochs 1000 --batch_size 10 --connectivity 0.1
 #+end_src
 
+* Network Generation
+Networks are create with the following parameters
+- Input neurons equal to =2 * data_columns=
+- Hidden neurons equal to =--hidden_neurons=
+- Output neurons equal to =len(unique(labels))=
+- Synapses are generated between any 2 neurons (including self connections) with probability =--connectivity=
+  - Synapses take on a random delay between =1= and =7=
+  - Synapse weights are initialized to small random values normal(0.0, 0.1) for floating-point, and a scaled version for discrete
+  - Floating-point synaptic weights are currently bound to [-1.0, 1.0] to match discrete network behavior, through this behavior should likely be removed
+
+* Network Training
+- Currently only synaptic weights are trained
+- Loss values are calculated from categorical cross-entropy, utilizing spike rate as the decoded value between [0.0, 1.0] 
+- Input values are encoded on 2 neurons, with spikes mirroring each other
+
+* Training A Discrete (integer only) SNN
+Make the app.
+#+begin_src shell
+make CFLAGS='-O3'
+#+end_src
+
+Download a dataset.
+#+begin_src shell
+python -m venv venv
+pip install pandas numpy scikit-learn
+python scripts/datasets.py -d data/ breast_cancer
+deactivate
+#+end_src
+
+Train your network. The app automatically detects if you're training a discrete network (based on the =--network_json= parameter) and will enable quantization based on the =min_weight= and =max_weight= parameters.
+#+begin_src shell
+bin/bptt_learning \
+    --network_json networks/risp_127.json \
+    --data_file data/breast_cancer_data.csv \
+    --label_file data/breast_cancer_label.csv \
+    --timesteps 32 \
+    --hidden_neurons 16 \
+    --connectivity 0.2 \
+    --epochs 1000 \
+    --batch_size 100 \
+    --threads 4 \
+    --decay_rate 0.01 \
+    --network_json_out networks/breast_cancer.json
+#+end_src
+
+Example training run.
+#+begin_src shell
+Neurons: 78, Synapses: 1214
+Beginning training
+Epoch:    1/1000, Loss:   0.693357 (Best:   0.693357), Acc:   0.397802 (Best:   0.397802), TestLoss:   0.693147 (Best:   0.693147), TestAcc:    0.27193 (Best:    0.27193)
+Epoch:    2/1000, Loss:    0.69159 (Best:    0.69159), Acc:   0.479121 (Best:   0.479121), TestLoss:   0.673843 (Best:   0.673843), TestAcc:    0.77193 (Best:    0.77193)
+Epoch:    3/1000, Loss:   0.676799 (Best:   0.676799), Acc:   0.621978 (Best:   0.621978), TestLoss:   0.649092 (Best:   0.649092), TestAcc:    0.72807 (Best:    0.77193)
+
+....
+
+Epoch:  998/1000, Loss:   0.393641 (Best:   0.386984), Acc:   0.964835 (Best:   0.982418), TestLoss:   0.372039 (Best:   0.371765), TestAcc:   0.991228 (Best:          1)
+Epoch:  999/1000, Loss:   0.392154 (Best:   0.386984), Acc:   0.969231 (Best:   0.982418), TestLoss:   0.375412 (Best:   0.371765), TestAcc:   0.991228 (Best:          1)
+Epoch: 1000/1000, Loss:   0.391129 (Best:   0.386984), Acc:   0.973626 (Best:   0.982418), TestLoss:   0.375193 (Best:   0.371765), TestAcc:   0.991228 (Best:          1)
+#+end_src
+
+Let's look at the distribution of weights that were trained.
+#+begin_src shell
+jq '.Edges[].values[0]' networks/breast_cancer.json | ministat
+#+end_src
+
+#+begin_src shell
+x <stdin>
++----------------------------------------------------------------------------------------------------+
+|                                                  x                                                 |
+|                                                  x                                                 |
+|                                                  x                                                 |
+|                                                  x                                                 |
+|                                                  x                                                 |
+|                                                  x                                                 |
+|                                                  x                                                 |
+|                                                  x  x                                              |
+|                                                  x  x                                              |
+|                                                  x  x                                              |
+|                                                  x  x                                              |
+|                                                  x  x                                              |
+|                                                  x  x                                              |
+|                                                  x  x                                              |
+|                                              x   x  x                                              |
+|                                              x   x  x                                              |
+|                                              x   xx x                                              |
+|                                              x   xx x                                              |
+|                                              x x xx x                                              |
+|                                              x x xx x                                              |
+|                                              x x xx x                                              |
+|                                              x x xx x                                              |
+|                                              x x xx x                                              |
+|                                              x x xx x                                              |
+|                                              x x xx x                                              |
+|                                              x x xx x                                              |
+|                                            x x x xx x                                              |
+|                                            x x x xx x x                                            |
+|                                            x x x xx x x                                            |
+|                                            x x x xx x x                                            |
+|                                            x x x xx x x                                            |
+|                                            x x x xx x x                                            |
+|                                            x x x xx x x                                            |
+|                                            x x x xxxx x                                            |
+|                                            x x x xxxx x                                            |
+|                                            x x xxxxxx x                                            |
+|                                            x x xxxxxx x                                            |
+|                                            x x xxxxxx x                                            |
+|                                            x x xxxxxx x                                            |
+|                                            x x xxxxxx x                                            |
+|                                            xxx xxxxxx x                                            |
+|                                            xxx xxxxxx x                                            |
+|                                            xxx xxxxxx x                                            |
+|                                            xxxxxxxxxx x                                            |
+|                                          x xxxxxxxxxx x                                            |
+|                                          x xxxxxxxxxx x                                            |
+|                                          x xxxxxxxxxx x                                            |
+|                                          xxxxxxxxxxxx x                                            |
+|                                          xxxxxxxxxxxx x                                            |
+|                                          xxxxxxxxxxxx x                                            |
+|                                          xxxxxxxxxxxx x x                                          |
+|                                          xxxxxxxxxxxx x x                                          |
+|                                          xxxxxxxxxxxx x x                                          |
+|                                          xxxxxxxxxxxx x x                                          |
+|                                          xxxxxxxxxxxx x x                                          |
+|                                          xxxxxxxxxxxxxx x                                          |
+|                                          xxxxxxxxxxxxxx x                                          |
+|                                          xxxxxxxxxxxxxx x                                          |
+|                                          xxxxxxxxxxxxxx x                                          |
+|                                         xxxxxxxxxxxxxxx x                                          |
+|                                         xxxxxxxxxxxxxxx x                                          |
+|                                         xxxxxxxxxxxxxxx x x                                        |
+|                                         xxxxxxxxxxxxxxxxxxx                                        |
+|                                        xxxxxxxxxxxxxxxxxxxxx                                       |
+|                                        xxxxxxxxxxxxxxxxxxxxx                                       |
+|                                        xxxxxxxxxxxxxxxxxxxxx                                       |
+|                                        xxxxxxxxxxxxxxxxxxxxx                                       |
+|                                     x xxxxxxxxxxxxxxxxxxxxxx                                       |
+|                                     x xxxxxxxxxxxxxxxxxxxxxx                                       |
+|                                     x xxxxxxxxxxxxxxxxxxxxxx                                       |
+|                                   x xxxxxxxxxxxxxxxxxxxxxxxx                                       |
+|                                   xxxxxxxxxxxxxxxxxxxxxxxxxx                                       |
+|                                   xxxxxxxxxxxxxxxxxxxxxxxxxx x                                     |
+|                                   xxxxxxxxxxxxxxxxxxxxxxxxxx x                                     |
+|                                  xxxxxxxxxxxxxxxxxxxxxxxxxxx x      x                              |
+|                                  xxxxxxxxxxxxxxxxxxxxxxxxxxx x      x                             x|
+|                                  xxxxxxxxxxxxxxxxxxxxxxxxxxx x      x                             x|
+|x                        x      xxxxxxxxxxxxxxxxxxxxxxxxxxxxx x      x                             x|
+|x                        x    xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx x      x                             x|
+|x                      x x    xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx x xx   x x  x                        x|
+|x                      x xx   xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx   x x  x x                      x|
+|x                 x  x x xx x xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx  xxxx xx x                      x|
+|x                xx xx x xx xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx xxxxxxx x        x x         x x|
+|x       x x x x  xx xx x xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx    x xx      x xxx|
+|xx x    xxxxxxx xxxxxx x xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx xxx xxx  xx xxxxx|
+|                                    |____________A____________|                                     |
++----------------------------------------------------------------------------------------------------+
+    N           Min           Max        Median           Avg        Stddev
+x 1271          -127           127            -1    -1.0668765     33.698259
+#+end_src
+
+How many weights ended up becoming zero?
+#+begin_src shell
+jq '.Edges[].values[0]' networks/breast_cancer.json | awk '{if ($1 == 0.0) { count++ }} END {print count}'
+#+end_src
+
+#+begin_src shell
+22
+#+end_src
+
+We also see fairly good CPU utilization across our 4 cores, the output of =/usr/bin/time -v=. 388% across 4 core comes out to 97% efficiency, with 400% being perfect.
+#+begin_src shell
+Command being timed: "bin/bptt_learning --network_json networks/risp_127.json --data_file data/breast_cancer_data.csv --label_file data/breast_cancer_label.csv --timesteps 32 --hidden_neurons 16 --connectivity 0.2 --epochs 1000 --batch_size 100 --threads 4 --decay_rate 0.01 --network_json_out networks/breast_cancer.json"
+        User time (seconds): 25.52
+        System time (seconds): 0.01
+        Percent of CPU this job got: 388%
+        Elapsed (wall clock) time (h:mm:ss or m:ss): 0:06.57
+        Average shared text size (kbytes): 0
+        Average unshared data size (kbytes): 0
+        Average stack size (kbytes): 0
+#+end_src
+
+Increasing the batch size to 500 (larger than the total number of training samples, therefore this value is capped) increases CPU utilization to 392% or 98% efficiency.
+
+* Training a floating-point SNN
+#+begin_src shell
+bin/bptt_learning \
+    --network_json networks/risp_f_emptynet.json \
+    --data_file data/digits_data.csv \
+    --label_file data/digits_label.csv \
+    --timesteps 32 \
+    --hidden_neurons 48 \
+    --connectivity 0.35 \
+    --epochs 100 \
+    --batch_size 100 \
+    --threads 10 \
+    --network_json_out networks/digits.json \
+    --decay_rate 0.0001 \
+    --learning_rate 0.01
+#+end_src
+
+#+begin_src shell
+Neurons: 186, Synapses: 12074
+Beginning training
+Epoch:    1/100, Loss:    2.27402 (Best:    2.27402), Acc:   0.175365 (Best:   0.175365), TestLoss:    2.21607 (Best:    2.21607), TestAcc:   0.177778 (Best:   0.177778)
+Epoch:    2/100, Loss:    2.14063 (Best:    2.14063), Acc:   0.475992 (Best:   0.475992), TestLoss:    2.07422 (Best:    2.07422), TestAcc:        0.8 (Best:        0.8)
+Epoch:    3/100, Loss:    2.01227 (Best:    2.01227), Acc:   0.820459 (Best:   0.820459), TestLoss:    1.94766 (Best:    1.94766), TestAcc:   0.783333 (Best:        0.8)
+
+...
+
+Epoch:   98/100, Loss:    1.53054 (Best:    1.53054), Acc:   0.999304 (Best:          1), TestLoss:    1.56667 (Best:    1.56276), TestAcc:   0.963889 (Best:      0.975)
+Epoch:   99/100, Loss:    1.53051 (Best:    1.53051), Acc:          1 (Best:          1), TestLoss:    1.56412 (Best:    1.56276), TestAcc:   0.966667 (Best:      0.975)
+Epoch:  100/100, Loss:    1.53007 (Best:    1.53007), Acc:   0.999304 (Best:          1), TestLoss:    1.56185 (Best:    1.56185), TestAcc:   0.969444 (Best:      0.975)
+#+end_src
+
+#+begin_src shell
+jq '.Edges[].values[0]' networks/digits.json | ministat -w 100
+#+end_src
+
+#+begin_src shell
+x <stdin>
++----------------------------------------------------------------------------------------------------+
+|                                                 xx                                                 |
+|                                                 xx                                                 |
+|                                                 xx                                                 |
+|                                                 xx                                                 |
+|                                                 xx                                                 |
+|                                                 xx                                                 |
+|                                                 xx                                                 |
+|                                                 xx                                                 |
+|                                                 xx                                                 |
+|                                                 xx                                                 |
+|                                                 xx                                                 |
+|                                                 xx                                                 |
+|                                                 xx                                                 |
+|                                                 xx                                                 |
+|                                                 xx                                                 |
+|                                                 xx                                                 |
+|                                                 xx                                                 |
+|                                                 xx                                                 |
+|                                                 xx                                                 |
+|                                                 xx                                                 |
+|                                                 xx                                                 |
+|                                                xxx                                                 |
+|                                                xxx                                                 |
+|                                                xxx                                                 |
+|                                                xxx                                                 |
+|                                                xxx                                                 |
+|                                                xxx                                                 |
+|                                                xxx                                                 |
+|                                                xxx                                                 |
+|                                                xxx                                                 |
+|                                                xxx                                                 |
+|                                                xxx                                                 |
+|                                                xxx                                                 |
+|                                                xxx                                                 |
+|                                                xxx                                                 |
+|                                                xxx x                                               |
+|                                                xxxxx                                               |
+|                                                xxxxx                                               |
+|                                                xxxxx                                               |
+|                                                xxxxx                                               |
+|                                                xxxxx                                               |
+|                                                xxxxx                                               |
+|                                                xxxxx                                               |
+|                                                xxxxx                                               |
+|                                                xxxxx                                               |
+|                                                xxxxx                                               |
+|                                                xxxxx                                               |
+|                                                xxxxx                                               |
+|                                                xxxxx                                               |
+|                                                xxxxxx                                              |
+|                                                xxxxxx                                              |
+|                                                xxxxxx                                              |
+|                                                xxxxxx                                              |
+|                                              xxxxxxxx                                              |
+|                                              xxxxxxxx                                              |
+|                                              xxxxxxxx                                              |
+|                                              xxxxxxxx                                              |
+|                                              xxxxxxxx                                              |
+|                                              xxxxxxxx                                              |
+|                                              xxxxxxxx                                              |
+|                                              xxxxxxxx                                              |
+|                                              xxxxxxxx                                              |
+|                                              xxxxxxxx                                              |
+|                                              xxxxxxxx                                              |
+|                                              xxxxxxxx                                              |
+|                                              xxxxxxxx                                              |
+|                                              xxxxxxxx                                              |
+|                                              xxxxxxxx                                              |
+|                                              xxxxxxxx                                              |
+|                                              xxxxxxxx                                              |
+|                                              xxxxxxxx                                              |
+|                                              xxxxxxxx                                              |
+|                                              xxxxxxxx                                              |
+|                                              xxxxxxxx                                              |
+|                                              xxxxxxxx                                              |
+|                                              xxxxxxxx                                              |
+|                                              xxxxxxxx                                              |
+|                                              xxxxxxxx                                              |
+|                                              xxxxxxxx                                              |
+|                                              xxxxxxxx                                              |
+|                                              xxxxxxxx                                              |
+|                                              xxxxxxxx                                              |
+|                                              xxxxxxxx                                              |
+|                                              xxxxxxxx                                              |
+|                                              xxxxxxxx                                              |
+|                                              xxxxxxxx                                              |
+|                                              xxxxxxxx                                              |
+|                                              xxxxxxxx                                              |
+|                                              xxxxxxxx                                              |
+|                                              xxxxxxxx                                              |
+|                                              xxxxxxxx                                              |
+|                                              xxxxxxxx                                              |
+|                                              xxxxxxxx                                              |
+|                                              xxxxxxxx                                              |
+|                                              xxxxxxxx                                              |
+|                                              xxxxxxxx                                              |
+|                                              xxxxxxxx                                              |
+|                                              xxxxxxxx                                              |
+|                                              xxxxxxxx                                              |
+|                                              xxxxxxxx                                              |
+|                                              xxxxxxxx                                              |
+|                                              xxxxxxxx                                              |
+|                                             xxxxxxxxx                                              |
+|                                             xxxxxxxxx                                              |
+|                                             xxxxxxxxx                                              |
+|                                             xxxxxxxxx                                              |
+|                                             xxxxxxxxx                                              |
+|                                             xxxxxxxxx                                              |
+|                                             xxxxxxxxx                                              |
+|                                             xxxxxxxxx                                              |
+|                                             xxxxxxxxx                                              |
+|                                             xxxxxxxxx                                              |
+|                                             xxxxxxxxx                                              |
+|                                             xxxxxxxxx                                              |
+|                                             xxxxxxxxx                                              |
+|                                             xxxxxxxxx                                              |
+|                                             xxxxxxxxx                                              |
+|                                             xxxxxxxxx                                              |
+|                                             xxxxxxxxx                                              |
+|                                             xxxxxxxxx                                              |
+|                                             xxxxxxxxx                                              |
+|                                             xxxxxxxxx                                              |
+|                                             xxxxxxxxx                                              |
+|                                             xxxxxxxxx                                              |
+|                                             xxxxxxxxx                                              |
+|                                             xxxxxxxxx                                              |
+|                                             xxxxxxxxx                                              |
+|                                             xxxxxxxxx                                              |
+|                                             xxxxxxxxx                                              |
+|                                             xxxxxxxxx                                              |
+|                                             xxxxxxxxx                                              |
+|                                             xxxxxxxxx                                              |
+|                                             xxxxxxxxx                                              |
+|                                             xxxxxxxxx                                              |
+|                                             xxxxxxxxxx                                             |
+|                                             xxxxxxxxxx                                             |
+|                                             xxxxxxxxxxx                                            |
+|                                             xxxxxxxxxxx                                            |
+|                                             xxxxxxxxxxx                                            |
+|                                             xxxxxxxxxxx                                            |
+|                                             xxxxxxxxxxx                                            |
+|                                             xxxxxxxxxxx                                            |
+|                                             xxxxxxxxxxx                                            |
+|                                            xxxxxxxxxxxx                                            |
+|                                            xxxxxxxxxxxx                                            |
+|                                            xxxxxxxxxxxx                                            |
+|                                            xxxxxxxxxxxx                                            |
+|                                            xxxxxxxxxxxx                                            |
+|                                            xxxxxxxxxxxx                                            |
+|                                            xxxxxxxxxxxx                                            |
+|                                            xxxxxxxxxxxx                                            |
+|                                            xxxxxxxxxxxx                                            |
+|                                            xxxxxxxxxxxx                                            |
+|                                            xxxxxxxxxxxx                                            |
+|                                            xxxxxxxxxxxx                                            |
+|                                            xxxxxxxxxxxx                                            |
+|                                            xxxxxxxxxxxx                                            |
+|                                            xxxxxxxxxxxx                                            |
+|                                            xxxxxxxxxxxx                                            |
+|                                            xxxxxxxxxxxx                                            |
+|                                            xxxxxxxxxxxx                                            |
+|                                            xxxxxxxxxxxx                                            |
+|                                            xxxxxxxxxxxx                                            |
+|                                            xxxxxxxxxxxx                                            |
+|                                            xxxxxxxxxxxx                                            |
+|                                            xxxxxxxxxxxx                                            |
+|                                            xxxxxxxxxxxx                                            |
+|                                            xxxxxxxxxxxx                                            |
+|                                            xxxxxxxxxxxx                                            |
+|                                            xxxxxxxxxxxx                                            |
+|                                            xxxxxxxxxxxx                                            |
+|                                            xxxxxxxxxxxx                                            |
+|                                            xxxxxxxxxxxx                                            |
+|                                            xxxxxxxxxxxx                                            |
+|                                            xxxxxxxxxxxx                                            |
+|                                            xxxxxxxxxxxx                                            |
+|                                            xxxxxxxxxxxx                                            |
+|                                            xxxxxxxxxxxx                                            |
+|                                            xxxxxxxxxxxx                                            |
+|                                            xxxxxxxxxxxx                                            |
+|                                            xxxxxxxxxxxx                                            |
+|                                            xxxxxxxxxxxx                                            |
+|                                            xxxxxxxxxxxx                                            |
+|                                            xxxxxxxxxxxx                                            |
+|                                            xxxxxxxxxxxx                                            |
+|                                            xxxxxxxxxxxx                                            |
+|                                            xxxxxxxxxxxx                                            |
+|                                           xxxxxxxxxxxxx                                            |
+|                                           xxxxxxxxxxxxx                                            |
+|                                           xxxxxxxxxxxxx                                            |
+|                                           xxxxxxxxxxxxx                                            |
+|                                           xxxxxxxxxxxxx                                            |
+|                                           xxxxxxxxxxxxx                                            |
+|                                           xxxxxxxxxxxxx                                            |
+|                                           xxxxxxxxxxxxx                                            |
+|                                           xxxxxxxxxxxxx                                            |
+|                                           xxxxxxxxxxxxx                                            |
+|                                           xxxxxxxxxxxxxx                                           |
+|                                           xxxxxxxxxxxxxx                                           |
+|                                           xxxxxxxxxxxxxx                                           |
+|                                           xxxxxxxxxxxxxx                                           |
+|                                           xxxxxxxxxxxxxx                                           |
+|                                           xxxxxxxxxxxxxx                                           |
+|                                           xxxxxxxxxxxxxx                                           |
+|                                           xxxxxxxxxxxxxx                                           |
+|                                           xxxxxxxxxxxxxx                                           |
+|                                           xxxxxxxxxxxxxx                                           |
+|                                          xxxxxxxxxxxxxxx                                           |
+|                                          xxxxxxxxxxxxxxx                                           |
+|                                          xxxxxxxxxxxxxxx                                           |
+|                                          xxxxxxxxxxxxxxx                                           |
+|                                          xxxxxxxxxxxxxxx                                           |
+|                                          xxxxxxxxxxxxxxx                                           |
+|                                          xxxxxxxxxxxxxxxx                                          |
+|                                          xxxxxxxxxxxxxxxx                                          |
+|                                          xxxxxxxxxxxxxxxx                                          |
+|                                          xxxxxxxxxxxxxxxx                                          |
+|                                          xxxxxxxxxxxxxxxx                                          |
+|                                          xxxxxxxxxxxxxxxx                                          |
+|                                          xxxxxxxxxxxxxxxx                                          |
+|                                          xxxxxxxxxxxxxxxx                                          |
+|                                          xxxxxxxxxxxxxxxx                                          |
+|                                          xxxxxxxxxxxxxxxx                                          |
+|                                          xxxxxxxxxxxxxxxx                                          |
+|                                          xxxxxxxxxxxxxxxx                                          |
+|                                          xxxxxxxxxxxxxxxx                                          |
+|                                          xxxxxxxxxxxxxxxxx                                         |
+|                                          xxxxxxxxxxxxxxxxx                                         |
+|                                         xxxxxxxxxxxxxxxxxx                                         |
+|                                         xxxxxxxxxxxxxxxxxx                                         |
+|                                         xxxxxxxxxxxxxxxxxx                                         |
+|                                         xxxxxxxxxxxxxxxxxx                                         |
+|                                         xxxxxxxxxxxxxxxxxx                                         |
+|                                         xxxxxxxxxxxxxxxxxx                                         |
+|                                         xxxxxxxxxxxxxxxxxx                                         |
+|                                         xxxxxxxxxxxxxxxxxx                                         |
+|                                         xxxxxxxxxxxxxxxxxx                                         |
+|                                         xxxxxxxxxxxxxxxxxx                                         |
+|                                         xxxxxxxxxxxxxxxxxx                                         |
+|                                         xxxxxxxxxxxxxxxxxx                                         |
+|                                         xxxxxxxxxxxxxxxxxx                                         |
+|                                         xxxxxxxxxxxxxxxxxx                                         |
+|                                         xxxxxxxxxxxxxxxxxx                                         |
+|                                         xxxxxxxxxxxxxxxxxx                                         |
+|                                         xxxxxxxxxxxxxxxxxx                                         |
+|                                         xxxxxxxxxxxxxxxxxx                                         |
+|                                         xxxxxxxxxxxxxxxxxx                                         |
+|                                         xxxxxxxxxxxxxxxxxx                                         |
+|                                         xxxxxxxxxxxxxxxxxx                                         |
+|                                         xxxxxxxxxxxxxxxxxx                                         |
+|                                         xxxxxxxxxxxxxxxxxx                                         |
+|                                         xxxxxxxxxxxxxxxxxx                                         |
+|                                         xxxxxxxxxxxxxxxxxx                                         |
+|                                         xxxxxxxxxxxxxxxxxx                                         |
+|                                         xxxxxxxxxxxxxxxxxx                                         |
+|                                         xxxxxxxxxxxxxxxxxx                                         |
+|                                         xxxxxxxxxxxxxxxxxx                                         |
+|                                         xxxxxxxxxxxxxxxxxx                                         |
+|                                         xxxxxxxxxxxxxxxxxx                                         |
+|                                         xxxxxxxxxxxxxxxxxx                                         |
+|                                         xxxxxxxxxxxxxxxxxx                                         |
+|                                         xxxxxxxxxxxxxxxxxx                                         |
+|                                         xxxxxxxxxxxxxxxxxx                                         |
+|                                         xxxxxxxxxxxxxxxxxx                                         |
+|                                         xxxxxxxxxxxxxxxxxx                                         |
+|                                         xxxxxxxxxxxxxxxxxx                                         |
+|                                         xxxxxxxxxxxxxxxxxx                                         |
+|                                         xxxxxxxxxxxxxxxxxx                                         |
+|                                         xxxxxxxxxxxxxxxxxx                                         |
+|                                         xxxxxxxxxxxxxxxxxx                                         |
+|                                         xxxxxxxxxxxxxxxxxx                                         |
+|                                         xxxxxxxxxxxxxxxxxx                                         |
+|                                         xxxxxxxxxxxxxxxxxx                                         |
+|                                         xxxxxxxxxxxxxxxxxx                                         |
+|                                         xxxxxxxxxxxxxxxxxx                                         |
+|                                         xxxxxxxxxxxxxxxxxx                                         |
+|                                        xxxxxxxxxxxxxxxxxxx                                         |
+|                                        xxxxxxxxxxxxxxxxxxx                                         |
+|                                        xxxxxxxxxxxxxxxxxxx                                         |
+|                                        xxxxxxxxxxxxxxxxxxx                                         |
+|                                        xxxxxxxxxxxxxxxxxxx                                         |
+|                                        xxxxxxxxxxxxxxxxxxx                                         |
+|                                        xxxxxxxxxxxxxxxxxxx                                         |
+|                                        xxxxxxxxxxxxxxxxxxx                                         |
+|                                        xxxxxxxxxxxxxxxxxxx                                         |
+|                                        xxxxxxxxxxxxxxxxxxx                                         |
+|                                        xxxxxxxxxxxxxxxxxxx                                         |
+|                                        xxxxxxxxxxxxxxxxxxx                                         |
+|                                        xxxxxxxxxxxxxxxxxxx                                         |
+|                                        xxxxxxxxxxxxxxxxxxx                                         |
+|                                        xxxxxxxxxxxxxxxxxxx                                         |
+|                                        xxxxxxxxxxxxxxxxxxx                                         |
+|                                        xxxxxxxxxxxxxxxxxxx                                         |
+|                                        xxxxxxxxxxxxxxxxxxx                                         |
+|                                        xxxxxxxxxxxxxxxxxxxx                                        |
+|                                        xxxxxxxxxxxxxxxxxxxxx                                       |
+|                                        xxxxxxxxxxxxxxxxxxxxx                                       |
+|                                        xxxxxxxxxxxxxxxxxxxxx                                       |
+|                                        xxxxxxxxxxxxxxxxxxxxx                                       |
+|                                        xxxxxxxxxxxxxxxxxxxxx                                       |
+|                                        xxxxxxxxxxxxxxxxxxxxx                                       |
+|                                        xxxxxxxxxxxxxxxxxxxxx                                       |
+|                                        xxxxxxxxxxxxxxxxxxxxx                                       |
+|                                        xxxxxxxxxxxxxxxxxxxxx                                       |
+|                                        xxxxxxxxxxxxxxxxxxxxx                                       |
+|                                        xxxxxxxxxxxxxxxxxxxxx                                       |
+|                                        xxxxxxxxxxxxxxxxxxxxx                                       |
+|                                        xxxxxxxxxxxxxxxxxxxxx                                       |
+|                                        xxxxxxxxxxxxxxxxxxxxx                                       |
+|                                        xxxxxxxxxxxxxxxxxxxxx                                       |
+|                                        xxxxxxxxxxxxxxxxxxxxx                                       |
+|                                        xxxxxxxxxxxxxxxxxxxxx                                       |
+|                                       xxxxxxxxxxxxxxxxxxxxxxx                                      |
+|                                       xxxxxxxxxxxxxxxxxxxxxxx                                      |
+|                                       xxxxxxxxxxxxxxxxxxxxxxx                                      |
+|                                       xxxxxxxxxxxxxxxxxxxxxxx                                      |
+|                                       xxxxxxxxxxxxxxxxxxxxxxx                                      |
+|                                       xxxxxxxxxxxxxxxxxxxxxxx                                      |
+|                                       xxxxxxxxxxxxxxxxxxxxxxx                                      |
+|                                       xxxxxxxxxxxxxxxxxxxxxxx                                      |
+|                                       xxxxxxxxxxxxxxxxxxxxxxx                                      |
+|                                       xxxxxxxxxxxxxxxxxxxxxxx                                      |
+|                                       xxxxxxxxxxxxxxxxxxxxxxx                                      |
+|                                       xxxxxxxxxxxxxxxxxxxxxxx                                      |
+|                                       xxxxxxxxxxxxxxxxxxxxxxx                                      |
+|                                       xxxxxxxxxxxxxxxxxxxxxxx                                      |
+|                                       xxxxxxxxxxxxxxxxxxxxxxx                                      |
+|                                       xxxxxxxxxxxxxxxxxxxxxxx                                      |
+|                                       xxxxxxxxxxxxxxxxxxxxxxx                                      |
+|                                       xxxxxxxxxxxxxxxxxxxxxxx                                      |
+|                                       xxxxxxxxxxxxxxxxxxxxxxx                                      |
+|                                       xxxxxxxxxxxxxxxxxxxxxxx                                      |
+|                                       xxxxxxxxxxxxxxxxxxxxxxx                                      |
+|                                      xxxxxxxxxxxxxxxxxxxxxxxx                                      |
+|                                      xxxxxxxxxxxxxxxxxxxxxxxx                                      |
+|                                      xxxxxxxxxxxxxxxxxxxxxxxx                                      |
+|                                      xxxxxxxxxxxxxxxxxxxxxxxx                                      |
+|                                      xxxxxxxxxxxxxxxxxxxxxxxx                                      |
+|                                      xxxxxxxxxxxxxxxxxxxxxxxx                                      |
+|                                      xxxxxxxxxxxxxxxxxxxxxxxx                                      |
+|                                      xxxxxxxxxxxxxxxxxxxxxxxx                                      |
+|                                      xxxxxxxxxxxxxxxxxxxxxxxx                                      |
+|                                      xxxxxxxxxxxxxxxxxxxxxxxx                                      |
+|                                      xxxxxxxxxxxxxxxxxxxxxxxx                                      |
+|                                     xxxxxxxxxxxxxxxxxxxxxxxxx                                      |
+|                                     xxxxxxxxxxxxxxxxxxxxxxxxx                                      |
+|                                     xxxxxxxxxxxxxxxxxxxxxxxxx                                      |
+|                                     xxxxxxxxxxxxxxxxxxxxxxxxx                                      |
+|                                     xxxxxxxxxxxxxxxxxxxxxxxxx                                      |
+|                                     xxxxxxxxxxxxxxxxxxxxxxxxx                                      |
+|                                     xxxxxxxxxxxxxxxxxxxxxxxxx                                      |
+|                                     xxxxxxxxxxxxxxxxxxxxxxxxx                                      |
+|                                     xxxxxxxxxxxxxxxxxxxxxxxxx                                      |
+|                                     xxxxxxxxxxxxxxxxxxxxxxxxxx                                     |
+|                                     xxxxxxxxxxxxxxxxxxxxxxxxxx                                     |
+|                                     xxxxxxxxxxxxxxxxxxxxxxxxxx                                     |
+|                                     xxxxxxxxxxxxxxxxxxxxxxxxxx                                     |
+|                                     xxxxxxxxxxxxxxxxxxxxxxxxxx                                     |
+|                                     xxxxxxxxxxxxxxxxxxxxxxxxxxx                                    |
+|                                     xxxxxxxxxxxxxxxxxxxxxxxxxxx                                    |
+|                                     xxxxxxxxxxxxxxxxxxxxxxxxxxx                                    |
+|                                     xxxxxxxxxxxxxxxxxxxxxxxxxxx                                    |
+|                                     xxxxxxxxxxxxxxxxxxxxxxxxxxx                                    |
+|                                     xxxxxxxxxxxxxxxxxxxxxxxxxxx                                    |
+|                                     xxxxxxxxxxxxxxxxxxxxxxxxxxx                                    |
+|                                     xxxxxxxxxxxxxxxxxxxxxxxxxxx                                    |
+|                                     xxxxxxxxxxxxxxxxxxxxxxxxxxx                                    |
+|                                     xxxxxxxxxxxxxxxxxxxxxxxxxxx                                    |
+|                                     xxxxxxxxxxxxxxxxxxxxxxxxxxx                                    |
+|                                     xxxxxxxxxxxxxxxxxxxxxxxxxxx                                    |
+|                                     xxxxxxxxxxxxxxxxxxxxxxxxxxx                                    |
+|                                     xxxxxxxxxxxxxxxxxxxxxxxxxxx                                    |
+|                                     xxxxxxxxxxxxxxxxxxxxxxxxxxx                                    |
+|                                     xxxxxxxxxxxxxxxxxxxxxxxxxxx                                    |
+|                                     xxxxxxxxxxxxxxxxxxxxxxxxxxx                                    |
+|                                     xxxxxxxxxxxxxxxxxxxxxxxxxxx                                    |
+|                                     xxxxxxxxxxxxxxxxxxxxxxxxxxx                                    |
+|                                     xxxxxxxxxxxxxxxxxxxxxxxxxxx                                    |
+|                                     xxxxxxxxxxxxxxxxxxxxxxxxxxx                                    |
+|                                     xxxxxxxxxxxxxxxxxxxxxxxxxxx                                    |
+|                                     xxxxxxxxxxxxxxxxxxxxxxxxxxx                                    |
+|                                     xxxxxxxxxxxxxxxxxxxxxxxxxxx                                    |
+|                                     xxxxxxxxxxxxxxxxxxxxxxxxxxxx                                   |
+|                                     xxxxxxxxxxxxxxxxxxxxxxxxxxxx                                   |
+|                                     xxxxxxxxxxxxxxxxxxxxxxxxxxxx                                   |
+|                                     xxxxxxxxxxxxxxxxxxxxxxxxxxxx                                   |
+|                                    xxxxxxxxxxxxxxxxxxxxxxxxxxxxx                                   |
+|                                    xxxxxxxxxxxxxxxxxxxxxxxxxxxxx                                   |
+|                                    xxxxxxxxxxxxxxxxxxxxxxxxxxxxx                                   |
+|                                    xxxxxxxxxxxxxxxxxxxxxxxxxxxxx                                   |
+|                                    xxxxxxxxxxxxxxxxxxxxxxxxxxxxx                                   |
+|                                    xxxxxxxxxxxxxxxxxxxxxxxxxxxxx                                   |
+|                                    xxxxxxxxxxxxxxxxxxxxxxxxxxxxx                                   |
+|                                    xxxxxxxxxxxxxxxxxxxxxxxxxxxxx                                   |
+|                                    xxxxxxxxxxxxxxxxxxxxxxxxxxxxx                                   |
+|                                    xxxxxxxxxxxxxxxxxxxxxxxxxxxxx                                   |
+|                                    xxxxxxxxxxxxxxxxxxxxxxxxxxxxx                                   |
+|                                    xxxxxxxxxxxxxxxxxxxxxxxxxxxxx                                   |
+|                                    xxxxxxxxxxxxxxxxxxxxxxxxxxxxx                                   |
+|                                    xxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                                  |
+|                                   xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                                  |
+|                                   xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                                  |
+|                                   xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                                  |
+|                                   xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                                  |
+|                                  xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                                  |
+|                                  xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                                  |
+|                                  xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                                  |
+|                                  xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                                  |
+|                                  xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                                  |
+|                                  xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                                  |
+|                                  xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                                  |
+|                                  xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                                  |
+|                                  xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                                  |
+|                                  xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                                  |
+|                                  xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                                  |
+|                                  xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                                  |
+|                                  xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                                  |
+|                                  xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                                  |
+|                                  xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                                  |
+|                                  xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                                  |
+|                                  xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                                  |
+|                                  xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                                  |
+|                                  xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                                  |
+|                                  xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                                  |
+|                                  xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                                  |
+|                                  xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                                  |
+|                                  xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                                  |
+|                                  xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                                  |
+|                                  xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                                  |
+|                                  xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                                  |
+|                                  xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                                  |
+|                                  xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                                  |
+|                                 xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                                  |
+|                                 xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                                 |
+|x                                xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                                 |
+|x                                xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                                 |
+|x                              x xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                                 |
+|x                              x xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                                 |
+|x                              x xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                                 |
+|x                              x xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                                 |
+|x                              x xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                                |
+|x                              x xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                                |
+|x                              x xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                                |
+|x                              xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                                |
+|x                              xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx x                              |
+|x                              xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx x                              |
+|x                           x  xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx x                              |
+|x                           x  xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx x                              |
+|x                           x  xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx x                              |
+|x                           x  xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx x                              |
+|x                           x  xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx x                              |
+|x                           x  xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx x                              |
+|x                           x  xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx x                              |
+|x                           x  xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx x                              |
+|x                           x  xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx x                              |
+|x                           x  xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx x                              |
+|x                           x  xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                              |
+|x                           x  xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                              |
+|x                           x  xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                              |
+|x                           x  xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                              |
+|x                           x  xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx x                            |
+|x                           x  xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx x                            |
+|x                           x  xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx x                            |
+|x                           xx xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx x                            |
+|x                           xx xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx x                            |
+|x                           xx xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx x                            |
+|x                           xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                            |
+|x                           xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                           x|
+|x                           xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                           x|
+|x                           xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                          x|
+|x                           xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                          x|
+|x                          xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                          x|
+|x                          xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                          x|
+|x                          xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                          x|
+|x                         xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                          x|
+|x                         xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                          x|
+|x                         xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                          x|
+|x                         xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                          x|
+|x                         xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                         x|
+|x                         xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                         x|
+|x                         xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                         x|
+|x                         xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                         x|
+|x                         xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                         x|
+|x                         xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                         x|
+|x                         xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                         x|
+|x                       xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                         x|
+|x                       xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                         x|
+|x                       xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                         x|
+|x                       xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                         x|
+|x                       xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                       x|
+|x                       xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                       x|
+|x                       xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                      x|
+|x                       xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                      x|
+|x                       xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                      x|
+|x                     x xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                      x|
+|x                     x xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                     x|
+|x                     xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                     x|
+|x                     xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                     x|
+|x                     xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                     x|
+|x                     xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                     x|
+|x                     xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                    x|
+|x                    xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                    x|
+|x                    xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                   x|
+|x                    xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                   x|
+|x                    xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                  x|
+|x                    xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                  x|
+|x                    xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                  x|
+|x                    xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                  x|
+|x              x     xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                  x|
+|x            x x     xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                  x|
+|x            x x     xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx   x              x|
+|x           xx x  x  xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx   x              x|
+|x           xx xx xx xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx x x              x|
+|x           xx xx xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx x x              x|
+|x           xx xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx x x              x|
+|x       x   xx xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx x              x|
+|xx      xx  xx xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx x  x  x        x|
+|xx   x  xx  xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx xx x  x        x|
+|xx   x  xx  xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx xxxx  x        x|
+|xx  xx xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx xxxxx x        x|
+|xx  xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx xxxxx x  x   x x|
+|xx  xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx  x x x x|
+|xx xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx xxxxxxx|
+|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx|
+|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx|
+|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx|
+|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx|
+|                                    |____________A_____________|                                    |
++----------------------------------------------------------------------------------------------------+
+    N           Min           Max        Median           Avg        Stddev
+x 12074            -1             1 -0.0013236494 -0.0045577614    0.27270209
+#+end_src
