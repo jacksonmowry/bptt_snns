@@ -93,7 +93,10 @@ struct NetworkConfiguration {
     double min_potential;
     bool leak;
     double scale_factor;
+    size_t steps;
     bool discrete;
+    double min_weight;
+    double max_weight;
 };
 
 struct ThreadArgs {
@@ -473,7 +476,8 @@ void weight_updates(const NetworkConfiguration* nc, const Dataset* d,
             }
 
             if (nc->discrete) {
-                weights[i][j] = quantize(weights[i][j], 256, -127, 127);
+                weights[i][j] = quantize(weights[i][j], nc->steps,
+                                         nc->min_weight, nc->max_weight);
             }
 
             e->set("Weight",
@@ -857,7 +861,10 @@ int main(int argc, char* argv[]) {
         .min_potential = min_potential,
         .leak          = leak,
         .scale_factor  = scale_factor,
+        .steps         = scale,
         .discrete      = discrete,
+        .min_weight    = min_weight,
+        .max_weight    = max_weight,
     };
 
     size_t neuron_count  = 0;
