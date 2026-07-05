@@ -13,13 +13,16 @@ FR_OBJ = framework-open/obj/framework.o framework-open/obj/processor_help.o fram
 
 RISP_OBJ = framework-open/obj/risp.o framework-open/obj/risp_static.o
 
+BPTT_OBJS = obj/math_utils.o obj/data_utils.o obj/forward_pass.o \
+             obj/backward_pass.o obj/weight_updates.o obj/opencl_utils.o
+
 FRAMEWORK_DIR = framework-open/
 
 all: framework-open/bin/network_tool \
 	bin/bptt_learning
 
 # Applications ################################################################
-bin/bptt_learning: src/bptt_learning.cpp obj/csv.o $(RISP_OBJ) $(FR_LIB)
+bin/bptt_learning: src/bptt_learning.cpp obj/csv.o obj/backtrace.o $(BPTT_OBJS) $(RISP_OBJ) $(FR_LIB)
 	$(CXX) $(FR_CFLAGS) -o $@ $^
 
 # Libraries ###################################################################
@@ -44,6 +47,27 @@ framework-open/obj/risp_static.o: framework-open/src/risp_static.cpp $(FR_INC) $
 	$(CXX) -c $(FR_CFLAGS) -o framework-open/obj/risp_static.o framework-open/src/risp_static.cpp
 
 obj/csv.o: src/csv.cpp 
+	$(CXX) $(FR_CFLAGS) -o $@ -c $^
+
+obj/backtrace.o: src/backtrace.cpp 
+	$(CXX) $(FR_CFLAGS) -o $@ -c $^
+
+obj/math_utils.o: src/math_utils.cpp 
+	$(CXX) $(FR_CFLAGS) -o $@ -c $^
+
+obj/data_utils.o: src/data_utils.cpp
+	$(CXX) $(FR_CFLAGS) -o $@ -c $^
+
+obj/forward_pass.o: src/forward_pass.cpp 
+	$(CXX) $(FR_CFLAGS) -o $@ -c $^
+
+obj/backward_pass.o: src/backward_pass.cpp 
+	$(CXX) $(FR_CFLAGS) -o $@ -c $^
+
+obj/weight_updates.o: src/weight_updates.cpp 
+	$(CXX) $(FR_CFLAGS) -o $@ -c $^
+
+obj/opencl_utils.o: src/opencl_utils.cpp 
 	$(CXX) $(FR_CFLAGS) -o $@ -c $^
 
 # Utility ######################################################################

@@ -3,8 +3,18 @@
 //   decay_rate: 2.4817122209750068e-05
 //   tau: 0.8163744927232162
 //   rho: 0.5486399999186418
+#include "backtrace.h"
+#include "backward_pass.h"
+#include "bptt_types.h"
 #include "csv.h"
+#include "data_utils.h"
+#include "forward_pass.h"
 #include "framework.hpp"
+#include "math_utils.h"
+#include "opencl_utils.h"
+#include "weight_updates.h"
+#include <CL/cl.h>
+#include <CL/cl_platform.h>
 #include <Eigen/Dense>
 #include <algorithm>
 #include <cassert>
@@ -15,7 +25,6 @@
 #include <iostream>
 #include <pthread.h>
 #include <stddef.h>
-#include <unordered_set>
 
 using namespace std;
 using namespace neuro;
@@ -26,111 +35,6 @@ using nlohmann::json;
 #define BETA2 (0.999)
 #define ADAM_EPS (1.0e-8)
 #define NUM_LAYERS (3)
-
-struct TrainingBundle {
-    const vector<vector<double>>* weights;
-    vector<vector<double>> delta_W;
-    const vector<vector<int>>* delays;
-    const vector<double>* thresholds;
-
-    vector<vector<double>> spikes;
-    vector<vector<double>> v_pre;
-    vector<double> spike_logits;
-    vector<double> target;
-    vector<double> dL_ds;
-    vector<double> softmax_out;
-
-    Eigen::VectorXd future_mem_grad_;
-    Eigen::Matrix<double, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor> sgh;
-    Eigen::Matrix<double, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor> vgh;
-    Eigen::VectorXd dL_dV_;
-    Eigen::VectorXd v_pre_t_;
-    Eigen::VectorXd dV_post_dV_pre_;
-    Eigen::VectorXd dV_post_ds_t_;
-    Eigen::VectorXd ds_t_dV_pre_;
-    Eigen::VectorXd dV_leak_dV_t1_;
-    Eigen::VectorXd grad_;
-
-    double rho;
-    double tau;
-
-    TrainingBundle(size_t total_neurons, size_t timesteps,
-                   size_t output_neurons, double rho, double tau,
-                   const vector<vector<double>>* weights,
-                   const vector<vector<int>>* delays,
-                   const vector<double>* thresholds)
-        : weights(weights), delta_W(total_neurons), delays(delays),
-          thresholds(thresholds),
-          spikes(timesteps, vector<double>(total_neurons)),
-          v_pre(timesteps, vector<double>(total_neurons)),
-          spike_logits(output_neurons), target(output_neurons),
-          dL_ds(output_neurons), softmax_out(output_neurons),
-          future_mem_grad_(total_neurons), sgh(total_neurons, timesteps),
-          vgh(total_neurons, timesteps), dL_dV_(total_neurons),
-          v_pre_t_(total_neurons), dV_post_dV_pre_(total_neurons),
-          dV_post_ds_t_(total_neurons), ds_t_dV_pre_(total_neurons),
-          dV_leak_dV_t1_(total_neurons), grad_(total_neurons), rho(rho),
-          tau(tau) {}
-};
-
-struct EvaluationResults {
-    double correct;
-    double loss;
-};
-
-struct NetworkConfiguration {
-    Network* n;
-
-    size_t input_neurons;
-    size_t hidden_neurons;
-    size_t output_neurons;
-    size_t layer_offsets[3];
-    size_t total_neurons;
-
-    size_t timesteps;
-    bool timeseries;
-
-    double min_potential;
-    bool leak;
-    double scale_factor;
-    bool discrete;
-};
-
-struct ThreadArgs {
-    TrainingBundle tb;
-    NetworkConfiguration* nc;
-    const size_t* order;
-
-    const Dataset* train;
-    const Dataset* test;
-    int* max_idx;
-    int* work_idx;
-    int* done;
-
-    double loss      = 0;
-    size_t correct   = 0;
-    size_t processed = 0;
-
-    pthread_mutex_t* mut;
-    pthread_cond_t* have_work;
-    pthread_cond_t* done_work;
-    bool* train_p;
-    bool* die;
-
-    ThreadArgs(size_t total_neurons, size_t timesteps, size_t output_neurons,
-               double rho, double tau, const vector<vector<double>>* weights,
-               const vector<vector<int>>* delays,
-               const vector<double>* thresholds, NetworkConfiguration* nc,
-               const size_t* order, const Dataset* train, const Dataset* test,
-               int* max_idx, int* work_idx, int* done, pthread_mutex_t* mut,
-               pthread_cond_t* have_work, pthread_cond_t* done_work,
-               bool* train_p, bool* die)
-        : tb(total_neurons, timesteps, output_neurons, rho, tau, weights,
-             delays, thresholds),
-          nc(nc), order(order), train(train), test(test), max_idx(max_idx),
-          work_idx(work_idx), done(done), mut(mut), have_work(have_work),
-          done_work(done_work), train_p(train_p), die(die) {}
-};
 
 void load_network(Processor** pp, Network* net) {
     json proc_params;
@@ -158,327 +62,6 @@ void load_network(Processor** pp, Network* net) {
         fprintf(stderr, "%s: load_network: Failed to load network.\n",
                 __FILE__);
         exit(1);
-    }
-}
-
-double normal(double mean, double stddev) {
-    double u1, u2;
-    do {
-        u1 = drand48();
-    } while (u1 == 0.0); // Avoid log(0)
-    u2       = drand48();
-    double z = sqrt(-2.0 * log(u1)) * cos(2.0 * acos(-1.0) * u2);
-    return mean + stddev * z;
-}
-
-void softmax(const double* logits, double* out, size_t n) {
-    double max = logits[0];
-    for (size_t i = 1; i < n; i++) {
-        if (logits[i] > max) {
-            max = logits[i];
-        }
-    }
-
-    double exp_sum = 0.0;
-    for (size_t i = 0; i < n; i++) {
-        out[i] = exp(logits[i] - max);
-        exp_sum += out[i];
-    }
-
-    for (size_t i = 0; i < n; i++) {
-        out[i] /= exp_sum;
-    }
-}
-
-double cross_entropy(const double* logits, const double* targets, double* grads,
-                     size_t n) {
-    softmax(logits, grads, n);
-
-    double loss = 0.0;
-    for (size_t i = 0; i < n; i++) {
-        loss -= targets[i] * log(grads[i] + ADAM_EPS);
-        grads[i] -= targets[i];
-    }
-
-    return loss;
-}
-
-double alpha(bool leak) { return (double)!leak; }
-
-double spike_surrogate(double v_pre_t, double v_thresh, double scale_rho,
-                       double tau_rho_scaled) {
-    return (scale_rho / (2.0 * tau_rho_scaled)) *
-           expf(-fabs(v_pre_t - v_thresh) / tau_rho_scaled);
-}
-
-double quantize(double weight, int steps, int min, int max) {
-    int x = round(weight / (2.0 / steps));
-
-    if (x < min) {
-        x = min;
-    } else if (x > max) {
-        x = max;
-    }
-
-    return x * (2.0 / steps);
-}
-
-size_t label_count(const Dataset* d) {
-    unordered_set<double> us;
-    for (int i = 0; i < d->observations; i++) {
-        us.insert(d->labels[i]);
-    }
-
-    return us.size();
-}
-
-void encode_spikes(Processor* p, const Dataset* d, size_t index,
-                   size_t timesteps, bool timeseries, size_t input_neurons) {
-    if (timeseries) {
-        size_t encoding_window = timesteps / d->cols;
-        assert(encoding_window > 0);
-
-        for (size_t input = 0; input < input_neurons / 2; input++) {
-            for (int column_t = 0; column_t < d->cols; column_t++) {
-                double encoding_start = column_t * encoding_window;
-                double encoding_end   = encoding_start + encoding_window;
-
-                double x =
-                    (d->data[(index * d->rows_per_observation * d->cols) +
-                             (input * d->cols) + column_t] -
-                     d->min_vals[input]) /
-                    (d->max_vals[input] - d->min_vals[input]);
-                double inv_x = 1.0 - x;
-
-                if (x > 0.0) {
-                    for (double j = encoding_start; j < encoding_end;
-                         j += 1.0 / x) {
-                        p->apply_spike({(int)input * 2, (double)(int)j, 1.0});
-                    }
-                }
-                if (inv_x > 0.0) {
-                    for (double j = encoding_start; j < encoding_end;
-                         j += 1.0 / inv_x) {
-                        p->apply_spike(
-                            {(int)input * 2 + 1, (double)(int)j, 1.0});
-                    }
-                }
-            }
-        }
-    } else {
-        for (size_t input = 0; input < input_neurons / 2; input++) {
-            double x = (d->data[index * d->cols + input] - d->min_vals[input]) /
-                       (d->max_vals[input] - d->min_vals[input]);
-            double inv_x = 1.0 - x;
-            if (x > 0.0) {
-                for (double j = 0; j < (double)timesteps; j += 1.0 / x) {
-                    p->apply_spike({(int)input * 2, (double)(size_t)j, 1.0});
-                }
-            }
-            if (inv_x > 0.0) {
-                for (double j = 0; j < (double)timesteps; j += 1.0 / inv_x) {
-                    p->apply_spike(
-                        {(int)input * 2 + 1, (double)(size_t)j, 1.0});
-                }
-            }
-        }
-    }
-}
-
-EvaluationResults forward(TrainingBundle* tb, Processor* p, const Dataset* d,
-                          size_t index, const NetworkConfiguration* nc) {
-    EvaluationResults er = {0.0, 0.0};
-
-    p->clear_activity();
-
-    for (size_t t = 0; t < nc->timesteps; t++) {
-        fill(tb->spikes[t].begin(), tb->spikes[t].end(), 0.0);
-        fill(tb->v_pre[t].begin(), tb->v_pre[t].end(), 0.0);
-    }
-    fill(tb->spike_logits.begin(), tb->spike_logits.end(), 0.0);
-
-    encode_spikes(p, d, index, nc->timesteps, nc->timeseries,
-                  nc->input_neurons);
-
-    for (size_t t = 0; t < nc->timesteps; t++) {
-        p->run(1);
-
-        const vector<int>& neuron_counts         = p->neuron_counts();
-        const vector<double>& neuron_pre_charges = p->neuron_pre_charges();
-        for (size_t neuron = 0; neuron < nc->total_neurons; neuron++) {
-            tb->spikes[t][neuron] = neuron_counts[neuron];
-            tb->v_pre[t][neuron]  = (neuron_pre_charges[neuron] *
-                                     (nc->discrete ? nc->scale_factor : 1.0));
-
-            if (neuron >= nc->layer_offsets[2]) {
-                tb->spike_logits[neuron - nc->layer_offsets[2]] +=
-                    neuron_counts[neuron];
-            }
-        }
-    }
-
-    size_t max_idx = 0;
-    double max_val = 0;
-    for (size_t neuron = 0; neuron < nc->output_neurons; neuron++) {
-        tb->spike_logits[neuron] /= (double)nc->timesteps;
-
-        if (tb->spike_logits[neuron] > max_val) {
-            max_idx = neuron;
-            max_val = tb->spike_logits[neuron];
-        }
-    }
-
-    if (max_idx == (size_t)d->labels[index]) {
-        er.correct++;
-    }
-
-    for (size_t i = 0; i < nc->output_neurons; i++) {
-        if (i == (size_t)d->labels[index]) {
-            tb->target[i] = 1.0;
-        } else {
-            tb->target[i] = 0.0;
-        }
-    }
-
-    double loss_spike =
-        cross_entropy(tb->spike_logits.data(), tb->target.data(),
-                      tb->dL_ds.data(), nc->output_neurons);
-    er.loss = loss_spike;
-
-    return er;
-}
-
-void backward(TrainingBundle* tb, const NetworkConfiguration* nc) {
-    tb->future_mem_grad_.setZero();
-    tb->sgh.setZero();
-    tb->vgh.setZero();
-    tb->dL_dV_.setZero();
-    tb->v_pre_t_.setZero();
-    tb->dV_post_dV_pre_.setZero();
-    tb->dV_post_ds_t_.setZero();
-    tb->ds_t_dV_pre_.setZero();
-    tb->dV_leak_dV_t1_.setZero();
-    tb->grad_.setZero();
-
-    for (int t = nc->timesteps - 1; t >= 0; t--) {
-        tb->sgh.col(t).segment(nc->layer_offsets[2], nc->output_neurons) +=
-            Eigen::Map<const Eigen::VectorXd>(&tb->dL_ds[0],
-                                              nc->output_neurons) /
-            nc->timesteps;
-
-        tb->dL_dV_   = tb->vgh.col(t) + tb->future_mem_grad_;
-        tb->v_pre_t_ = Eigen::Map<const Eigen::VectorXd>(&tb->v_pre[t][0],
-                                                         nc->total_neurons);
-
-        tb->dV_post_dV_pre_ = (Eigen::Map<const Eigen::VectorXd>(
-                                   &tb->spikes[t][0], nc->total_neurons)
-                                   .array() <= 0)
-                                  .cast<double>();
-
-        tb->dV_post_ds_t_ = -tb->v_pre_t_;
-        if (nc->min_potential > 0) {
-            (tb->dV_post_ds_t_.array() + nc->min_potential).matrix();
-        }
-
-        tb->ds_t_dV_pre_ =
-            (tb->rho / (2.0 * tb->tau)) *
-            (-(tb->v_pre_t_ - Eigen::Map<const Eigen::VectorXd>(
-                                  &((*tb->thresholds)[0]), nc->total_neurons))
-                  .array()
-                  .abs()
-                  .matrix() /
-             tb->tau)
-                .array()
-                .exp()
-                .matrix();
-
-        tb->dV_leak_dV_t1_ =
-            (tb->v_pre_t_.array() >= nc->min_potential).cast<double>() *
-            (1.0 - nc->leak);
-
-        tb->grad_ = (tb->dL_dV_.array() * tb->dV_post_dV_pre_.array()) +
-                    (tb->dL_dV_.array() * tb->dV_post_ds_t_.array() *
-                     tb->ds_t_dV_pre_.array()) +
-                    (tb->sgh.col(t).array() * tb->ds_t_dV_pre_.array());
-
-        tb->future_mem_grad_ =
-            (tb->dL_dV_.array() * tb->dV_post_dV_pre_.array() *
-             tb->dV_leak_dV_t1_.array()) +
-            (tb->dL_dV_.array() * tb->dV_post_ds_t_.array() *
-             tb->ds_t_dV_pre_.array() * tb->dV_leak_dV_t1_.array()) +
-            (tb->sgh.col(t).array() * tb->ds_t_dV_pre_.array() *
-             tb->dV_leak_dV_t1_.array());
-
-        for (int dest = nc->total_neurons - 1; dest >= 0; dest--) {
-            for (size_t source_idx = 0;
-                 source_idx < nc->n->get_node(dest)->incoming.size();
-                 source_idx++) {
-                size_t source =
-                    nc->n->get_node(dest)->incoming[source_idx]->from->id;
-
-                int delay       = (*tb->delays)[dest][source_idx];
-                int source_time = t - delay;
-                if (source_time < 0) {
-                    continue;
-                }
-
-                double source_spike = tb->spikes[source_time][source];
-                tb->delta_W[dest][source_idx] += source_spike * tb->grad_(dest);
-                tb->sgh(source, source_time) +=
-                    tb->grad_(dest) * (*tb->weights)[dest][source_idx];
-            }
-        }
-    }
-}
-
-void weight_updates(const NetworkConfiguration* nc, const Dataset* d,
-                    size_t current_batch_size, size_t batch_size,
-                    size_t batch_start, size_t epoch, double& b1_t,
-                    double& b2_t, vector<vector<double>>& m_weights,
-                    vector<vector<double>>& v_weights, double learning_rate,
-                    double decay_rate, vector<vector<double>>& weights,
-                    vector<vector<double>>& delta_W) {
-    double inv_batch = 1.0 / ((double)current_batch_size * nc->timesteps);
-
-    b1_t *= BETA1;
-    b2_t *= BETA2;
-
-    for (size_t i = 0; i < nc->total_neurons; i++) {
-        for (size_t j = 0; j < nc->n->get_node(i)->incoming.size(); j++) {
-            Edge* e = nc->n->get_node(i)->incoming[j];
-
-            delta_W[i][j] *= inv_batch;
-
-            m_weights[i][j] =
-                BETA1 * m_weights[i][j] + (1.0 - BETA1) * delta_W[i][j];
-            v_weights[i][j] = BETA2 * v_weights[i][j] +
-                              (1.0 - BETA2) * (delta_W[i][j] * delta_W[i][j]);
-            delta_W[i][j]   = 0.0;
-
-            double mW_hat = m_weights[i][j] / (1.0 - b1_t);
-            double vW_hat = v_weights[i][j] / (1.0 - b2_t);
-
-            double lr = learning_rate;
-            if (epoch == 0) {
-                lr = ((batch_start + batch_size) / (double)d->observations) *
-                     learning_rate;
-            }
-
-            weights[i][j] -= lr * mW_hat / (sqrt(vW_hat + ADAM_EPS));
-            weights[i][j] -= lr * decay_rate * weights[i][j];
-            if (weights[i][j] > 1.0) {
-                weights[i][j] = 1.0;
-            } else if (weights[i][j] < -1.0) {
-                weights[i][j] = -1.0;
-            }
-
-            if (nc->discrete) {
-                weights[i][j] = quantize(weights[i][j], 256, -127, 127);
-            }
-
-            e->set("Weight",
-                   weights[i][j] / (nc->discrete ? nc->scale_factor : 1.0));
-        }
     }
 }
 
@@ -825,7 +408,9 @@ int main(int argc, char* argv[]) {
     double min_weight    = n->get_data("proc_params")["min_weight"];
     double max_weight    = n->get_data("proc_params")["max_weight"];
     double max_threshold = n->get_data("proc_params")["max_threshold"];
-    int scale            = 0;
+    double spike_value_factor =
+        n->get_data("proc_params")["spike_value_factor"];
+    int scale = 0;
 
     if (discrete) {
         // Symmetric scale around zero, rounded up to next bit
@@ -877,7 +462,9 @@ int main(int argc, char* argv[]) {
         }
     }
 
+    uint16_t max_incoming = 0;
     for (size_t i = 0; i < total_neurons; i++) {
+        uint16_t incoming = 0;
         for (size_t j = 0; j < total_neurons; j++) {
             if (drand48() < (1.0 - connectivity)) {
                 continue;
@@ -885,6 +472,7 @@ int main(int argc, char* argv[]) {
 
             Edge* e = n->add_edge(i, j);
             synapse_count++;
+            incoming++;
 
             double weight = normal(0.0, 0.1);
             if (discrete) {
@@ -896,11 +484,67 @@ int main(int argc, char* argv[]) {
             e->set(n->get_edge_property("Weight")->index, weight);
             e->set(n->get_edge_property("Delay")->index, delay);
         }
+
+        if (incoming > max_incoming) {
+            max_incoming = incoming;
+        }
     }
 
     printf("Neurons: %zu, Synapses: %zu\n", neuron_count, synapse_count);
     n->make_sorted_node_vector();
 
+    // Encode data for opencl kernels
+    double* train_encoded = (double*)malloc(train.observations * train.cols *
+                                            2 * sizeof(*train_encoded));
+    for (int i = 0; i < train.observations; i++) {
+        for (int j = 0; j < train.cols; j++) {
+            double x = (train.data[i * train.cols + j] - train.min_vals[j]) /
+                       (train.max_vals[j] - train.min_vals[j]);
+            double inv_x = 1.0 - x;
+
+            if (x > 0.0) {
+                train_encoded[(i * train.cols * 2) + (j * 2)] = 1.0 / x;
+            }
+
+            if (inv_x > 0.0) {
+                train_encoded[(i * train.cols * 2) + (j * 2 + 1)] = 1.0 / inv_x;
+            }
+        }
+    }
+
+    for (int i = 0; i < 8; i++) {
+        printf("%g ", train_encoded[i]);
+    }
+    puts("");
+    puts("");
+
+    // OpenCL host memory allocations
+    int16_t* cl_thresh = (int16_t*)calloc(total_neurons, sizeof(*cl_thresh));
+    int16_t* cl_weights =
+        (int16_t*)calloc(total_neurons * max_incoming, sizeof(*cl_weights));
+    uint16_t* cl_delays =
+        (uint16_t*)calloc(total_neurons * max_incoming, sizeof(*cl_delays));
+    uint16_t* cl_incoming =
+        (uint16_t*)calloc(total_neurons, sizeof(*cl_incoming));
+    uint16_t* cl_incoming_ids = (uint16_t*)calloc(total_neurons * max_incoming,
+                                                  sizeof(*cl_incoming_ids));
+    uint8_t* cl_is_input =
+        (uint8_t*)calloc(total_neurons, sizeof(*cl_is_input));
+    uint8_t* cl_is_output =
+        (uint8_t*)calloc(total_neurons, sizeof(*cl_is_output));
+    BwdParams bwd_params = {
+        .v_decay            = leak,
+        .v_rest             = (short)(min_potential / scale_factor),
+        .tau_rho            = tau,
+        .scale_rho          = rho,
+        .num_neurons        = (ushort)total_neurons,
+        .num_output_neurons = (ushort)output_neurons,
+        .num_steps          = (short)timesteps,
+        .max_incoming       = max_incoming,
+        .scale_factor       = scale_factor,
+    };
+
+    // Current cpu-only allocations
     vector<vector<double>> weights(total_neurons);
     vector<vector<int>> delays(total_neurons);
     vector<double> thresholds(total_neurons);
@@ -911,23 +555,501 @@ int main(int argc, char* argv[]) {
     double b2_t = 1.0;
 
     for (size_t i = 0; i < total_neurons; i++) {
-        thresholds[i] = n->get_node(i)->get("Threshold") *
-                        ((discrete) ? scale_factor : 1.0);
-        weights[i].reserve(n->get_node(i)->incoming.size());
-        delays[i].reserve(n->get_node(i)->incoming.size());
+        Node* nd = n->get_node(i);
 
-        m_weights[i].resize(n->get_node(i)->incoming.size());
-        v_weights[i].resize(n->get_node(i)->incoming.size());
-        delta_W[i].resize(n->get_node(i)->incoming.size());
+        thresholds[i] =
+            nd->get("Threshold") * ((discrete) ? scale_factor : 1.0);
+        weights[i].reserve(nd->incoming.size());
+        delays[i].reserve(nd->incoming.size());
 
-        for (size_t j = 0; j < n->get_node(i)->incoming.size(); j++) {
-            Edge* e = n->get_node(i)->incoming[j];
+        m_weights[i].resize(nd->incoming.size());
+        v_weights[i].resize(nd->incoming.size());
+        delta_W[i].resize(nd->incoming.size());
+
+        {
+            // OpenCL
+            cl_thresh[i]    = nd->get("Threshold");
+            cl_incoming[i]  = nd->incoming.size();
+            cl_is_input[i]  = i < input_neurons;
+            cl_is_output[i] = nd->is_output();
+            ;
+        }
+
+        for (size_t j = 0; j < nd->incoming.size(); j++) {
+            Edge* e = nd->incoming[j];
 
             weights[i].push_back(e->get("Weight") *
                                  ((discrete) ? scale_factor : 1.0));
             delays[i].push_back(e->get("Delay"));
+
+            {
+                // OpenCL
+                cl_weights[i * max_incoming + j]      = e->get("Weight");
+                cl_delays[i * max_incoming + j]       = e->get("Delay");
+                cl_incoming_ids[i * max_incoming + j] = e->from->id;
+            }
         }
     }
+
+    cl_int err;
+    cl_platform_id platform;
+    err = clGetPlatformIDs(1, &platform, NULL);
+    if (err != CL_SUCCESS) {
+        fprintf(stderr, "clGetPlatformIDs failed: ");
+        opencl_perror(err);
+        exit(1);
+    }
+
+    cl_device_id device;
+    err = clGetDeviceIDs(platform, CL_DEVICE_TYPE_GPU, 1, &device, NULL);
+    if (err != CL_SUCCESS) {
+        fprintf(stderr, "clGetDeviceIDs failed for GPU: ");
+        opencl_perror(err);
+        exit(1);
+    }
+    if (device == NULL) {
+        clGetDeviceIDs(platform, CL_DEVICE_TYPE_CPU, 1, &device, NULL);
+        if (err != CL_SUCCESS) {
+            fprintf(stderr, "clGetDeviceIDs failed for CPU: ");
+            opencl_perror(err);
+            exit(1);
+        }
+    }
+
+    cl_context ctx = clCreateContext(NULL, 1, &device, NULL, NULL, &err);
+    if (err != CL_SUCCESS) {
+        fprintf(stderr, "clCreateContext failed: ");
+        opencl_perror(err);
+        exit(1);
+    }
+    cl_command_queue queue = clCreateCommandQueue(ctx, device, 0, &err);
+    if (err != CL_SUCCESS) {
+        fprintf(stderr, "clCreateCommandQueue failed: ");
+        opencl_perror(err);
+        exit(1);
+    }
+
+    char* src              = load_kernel("kernels/risp.cl");
+    const char* sources[1] = {src};
+
+    cl_program prog = clCreateProgramWithSource(ctx, 1, sources, NULL, &err);
+    if (err != CL_SUCCESS) {
+        fprintf(stderr, "clCreateProgramWithSource failed: ");
+        opencl_perror(err);
+        exit(1);
+    }
+    err = clBuildProgram(prog, 1, &device, NULL, NULL, NULL);
+    if (err != CL_SUCCESS) {
+        fprintf(stderr, "clBuildProgram failed: ");
+        opencl_perror(err);
+
+        size_t log_size;
+        clGetProgramBuildInfo(prog, device, CL_PROGRAM_BUILD_LOG, 0, NULL,
+                              &log_size);
+        char* log = (char*)malloc(log_size + 1);
+        clGetProgramBuildInfo(prog, device, CL_PROGRAM_BUILD_LOG, log_size, log,
+                              NULL);
+        log[log_size] = '\0';
+        fprintf(stderr, "%s\n", log);
+        free(log);
+
+        exit(1);
+    }
+
+    cl_kernel encode = clCreateKernel(prog, "RispEncodeInputs", &err);
+    if (err != CL_SUCCESS) {
+        fprintf(stderr, "clCreateKernel for RispEncodeInputs failed: ");
+        opencl_perror(err);
+        exit(1);
+    }
+
+    cl_kernel fwd = clCreateKernel(prog, "RispDynamicsFwdKernel", &err);
+    if (err != CL_SUCCESS) {
+        fprintf(stderr, "clCreateKernel for RispDynamicsFwdKernel failed: ");
+        opencl_perror(err);
+        exit(1);
+    }
+
+    cl_kernel spike_loss = clCreateKernel(prog, "RispSpikeLoss", &err);
+    if (err != CL_SUCCESS) {
+        fprintf(stderr, "clCreateKernel for RispSpikeLoss failed: ");
+        opencl_perror(err);
+        exit(1);
+    }
+
+    cl_kernel bwd = clCreateKernel(prog, "RispDynamicsBwdKernel", &err);
+    if (err != CL_SUCCESS) {
+        fprintf(stderr, "clCreateKernel for RispDynamicsBwdKernel failed: ");
+        opencl_perror(err);
+        exit(1);
+    }
+
+    cl_kernel w_updates = clCreateKernel(prog, "RispWeightUpdates", &err);
+    if (err != CL_SUCCESS) {
+        fprintf(stderr, "clCreateKernel for RispWeightUpdates failed: ");
+        opencl_perror(err);
+        exit(1);
+    }
+
+    free(src);
+
+    cl_mem x_buf = clCreateBuffer(
+        ctx, CL_MEM_READ_WRITE | CL_MEM_ALLOC_HOST_PTR,
+        input_neurons * timesteps * sizeof(cl_short), NULL, &err);
+    cl_mem v_buf =
+        clCreateBuffer(ctx, CL_MEM_READ_WRITE | CL_MEM_ALLOC_HOST_PTR,
+                       total_neurons * sizeof(cl_short), NULL, &err);
+    cl_mem s_buf =
+        clCreateBuffer(ctx, CL_MEM_READ_WRITE | CL_MEM_ALLOC_HOST_PTR,
+                       total_neurons * timesteps * sizeof(cl_char), NULL, &err);
+    cl_mem v_pre_buf = clCreateBuffer(
+        ctx, CL_MEM_READ_WRITE | CL_MEM_ALLOC_HOST_PTR,
+        total_neurons * timesteps * sizeof(cl_short), NULL, &err);
+    cl_mem thresh_buf =
+        clCreateBuffer(ctx, CL_MEM_READ_ONLY | CL_MEM_COPY_HOST_PTR,
+                       total_neurons * sizeof(cl_short), cl_thresh, &err);
+    cl_mem weights_buf = clCreateBuffer(
+        ctx, CL_MEM_READ_ONLY | CL_MEM_COPY_HOST_PTR,
+        total_neurons * max_incoming * sizeof(cl_short), cl_weights, &err);
+    cl_mem delays_buf = clCreateBuffer(
+        ctx, CL_MEM_READ_ONLY | CL_MEM_COPY_HOST_PTR,
+        total_neurons * max_incoming * sizeof(cl_ushort), cl_delays, &err);
+    cl_mem incoming_buf =
+        clCreateBuffer(ctx, CL_MEM_READ_ONLY | CL_MEM_COPY_HOST_PTR,
+                       total_neurons * sizeof(cl_ushort), cl_incoming, &err);
+    cl_mem incoming_ids_buf =
+        clCreateBuffer(ctx, CL_MEM_READ_ONLY | CL_MEM_COPY_HOST_PTR,
+                       total_neurons * max_incoming * sizeof(cl_ushort),
+                       cl_incoming_ids, &err);
+    cl_mem is_input_buf =
+        clCreateBuffer(ctx, CL_MEM_READ_ONLY | CL_MEM_COPY_HOST_PTR,
+                       total_neurons * sizeof(cl_uchar), cl_is_input, &err);
+    cl_mem is_output_buf =
+        clCreateBuffer(ctx, CL_MEM_READ_ONLY | CL_MEM_COPY_HOST_PTR,
+                       total_neurons * sizeof(cl_uchar), cl_is_output, &err);
+    cl_mem train_data_buf =
+        clCreateBuffer(ctx, CL_MEM_READ_ONLY | CL_MEM_COPY_HOST_PTR,
+                       train.observations * train.cols * 2 * sizeof(cl_double),
+                       train_encoded, &err);
+    cl_mem dL_ds_buf =
+        clCreateBuffer(ctx, CL_MEM_READ_WRITE | CL_MEM_ALLOC_HOST_PTR,
+                       output_neurons * sizeof(cl_double), NULL, &err);
+    cl_mem spike_grad_history_buf = clCreateBuffer(
+        ctx, CL_MEM_READ_WRITE | CL_MEM_ALLOC_HOST_PTR,
+        total_neurons * timesteps * sizeof(cl_double), NULL, &err);
+    cl_mem voltage_grad_history_buf = clCreateBuffer(
+        ctx, CL_MEM_READ_WRITE | CL_MEM_ALLOC_HOST_PTR,
+        total_neurons * timesteps * sizeof(cl_double), NULL, &err);
+    cl_mem future_mem_grad_buf =
+        clCreateBuffer(ctx, CL_MEM_READ_WRITE | CL_MEM_ALLOC_HOST_PTR,
+                       total_neurons * sizeof(cl_double), NULL, &err);
+    cl_mem delta_W_buf = clCreateBuffer(
+        ctx, CL_MEM_READ_WRITE | CL_MEM_ALLOC_HOST_PTR,
+        total_neurons * max_incoming * sizeof(cl_double), NULL, &err);
+    cl_mem m_weights_buf = clCreateBuffer(
+        ctx, CL_MEM_READ_WRITE | CL_MEM_ALLOC_HOST_PTR,
+        total_neurons * max_incoming * sizeof(cl_double), NULL, &err);
+    cl_mem v_weights_buf = clCreateBuffer(
+        ctx, CL_MEM_READ_WRITE | CL_MEM_ALLOC_HOST_PTR,
+        total_neurons * max_incoming * sizeof(cl_double), NULL, &err);
+    cl_mem correct_buf =
+        clCreateBuffer(ctx, CL_MEM_READ_WRITE | CL_MEM_ALLOC_HOST_PTR,
+                       1 * sizeof(cl_double), NULL, &err);
+    cl_mem loss_buf =
+        clCreateBuffer(ctx, CL_MEM_READ_WRITE | CL_MEM_ALLOC_HOST_PTR,
+                       1 * sizeof(cl_double), NULL, &err);
+    cl_mem bwd_params_buf =
+        clCreateBuffer(ctx, CL_MEM_READ_ONLY | CL_MEM_COPY_HOST_PTR,
+                       sizeof(BwdParams), &bwd_params, &err);
+    if (err != CL_SUCCESS) {
+        fprintf(stderr, "clCreateBuffer for bwd_params failed: ");
+        opencl_perror(err);
+        exit(1);
+    }
+
+    size_t* batch_order =
+        (size_t*)calloc(train.observations, sizeof(*batch_order));
+
+    {
+        size_t encoder_work_size   = input_neurons;
+        size_t fwd_work_size       = total_neurons;
+        size_t loss_work_size      = output_neurons;
+        size_t bwd_work_size       = total_neurons;
+        size_t w_updates_work_size = total_neurons * max_incoming;
+
+        int iinput_neurons          = input_neurons;
+        int itimesteps              = timesteps;
+        int16_t ispike_value_factor = spike_value_factor;
+        short neuron_decay          = leak;
+        short imin_potential        = min_potential / scale_factor;
+        ushort inum_neurons         = total_neurons;
+        ushort inum_steps           = timesteps;
+        ushort imax_incoming        = max_incoming;
+        ushort inum_output_neurons  = output_neurons;
+        ushort ibatch_size          = batch_size;
+        uint iepoch                 = 0;
+        double beta1                = BETA1;
+        double beta2                = BETA2;
+        short imin_weight           = min_weight;
+        short imax_weight           = max_weight;
+
+        cl_event event_prev;
+        cl_event event_curr;
+
+        // Set kernel arguments that don't change
+        {
+            // Encode
+            clSetKernelArg(encode, 0, sizeof(cl_mem), &x_buf);
+            clSetKernelArg(encode, 1, sizeof(cl_mem), &train_data_buf);
+            clSetKernelArg(encode, 2, sizeof(int), &train.cols);
+            clSetKernelArg(encode, 3, sizeof(int), &iinput_neurons);
+            clSetKernelArg(encode, 4, sizeof(int), &itimesteps);
+            clSetKernelArg(encode, 6, sizeof(int16_t), &ispike_value_factor);
+
+            // Forward
+            clSetKernelArg(fwd, 0, sizeof(cl_mem), &x_buf);
+            clSetKernelArg(fwd, 1, sizeof(cl_mem), &thresh_buf);
+            clSetKernelArg(fwd, 2, sizeof(cl_mem), &weights_buf);
+            clSetKernelArg(fwd, 3, sizeof(cl_mem), &delays_buf);
+            clSetKernelArg(fwd, 4, sizeof(cl_mem), &incoming_buf);
+            clSetKernelArg(fwd, 5, sizeof(cl_mem), &incoming_ids_buf);
+            clSetKernelArg(fwd, 6, sizeof(cl_short), &neuron_decay);
+            clSetKernelArg(fwd, 7, sizeof(cl_short), &imin_potential);
+            clSetKernelArg(fwd, 8, sizeof(cl_mem), &is_input_buf);
+            clSetKernelArg(fwd, 9, sizeof(cl_mem), &v_buf);
+            clSetKernelArg(fwd, 10, sizeof(cl_mem), &s_buf);
+            clSetKernelArg(fwd, 11, sizeof(cl_mem), &v_pre_buf);
+            clSetKernelArg(fwd, 12, sizeof(cl_ushort), &inum_neurons);
+            clSetKernelArg(fwd, 13, sizeof(cl_ushort), &inum_steps);
+            clSetKernelArg(fwd, 15, sizeof(cl_ushort), &imax_incoming);
+
+            // Loss
+            clSetKernelArg(spike_loss, 0, sizeof(cl_mem), &dL_ds_buf);
+            clSetKernelArg(spike_loss, 1, sizeof(cl_mem), &correct_buf);
+            clSetKernelArg(spike_loss, 2, sizeof(cl_mem), &loss_buf);
+            clSetKernelArg(spike_loss, 3, sizeof(cl_mem), &s_buf);
+            clSetKernelArg(spike_loss, 4, sizeof(cl_ushort), &inum_neurons);
+            clSetKernelArg(spike_loss, 5, sizeof(cl_ushort),
+                           &inum_output_neurons);
+            clSetKernelArg(spike_loss, 6, sizeof(cl_ushort), &inum_steps);
+
+            // Backward
+            clSetKernelArg(bwd, 0, sizeof(cl_mem), &dL_ds_buf);
+            clSetKernelArg(bwd, 1, sizeof(cl_mem), &s_buf);
+            clSetKernelArg(bwd, 2, sizeof(cl_mem), &v_pre_buf);
+            clSetKernelArg(bwd, 3, sizeof(cl_mem), &thresh_buf);
+            clSetKernelArg(bwd, 4, sizeof(cl_mem), &is_output_buf);
+            clSetKernelArg(bwd, 5, sizeof(cl_mem), &spike_grad_history_buf);
+            clSetKernelArg(bwd, 6, sizeof(cl_mem), &voltage_grad_history_buf);
+            clSetKernelArg(bwd, 7, sizeof(cl_mem), &future_mem_grad_buf);
+            clSetKernelArg(bwd, 8, sizeof(cl_mem), &delta_W_buf);
+            clSetKernelArg(bwd, 9, sizeof(cl_mem), &weights_buf);
+            clSetKernelArg(bwd, 10, sizeof(cl_mem), &delays_buf);
+            clSetKernelArg(bwd, 11, sizeof(cl_mem), &incoming_buf);
+            clSetKernelArg(bwd, 12, sizeof(cl_mem), &incoming_ids_buf);
+            clSetKernelArg(bwd, 13, sizeof(cl_mem), &bwd_params_buf);
+
+            // Weight updates
+            clSetKernelArg(w_updates, 0, sizeof(cl_mem), &m_weights_buf);
+            clSetKernelArg(w_updates, 1, sizeof(cl_mem), &v_weights_buf);
+            clSetKernelArg(w_updates, 2, sizeof(cl_mem), &delta_W_buf);
+            clSetKernelArg(w_updates, 3, sizeof(cl_mem), &weights_buf);
+            clSetKernelArg(w_updates, 4, sizeof(cl_mem), &incoming_buf);
+            clSetKernelArg(w_updates, 5, sizeof(cl_ushort), &inum_neurons);
+            clSetKernelArg(w_updates, 6, sizeof(cl_ushort), &imax_incoming);
+            clSetKernelArg(w_updates, 7, sizeof(cl_double), &learning_rate);
+            clSetKernelArg(w_updates, 8, sizeof(cl_double), &decay_rate);
+            clSetKernelArg(w_updates, 10, sizeof(cl_ushort), &ibatch_size);
+            clSetKernelArg(w_updates, 13, sizeof(cl_double), &beta1);
+            clSetKernelArg(w_updates, 14, sizeof(cl_double), &beta2);
+            clSetKernelArg(w_updates, 17, sizeof(cl_ushort), &inum_steps);
+            clSetKernelArg(w_updates, 18, sizeof(cl_uint), &train.observations);
+            clSetKernelArg(w_updates, 19, sizeof(cl_double), &scale_factor);
+            clSetKernelArg(w_updates, 20, sizeof(cl_short), &imin_weight);
+            clSetKernelArg(w_updates, 21, sizeof(cl_short), &imax_weight);
+            clSetKernelArg(w_updates, 22, sizeof(cl_int), &scale);
+        }
+
+        for (size_t epoch = 0; epoch < epochs; epoch++) {
+            double epoch_loss    = 0.0;
+            double epoch_correct = 0.0;
+
+            for (int i = 0; i < train.observations; i++) {
+                batch_order[i] = i;
+            }
+
+            // Shuffle batch order
+            for (int i = 0; i < train.observations; i++) {
+                int j          = rand() % train.observations;
+                size_t tmp     = batch_order[i];
+                batch_order[i] = batch_order[j];
+                batch_order[j] = tmp;
+            }
+
+            for (int batch_start = 0; batch_start < train.observations;
+                 batch_start += batch_size) {
+                size_t current_batch_size =
+                    min((size_t)batch_size,
+                        train.observations - (size_t)batch_start);
+
+                event_prev = NULL;
+                event_curr = NULL;
+
+                for (size_t i = 0; i < current_batch_size; i++) {
+                    int observation_idx = batch_order[batch_start + i];
+
+                    if (event_curr) {
+                        clWaitForEvents(1, &event_curr);
+                    }
+
+                    // Zero buffers
+                    opencl_zerobuf(queue, x_buf, input_neurons * timesteps,
+                                   sizeof(cl_short), &event_curr);
+                    opencl_zerobuf(queue, v_buf, total_neurons,
+                                   sizeof(cl_short), &event_curr);
+                    opencl_zerobuf(queue, s_buf, total_neurons * timesteps,
+                                   sizeof(cl_char), &event_curr);
+                    opencl_zerobuf(queue, v_pre_buf, total_neurons * timesteps,
+                                   sizeof(cl_short), &event_curr);
+                    opencl_zerobuf(queue, dL_ds_buf, output_neurons,
+                                   sizeof(cl_double), &event_curr);
+                    opencl_zerobuf(queue, correct_buf, 1, sizeof(cl_double),
+                                   &event_curr);
+                    opencl_zerobuf(queue, loss_buf, 1, sizeof(cl_double),
+                                   &event_curr);
+                    opencl_zerobuf(queue, spike_grad_history_buf,
+                                   total_neurons * timesteps, sizeof(cl_float),
+                                   &event_curr);
+                    opencl_zerobuf(queue, voltage_grad_history_buf,
+                                   total_neurons * timesteps, sizeof(cl_float),
+                                   &event_curr);
+                    opencl_zerobuf(queue, future_mem_grad_buf, total_neurons,
+                                   sizeof(cl_float), &event_curr);
+
+                    event_prev = event_curr;
+
+                    clSetKernelArg(encode, 5, sizeof(int), &observation_idx);
+                    err = clEnqueueNDRangeKernel(queue, encode, 1, NULL,
+                                                 &encoder_work_size, NULL, 1,
+                                                 &event_prev, &event_curr);
+                    if (err != CL_SUCCESS) {
+                        fprintf(stderr,
+                                "clEnqueueNDRangeKernel for RispEncodeInputs "
+                                "failed: ");
+                        opencl_perror(err);
+                        exit(1);
+                    }
+
+                    event_prev = event_curr;
+
+                    // Forward pass
+                    for (short t = 0; t < (short)timesteps; t++) {
+                        clSetKernelArg(fwd, 14, sizeof(cl_ushort), &t);
+
+                        err = clEnqueueNDRangeKernel(queue, fwd, 1, NULL,
+                                                     &fwd_work_size, NULL, 1,
+                                                     &event_prev, &event_curr);
+                        if (err != CL_SUCCESS) {
+                            fprintf(stderr,
+                                    "clEnqueueNDRangeKernel for "
+                                    "RispDynamicsFwdKernel "
+                                    "failed @t=%hd: ",
+                                    t);
+                            opencl_perror(err);
+                            exit(1);
+                        }
+
+                        event_prev = event_curr;
+                    }
+
+                    // Loss kernel
+                    ushort target_idx = train.labels[observation_idx];
+                    clSetKernelArg(spike_loss, 7, sizeof(cl_ushort),
+                                   &target_idx);
+                    err = clEnqueueNDRangeKernel(queue, spike_loss, 1, NULL,
+                                                 &loss_work_size, NULL, 1,
+                                                 &event_prev, &event_curr);
+                    if (err != CL_SUCCESS) {
+                        fprintf(stderr, "clEnqueueNDRangeKernel for "
+                                        "RispSpikeLoss failed: ");
+                        opencl_perror(err);
+                        exit(1);
+                    }
+
+                    event_prev = event_curr;
+
+                    // Read loss and correct count
+                    double loss;
+                    double correct;
+                    if (epoch % 10 == 0) {
+                        err = clEnqueueReadBuffer(queue, loss_buf, CL_TRUE, 0,
+                                                  sizeof(double), &loss, 1,
+                                                  &event_prev, &event_curr);
+                        event_prev = event_curr;
+                        err = clEnqueueReadBuffer(queue, correct_buf, CL_TRUE,
+                                                  0, sizeof(double), &correct,
+                                                  1, &event_prev, &event_curr);
+                        event_prev = event_curr;
+
+                        epoch_loss += loss;
+                        epoch_correct += correct;
+                    }
+
+                    // Backward pass
+                    for (short t = (short)timesteps - 1; t >= 0; t--) {
+                        clSetKernelArg(bwd, 14, sizeof(cl_short), &t);
+
+                        err = clEnqueueNDRangeKernel(queue, bwd, 1, NULL,
+                                                     &bwd_work_size, NULL, 1,
+                                                     &event_prev, &event_curr);
+                        if (err != CL_SUCCESS) {
+                            fprintf(stderr,
+                                    "clEnqueueNDRangeKernel for "
+                                    "RispDynamicsBwdKernel "
+                                    "failed @t=%hd: ",
+                                    t);
+                            opencl_perror(err);
+                            exit(1);
+                        }
+
+                        event_prev = event_curr;
+                    }
+                }
+
+                // Weight updates
+                ushort icurrent_batch_size = current_batch_size;
+                uint ibatch_start          = batch_start;
+                iepoch                     = epoch;
+                b1_t *= BETA1;
+                b2_t *= BETA2;
+                clSetKernelArg(w_updates, 9, sizeof(cl_ushort),
+                               &icurrent_batch_size);
+                clSetKernelArg(w_updates, 11, sizeof(cl_uint), &ibatch_start);
+                clSetKernelArg(w_updates, 12, sizeof(cl_uint), &iepoch);
+                clSetKernelArg(w_updates, 15, sizeof(cl_double), &b1_t);
+                clSetKernelArg(w_updates, 16, sizeof(cl_double), &b2_t);
+                err = clEnqueueNDRangeKernel(queue, w_updates, 1, NULL,
+                                             &w_updates_work_size, NULL, 1,
+                                             &event_prev, &event_curr);
+                if (err != CL_SUCCESS) {
+                    fprintf(stderr, "clEnqueueNDRangeKernel for "
+                                    "RispWeightUpdates failed: ");
+                    opencl_perror(err);
+                    exit(1);
+                }
+
+                clWaitForEvents(1, &event_curr);
+            }
+
+            clFinish(queue);
+
+            printf("Epoch %zu: Train Loss: %8g, Train Acc: %8g\n", epoch,
+                   epoch_loss / (double)train.observations,
+                   epoch_correct / (double)train.observations);
+        }
+    }
+
+    exit(1);
 
     ThreadArgs* tas          = (ThreadArgs*)calloc(threads, sizeof(*tas));
     pthread_t* tids          = (pthread_t*)calloc(threads, sizeof(*tids));
@@ -937,10 +1059,8 @@ int main(int argc, char* argv[]) {
     pthread_cond_t done_work = PTHREAD_COND_INITIALIZER;
     bool train_p             = true;
     bool die                 = false;
-    size_t* batch_order =
-        (size_t*)calloc(train.observations, sizeof(*batch_order));
-    int work_idx   = 0;
-    int done_count = 0;
+    int work_idx             = 0;
+    int done_count           = 0;
 
     for (size_t i = 0; i < threads; i++) {
         tas[i] = ThreadArgs(total_neurons, timesteps, output_neurons, rho, tau,
@@ -1075,13 +1195,13 @@ int main(int argc, char* argv[]) {
             }
         }
 
-        printf(
-            "Epoch: %4zu/%zu, Loss: %10g (Best: %10g), Acc: %10g (Best: %10g), "
-            "TestLoss: %10g (Best: %10g), TestAcc: %10g (Best: %10g)\n",
-            epoch + 1, epochs, epoch_loss / (double)train.observations,
-            best_train_loss, correct / (double)train.observations,
-            best_train_acc, test_loss, best_test_loss, test_correct,
-            best_test_acc);
+        printf("Epoch: %4zu/%zu, Loss: %10g (Best: %10g), Acc: %10g (Best: "
+               "%10g), "
+               "TestLoss: %10g (Best: %10g), TestAcc: %10g (Best: %10g)\n",
+               epoch + 1, epochs, epoch_loss / (double)train.observations,
+               best_train_loss, correct / (double)train.observations,
+               best_train_acc, test_loss, best_test_loss, test_correct,
+               best_test_acc);
 
         if (network_json_out) {
             json j;
