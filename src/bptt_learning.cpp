@@ -5,781 +5,349 @@
 //   rho: 0.5486399999186418
 #include "csv.h"
 #include "framework.hpp"
+#include "shared.h"
+#include "math_utils.h"
+#include "data_utils.h"
+#include "network_utils.h"
+#include "forward_backward.h"
+#include "optimizer.h"
+#include "threading.h"
 #include <Eigen/Dense>
 #include <algorithm>
 #include <cassert>
+#include <cerrno>
 #include <cfloat>
 #include <cstddef>
+#include <cstdlib>
+#include <cstdarg>
+#include <cstring>
 #include <fstream>
-#include <getopt.h>
 #include <iostream>
+#include <limits>
 #include <pthread.h>
-#include <stddef.h>
+#include <string>
 #include <unordered_set>
+#include <vector>
+#include <ctime>
+#include <sys/time.h>
+#include <sys/time.h>
 
 using namespace std;
 using namespace neuro;
 using nlohmann::json;
 
-// Adam/Learning Parameters
-#define BETA1 (0.9)
-#define BETA2 (0.999)
-#define ADAM_EPS (1.0e-8)
 #define NUM_LAYERS (3)
 
-struct TrainingBundle {
-    const vector<vector<double>>* weights;
-    vector<vector<double>> delta_W;
-    const vector<vector<int>>* delays;
-    const vector<double>* thresholds;
-
-    vector<vector<double>> spikes;
-    vector<vector<double>> v_pre;
-    vector<double> spike_logits;
-    vector<double> target;
-    vector<double> dL_ds;
-    vector<double> softmax_out;
-
-    Eigen::VectorXd future_mem_grad_;
-    Eigen::Matrix<double, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor> sgh;
-    Eigen::Matrix<double, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor> vgh;
-    Eigen::VectorXd dL_dV_;
-    Eigen::VectorXd v_pre_t_;
-    Eigen::VectorXd dV_post_dV_pre_;
-    Eigen::VectorXd dV_post_ds_t_;
-    Eigen::VectorXd ds_t_dV_pre_;
-    Eigen::VectorXd dV_leak_dV_t1_;
-    Eigen::VectorXd grad_;
-
-    double rho;
-    double tau;
-
-    TrainingBundle(size_t total_neurons, size_t timesteps,
-                   size_t output_neurons, double rho, double tau,
-                   const vector<vector<double>>* weights,
-                   const vector<vector<int>>* delays,
-                   const vector<double>* thresholds)
-        : weights(weights), delta_W(total_neurons), delays(delays),
-          thresholds(thresholds),
-          spikes(timesteps, vector<double>(total_neurons)),
-          v_pre(timesteps, vector<double>(total_neurons)),
-          spike_logits(output_neurons), target(output_neurons),
-          dL_ds(output_neurons), softmax_out(output_neurons),
-          future_mem_grad_(total_neurons), sgh(total_neurons, timesteps),
-          vgh(total_neurons, timesteps), dL_dV_(total_neurons),
-          v_pre_t_(total_neurons), dV_post_dV_pre_(total_neurons),
-          dV_post_ds_t_(total_neurons), ds_t_dV_pre_(total_neurons),
-          dV_leak_dV_t1_(total_neurons), grad_(total_neurons), rho(rho),
-          tau(tau) {}
+struct CliConfig {
+    std::string network_json_file;
+    std::string data_file;
+    std::string label_file;
+    std::string train_data_file;
+    std::string train_label_file;
+    std::string test_data_file;
+    std::string test_label_file;
+    bool timeseries = false;
+    double connectivity = 0.2;
+    double learning_rate = 0.008;
+    double decay_rate = 0.0001;
+    double tau = 0.95;
+    double rho = 1.4;
+    size_t timesteps = 32;
+    size_t hidden_neurons = 16;
+    unsigned long seed = (unsigned long)time(NULL);
+    size_t epochs = 10;
+    size_t batch_size = 1;
+    double training_percent = 0.8;
+    std::string network_json_out;
+    size_t threads = 1;
+    bool show_help = false;
 };
 
-struct EvaluationResults {
-    double correct;
-    double loss;
-};
-
-struct NetworkConfiguration {
-    Network* n;
-
-    size_t input_neurons;
-    size_t hidden_neurons;
-    size_t output_neurons;
-    size_t layer_offsets[3];
-    size_t total_neurons;
-
-    size_t timesteps;
-    bool timeseries;
-
-    double min_potential;
-    bool leak;
-    double scale_factor;
-    size_t steps;
-    bool discrete;
-    double min_weight;
-    double max_weight;
-};
-
-struct ThreadArgs {
-    TrainingBundle tb;
-    NetworkConfiguration* nc;
-    const size_t* order;
-
-    const Dataset* train;
-    const Dataset* test;
-    int* max_idx;
-    int* work_idx;
-    int* done;
-
-    double loss      = 0;
-    size_t correct   = 0;
-    size_t processed = 0;
-
-    pthread_mutex_t* mut;
-    pthread_cond_t* have_work;
-    pthread_cond_t* done_work;
-    bool* train_p;
-    bool* die;
-
-    ThreadArgs(size_t total_neurons, size_t timesteps, size_t output_neurons,
-               double rho, double tau, const vector<vector<double>>* weights,
-               const vector<vector<int>>* delays,
-               const vector<double>* thresholds, NetworkConfiguration* nc,
-               const size_t* order, const Dataset* train, const Dataset* test,
-               int* max_idx, int* work_idx, int* done, pthread_mutex_t* mut,
-               pthread_cond_t* have_work, pthread_cond_t* done_work,
-               bool* train_p, bool* die)
-        : tb(total_neurons, timesteps, output_neurons, rho, tau, weights,
-             delays, thresholds),
-          nc(nc), order(order), train(train), test(test), max_idx(max_idx),
-          work_idx(work_idx), done(done), mut(mut), have_work(have_work),
-          done_work(done_work), train_p(train_p), die(die) {}
-};
-
-void load_network(Processor** pp, Network* net) {
-    json proc_params;
-    string proc_name;
-    Processor* p;
-
-    p = *pp;
-    if (p == nullptr) {
-        proc_params = net->get_data("proc_params");
-        proc_name   = net->get_data("other")["proc_name"];
-        p           = Processor::make(proc_name, proc_params);
-        *pp         = p;
-    }
-
-    if (p->get_network_properties().as_json() !=
-        net->get_properties().as_json()) {
-        fprintf(stderr,
-                "%s: load_network: Network and processor properties do not "
-                "match.\n",
-                __FILE__);
-        exit(1);
-    }
-
-    if (!p->load_network(net)) {
-        fprintf(stderr, "%s: load_network: Failed to load network.\n",
-                __FILE__);
-        exit(1);
-    }
+static int cli_error(const char* fmt, ...) {
+    va_list ap;
+    fprintf(stderr, "Error: ");
+    va_start(ap, fmt);
+    vfprintf(stderr, fmt, ap);
+    va_end(ap);
+    fprintf(stderr, "\n");
+    return 1;
 }
 
-double normal(double mean, double stddev) {
-    double u1, u2;
-    do {
-        u1 = drand48();
-    } while (u1 == 0.0); // Avoid log(0)
-    u2       = drand48();
-    double z = sqrt(-2.0 * log(u1)) * cos(2.0 * acos(-1.0) * u2);
-    return mean + stddev * z;
+static int check_range(double v, double lo, double hi,
+                       const char* name) {
+    if (v < lo || v > hi) {
+        return cli_error("--%s must be in [%.1f, %.1f]", name, lo, hi);
+    }
+    return 0;
 }
 
-void softmax(const double* logits, double* out, size_t n) {
-    double max = logits[0];
-    for (size_t i = 1; i < n; i++) {
-        if (logits[i] > max) {
-            max = logits[i];
-        }
+static int check_pos(double v, const char* name) {
+    if (v <= 0.0) {
+        return cli_error("--%s must be > 0", name);
     }
-
-    double exp_sum = 0.0;
-    for (size_t i = 0; i < n; i++) {
-        out[i] = exp(logits[i] - max);
-        exp_sum += out[i];
-    }
-
-    for (size_t i = 0; i < n; i++) {
-        out[i] /= exp_sum;
-    }
+    return 0;
 }
 
-double cross_entropy(const double* logits, const double* targets, double* grads,
-                     size_t n) {
-    softmax(logits, grads, n);
-
-    double loss = 0.0;
-    for (size_t i = 0; i < n; i++) {
-        loss -= targets[i] * log(grads[i] + ADAM_EPS);
-        grads[i] -= targets[i];
+static int parse_double_arg(int& i, int argc, char* argv[],
+                            double* out, const char* name) {
+    if (++i >= argc) {
+        return cli_error("--%s requires a value", name);
     }
-
-    return loss;
+    char* end = nullptr;
+    errno = 0;
+    double v = strtod(argv[i], &end);
+    if (end == argv[i] || *end != '\0' || errno != 0) {
+        return cli_error("--%s: invalid numeric value '%s'", name, argv[i]);
+    }
+    *out = v;
+    return 0;
 }
 
-double alpha(bool leak) { return (double)!leak; }
-
-double spike_surrogate(double v_pre_t, double v_thresh, double scale_rho,
-                       double tau_rho_scaled) {
-    return (scale_rho / (2.0 * tau_rho_scaled)) *
-           expf(-fabs(v_pre_t - v_thresh) / tau_rho_scaled);
+static int parse_ulong_arg(int& i, int argc, char* argv[],
+                           unsigned long* out, const char* name) {
+    if (++i >= argc) {
+        return cli_error("--%s requires a value", name);
+    }
+    char* end = nullptr;
+    errno = 0;
+    unsigned long v = strtoul(argv[i], &end, 0);
+    if (end == argv[i] || *end != '\0' || errno != 0) {
+        return cli_error("--%s: invalid integer value '%s'", name, argv[i]);
+    }
+    *out = v;
+    return 0;
 }
 
-double quantize(double weight, int steps, int min, int max) {
-    int x = round(weight / (2.0 / steps));
+static int parse_cli(int argc, char* argv[], CliConfig* cfg) {
+    int i = 1;
 
-    if (x < min) {
-        x = min;
-    } else if (x > max) {
-        x = max;
-    }
+    while (i < argc) {
+        string arg = argv[i];
 
-    return x * (2.0 / steps);
-}
-
-size_t label_count(const Dataset* d) {
-    unordered_set<double> us;
-    for (int i = 0; i < d->observations; i++) {
-        us.insert(d->labels[i]);
-    }
-
-    return us.size();
-}
-
-void encode_spikes(Processor* p, const Dataset* d, size_t index,
-                   size_t timesteps, bool timeseries, size_t input_neurons) {
-    if (timeseries) {
-        size_t encoding_window = timesteps / d->cols;
-        assert(encoding_window > 0);
-
-        for (size_t input = 0; input < input_neurons / 2; input++) {
-            for (int column_t = 0; column_t < d->cols; column_t++) {
-                double encoding_start = column_t * encoding_window;
-                double encoding_end   = encoding_start + encoding_window;
-
-                double x =
-                    (d->data[(index * d->rows_per_observation * d->cols) +
-                             (input * d->cols) + column_t] -
-                     d->min_vals[input]) /
-                    (d->max_vals[input] - d->min_vals[input]);
-                double inv_x = 1.0 - x;
-
-                if (x > 0.0) {
-                    for (double j = encoding_start; j < encoding_end;
-                         j += 1.0 / x) {
-                        p->apply_spike({(int)input * 2, (double)(int)j, 1.0});
-                    }
-                }
-                if (inv_x > 0.0) {
-                    for (double j = encoding_start; j < encoding_end;
-                         j += 1.0 / inv_x) {
-                        p->apply_spike(
-                            {(int)input * 2 + 1, (double)(int)j, 1.0});
-                    }
-                }
-            }
+        if (arg == "--help" || arg == "-h") {
+            cfg->show_help = true;
+            ++i;
+            continue;
         }
-    } else {
-        for (size_t input = 0; input < input_neurons / 2; input++) {
-            double x = (d->data[index * d->cols + input] - d->min_vals[input]) /
-                       (d->max_vals[input] - d->min_vals[input]);
-            double inv_x = 1.0 - x;
-            if (x > 0.0) {
-                for (double j = 0; j < (double)timesteps; j += 1.0 / x) {
-                    p->apply_spike({(int)input * 2, (double)(size_t)j, 1.0});
-                }
-            }
-            if (inv_x > 0.0) {
-                for (double j = 0; j < (double)timesteps; j += 1.0 / inv_x) {
-                    p->apply_spike(
-                        {(int)input * 2 + 1, (double)(size_t)j, 1.0});
-                }
-            }
+        else if (arg == "--network_json" || arg == "-n") {
+            if (++i >= argc) return cli_error("--network_json requires a value");
+            cfg->network_json_file = argv[i];
         }
-    }
-}
-
-EvaluationResults forward(TrainingBundle* tb, Processor* p, const Dataset* d,
-                          size_t index, const NetworkConfiguration* nc) {
-    EvaluationResults er = {0.0, 0.0};
-
-    p->clear_activity();
-
-    for (size_t t = 0; t < nc->timesteps; t++) {
-        fill(tb->spikes[t].begin(), tb->spikes[t].end(), 0.0);
-        fill(tb->v_pre[t].begin(), tb->v_pre[t].end(), 0.0);
-    }
-    fill(tb->spike_logits.begin(), tb->spike_logits.end(), 0.0);
-
-    encode_spikes(p, d, index, nc->timesteps, nc->timeseries,
-                  nc->input_neurons);
-
-    for (size_t t = 0; t < nc->timesteps; t++) {
-        p->run(1);
-
-        const vector<int>& neuron_counts         = p->neuron_counts();
-        const vector<double>& neuron_pre_charges = p->neuron_pre_charges();
-        for (size_t neuron = 0; neuron < nc->total_neurons; neuron++) {
-            tb->spikes[t][neuron] = neuron_counts[neuron];
-            tb->v_pre[t][neuron]  = (neuron_pre_charges[neuron] *
-                                     (nc->discrete ? nc->scale_factor : 1.0));
-
-            if (neuron >= nc->layer_offsets[2]) {
-                tb->spike_logits[neuron - nc->layer_offsets[2]] +=
-                    neuron_counts[neuron];
-            }
+        else if (arg == "--data_file" || arg == "-d") {
+            if (++i >= argc) return cli_error("--data_file requires a value");
+            cfg->data_file = argv[i];
         }
-    }
-
-    size_t max_idx = 0;
-    double max_val = 0;
-    for (size_t neuron = 0; neuron < nc->output_neurons; neuron++) {
-        tb->spike_logits[neuron] /= (double)nc->timesteps;
-
-        if (tb->spike_logits[neuron] > max_val) {
-            max_idx = neuron;
-            max_val = tb->spike_logits[neuron];
+        else if (arg == "--label_file" || arg == "-l") {
+            if (++i >= argc) return cli_error("--label_file requires a value");
+            cfg->label_file = argv[i];
         }
-    }
-
-    if (max_idx == (size_t)d->labels[index]) {
-        er.correct++;
-    }
-
-    for (size_t i = 0; i < nc->output_neurons; i++) {
-        if (i == (size_t)d->labels[index]) {
-            tb->target[i] = 1.0;
-        } else {
-            tb->target[i] = 0.0;
+        else if (arg == "--train_data_file" || arg == "-a") {
+            if (++i >= argc) return cli_error("--train_data_file requires a value");
+            cfg->train_data_file = argv[i];
         }
-    }
-
-    double loss_spike =
-        cross_entropy(tb->spike_logits.data(), tb->target.data(),
-                      tb->dL_ds.data(), nc->output_neurons);
-    er.loss = loss_spike;
-
-    return er;
-}
-
-void backward(TrainingBundle* tb, const NetworkConfiguration* nc) {
-    tb->future_mem_grad_.setZero();
-    tb->sgh.setZero();
-    tb->vgh.setZero();
-    tb->dL_dV_.setZero();
-    tb->v_pre_t_.setZero();
-    tb->dV_post_dV_pre_.setZero();
-    tb->dV_post_ds_t_.setZero();
-    tb->ds_t_dV_pre_.setZero();
-    tb->dV_leak_dV_t1_.setZero();
-    tb->grad_.setZero();
-
-    for (int t = nc->timesteps - 1; t >= 0; t--) {
-        tb->sgh.col(t).segment(nc->layer_offsets[2], nc->output_neurons) +=
-            Eigen::Map<const Eigen::VectorXd>(&tb->dL_ds[0],
-                                              nc->output_neurons) /
-            nc->timesteps;
-
-        tb->dL_dV_   = tb->vgh.col(t) + tb->future_mem_grad_;
-        tb->v_pre_t_ = Eigen::Map<const Eigen::VectorXd>(&tb->v_pre[t][0],
-                                                         nc->total_neurons);
-
-        tb->dV_post_dV_pre_ = (Eigen::Map<const Eigen::VectorXd>(
-                                   &tb->spikes[t][0], nc->total_neurons)
-                                   .array() <= 0)
-                                  .cast<double>();
-
-        tb->dV_post_ds_t_ = -tb->v_pre_t_;
-        if (nc->min_potential > 0) {
-            (tb->dV_post_ds_t_.array() + nc->min_potential).matrix();
+        else if (arg == "--train_label_file" || arg == "-i") {
+            if (++i >= argc) return cli_error("--train_label_file requires a value");
+            cfg->train_label_file = argv[i];
+        }
+        else if (arg == "--test_data_file" || arg == "-j") {
+            if (++i >= argc) return cli_error("--test_data_file requires a value");
+            cfg->test_data_file = argv[i];
+        }
+        else if (arg == "--test_label_file" || arg == "-k") {
+            if (++i >= argc) return cli_error("--test_label_file requires a value");
+            cfg->test_label_file = argv[i];
+        }
+        else if (arg == "--timeseries" || arg == "-b") {
+            cfg->timeseries = true;
+        }
+        else if (arg == "--connectivity" || arg == "-c" || arg == "-S") {
+            double v;
+            int rc = parse_double_arg(i, argc, argv, &v, "connectivity");
+            if (rc) return rc;
+            rc = check_range(v, 0.0, 1.0, "connectivity");
+            if (rc) return rc;
+            cfg->connectivity = v;
+        }
+        else if (arg == "--learning_rate" || arg == "-r") {
+            double v;
+            int rc = parse_double_arg(i, argc, argv, &v, "learning_rate");
+            if (rc) return rc;
+            rc = check_range(v, 0.0, 1.0, "learning_rate");
+            if (rc) return rc;
+            cfg->learning_rate = v;
+        }
+        else if (arg == "--decay_rate" || arg == "-e") {
+            double v;
+            int rc = parse_double_arg(i, argc, argv, &v, "decay_rate");
+            if (rc) return rc;
+            rc = check_range(v, 0.0, 1.0, "decay_rate");
+            if (rc) return rc;
+            cfg->decay_rate = v;
+        }
+        else if (arg == "--tau" || arg == "-u") {
+            double v;
+            int rc = parse_double_arg(i, argc, argv, &v, "tau");
+            if (rc) return rc;
+            rc = check_pos(v, "tau");
+            if (rc) return rc;
+            cfg->tau = v;
+        }
+        else if (arg == "--rho" || arg == "-o") {
+            double v;
+            int rc = parse_double_arg(i, argc, argv, &v, "rho");
+            if (rc) return rc;
+            rc = check_pos(v, "rho");
+            if (rc) return rc;
+            cfg->rho = v;
+        }
+        else if (arg == "--timesteps" || arg == "-t") {
+            unsigned long v;
+            int rc = parse_ulong_arg(i, argc, argv, &v, "timesteps");
+            if (rc) return rc;
+            if (v == 0) return cli_error("--timesteps must be > 0");
+            cfg->timesteps = v;
+        }
+        else if (arg == "--hidden_neurons" || arg == "-H") {
+            unsigned long v;
+            int rc = parse_ulong_arg(i, argc, argv, &v, "hidden_neurons");
+            if (rc) return rc;
+            if (v == 0) return cli_error("--hidden_neurons must be > 0");
+            cfg->hidden_neurons = v;
+        }
+        else if (arg == "--seed" || arg == "-s") {
+            unsigned long v;
+            int rc = parse_ulong_arg(i, argc, argv, &v, "seed");
+            if (rc) return rc;
+            cfg->seed = v;
+        }
+        else if (arg == "--epochs" || arg == "-p") {
+            unsigned long v;
+            int rc = parse_ulong_arg(i, argc, argv, &v, "epochs");
+            if (rc) return rc;
+            cfg->epochs = v;
+        }
+        else if (arg == "--batch_size" || arg == "-B") {
+            unsigned long v;
+            int rc = parse_ulong_arg(i, argc, argv, &v, "batch_size");
+            if (rc) return rc;
+            cfg->batch_size = v;
+        }
+        else if (arg == "--training_percent" || arg == "-P") {
+            double v;
+            int rc = parse_double_arg(i, argc, argv, &v, "training_percent");
+            if (rc) return rc;
+            rc = check_range(v, 0.0, 1.0, "training_percent");
+            if (rc) return rc;
+            cfg->training_percent = v;
+        }
+        else if (arg == "--network_json_out" || arg == "-N") {
+            if (++i >= argc) return cli_error("--network_json_out requires a value");
+            cfg->network_json_out = argv[i];
+        }
+        else if (arg == "--threads" || arg == "-T") {
+            unsigned long v;
+            int rc = parse_ulong_arg(i, argc, argv, &v, "threads");
+            if (rc) return rc;
+            if (v == 0) return cli_error("--threads must be > 0");
+            cfg->threads = v;
+        }
+        else {
+            return cli_error("Unknown argument: %s", arg.c_str());
         }
 
-        tb->ds_t_dV_pre_ =
-            (tb->rho / (2.0 * tb->tau)) *
-            (-(tb->v_pre_t_ - Eigen::Map<const Eigen::VectorXd>(
-                                  &((*tb->thresholds)[0]), nc->total_neurons))
-                  .array()
-                  .abs()
-                  .matrix() /
-             tb->tau)
-                .array()
-                .exp()
-                .matrix();
-
-        tb->dV_leak_dV_t1_ =
-            (tb->v_pre_t_.array() >= nc->min_potential).cast<double>() *
-            (1.0 - nc->leak);
-
-        tb->grad_ = (tb->dL_dV_.array() * tb->dV_post_dV_pre_.array()) +
-                    (tb->dL_dV_.array() * tb->dV_post_ds_t_.array() *
-                     tb->ds_t_dV_pre_.array()) +
-                    (tb->sgh.col(t).array() * tb->ds_t_dV_pre_.array());
-
-        tb->future_mem_grad_ =
-            (tb->dL_dV_.array() * tb->dV_post_dV_pre_.array() *
-             tb->dV_leak_dV_t1_.array()) +
-            (tb->dL_dV_.array() * tb->dV_post_ds_t_.array() *
-             tb->ds_t_dV_pre_.array() * tb->dV_leak_dV_t1_.array()) +
-            (tb->sgh.col(t).array() * tb->ds_t_dV_pre_.array() *
-             tb->dV_leak_dV_t1_.array());
-
-        for (int dest = nc->total_neurons - 1; dest >= 0; dest--) {
-            for (size_t source_idx = 0;
-                 source_idx < nc->n->get_node(dest)->incoming.size();
-                 source_idx++) {
-                size_t source =
-                    nc->n->get_node(dest)->incoming[source_idx]->from->id;
-
-                int delay       = (*tb->delays)[dest][source_idx];
-                int source_time = t - delay;
-                if (source_time < 0) {
-                    continue;
-                }
-
-                double source_spike = tb->spikes[source_time][source];
-                tb->delta_W[dest][source_idx] += source_spike * tb->grad_(dest);
-                tb->sgh(source, source_time) +=
-                    tb->grad_(dest) * (*tb->weights)[dest][source_idx];
-            }
-        }
-    }
-}
-
-void weight_updates(const NetworkConfiguration* nc, const Dataset* d,
-                    size_t current_batch_size, size_t batch_size,
-                    size_t batch_start, size_t epoch, double& b1_t,
-                    double& b2_t, vector<vector<double>>& m_weights,
-                    vector<vector<double>>& v_weights, double learning_rate,
-                    double decay_rate, vector<vector<double>>& weights,
-                    vector<vector<double>>& delta_W) {
-    double inv_batch = 1.0 / ((double)current_batch_size * nc->timesteps);
-
-    b1_t *= BETA1;
-    b2_t *= BETA2;
-
-    for (size_t i = 0; i < nc->total_neurons; i++) {
-        for (size_t j = 0; j < nc->n->get_node(i)->incoming.size(); j++) {
-            Edge* e = nc->n->get_node(i)->incoming[j];
-
-            delta_W[i][j] *= inv_batch;
-
-            m_weights[i][j] =
-                BETA1 * m_weights[i][j] + (1.0 - BETA1) * delta_W[i][j];
-            v_weights[i][j] = BETA2 * v_weights[i][j] +
-                              (1.0 - BETA2) * (delta_W[i][j] * delta_W[i][j]);
-            delta_W[i][j]   = 0.0;
-
-            double mW_hat = m_weights[i][j] / (1.0 - b1_t);
-            double vW_hat = v_weights[i][j] / (1.0 - b2_t);
-
-            double lr = learning_rate;
-            if (epoch == 0) {
-                lr = ((batch_start + batch_size) / (double)d->observations) *
-                     learning_rate;
-            }
-
-            weights[i][j] -= lr * mW_hat / (sqrt(vW_hat + ADAM_EPS));
-            weights[i][j] -= lr * decay_rate * weights[i][j];
-            if (weights[i][j] > 1.0) {
-                weights[i][j] = 1.0;
-            } else if (weights[i][j] < -1.0) {
-                weights[i][j] = -1.0;
-            }
-
-            if (nc->discrete) {
-                weights[i][j] = quantize(weights[i][j], nc->steps,
-                                         nc->min_weight, nc->max_weight);
-            }
-
-            e->set("Weight",
-                   weights[i][j] / (nc->discrete ? nc->scale_factor : 1.0));
-        }
-    }
-}
-
-void* worker(void* arg) {
-    if (!arg) {
-        fprintf(stderr, "Thread spawned with NULL arg\n");
-        exit(1);
+        ++i;
     }
 
-    ThreadArgs* ta         = (ThreadArgs*)arg;
-    Processor* p           = NULL;
-    bool do_backwards_pass = false;
-    int my_max;
-
-    while (true) {
-        pthread_mutex_lock(ta->mut);
-        if (*ta->die) {
-            pthread_mutex_unlock(ta->mut);
-            pthread_exit(NULL);
-        }
-
-        while (*ta->work_idx >= *ta->max_idx) {
-            pthread_cond_wait(ta->have_work, ta->mut);
-            if (*ta->die) {
-                pthread_mutex_unlock(ta->mut);
-                pthread_exit(NULL);
-            }
-        }
-        int my_work_idx   = *ta->work_idx;
-        *ta->work_idx     = my_work_idx + 1;
-        my_max            = *ta->max_idx;
-        do_backwards_pass = *ta->train_p;
-        pthread_mutex_unlock(ta->mut);
-
-        load_network(&p, ta->nc->n);
-
-        while (my_work_idx < my_max) {
-            EvaluationResults er = forward(
-                &ta->tb, p, *ta->train_p ? ta->train : ta->test,
-                *ta->train_p ? ta->order[my_work_idx] : my_work_idx, ta->nc);
-            ta->loss += er.loss;
-            ta->correct += er.correct;
-            ta->processed++;
-
-            if (do_backwards_pass) {
-                backward(&ta->tb, ta->nc);
-            }
-
-            pthread_mutex_lock(ta->mut);
-            my_work_idx   = *ta->work_idx;
-            *ta->work_idx = my_work_idx + 1;
-            assert(*ta->max_idx == my_max);
-            do_backwards_pass = *ta->train_p;
-            pthread_mutex_unlock(ta->mut);
-        }
-
-        pthread_mutex_lock(ta->mut);
-        *ta->done = *ta->done + ta->processed;
-        pthread_cond_signal(ta->done_work);
-        pthread_mutex_unlock(ta->mut);
-        delete p;
-        p = NULL;
-    }
-
-    return NULL;
+    return 0;
 }
 
 static void print_usage(const char* prog) {
-    fprintf(stderr, "Usage: %s [OPTIONS]...\n", prog);
-    fprintf(stderr, "  -n, --network_json     FILE    Network JSON path\n");
-    fprintf(stderr, "  -d, --data_file        FILE    Data file path\n");
-    fprintf(stderr, "  -l, --label_file       FILE    Label file path\n");
-    fprintf(stderr, "  -l, --train_data_file  FILE    Train data file path\n");
-    fprintf(stderr, "  -l, --train_label_file FILE    Train label file path\n");
-    fprintf(stderr, "  -l, --test_data_file   FILE    Test data file path\n");
-    fprintf(stderr, "  -l, --test_label_file  FILE    Test label file path\n");
-    fprintf(stderr,
-            "  -b, --timeseries               Enable timeseries mode\n");
-    fprintf(stderr, "  -S, --connectivity     FLOAT   Chance each neuron is "
-                    "connected to another (0,1]\n");
-    fprintf(stderr, "  -r, --learning_rate    FLOAT   Learning rate (0,1]\n");
-    fprintf(stderr, "  -e, --decay_rate       FLOAT   Decay rate (0,1]\n");
-    fprintf(stderr, "  -u, --tau              FLOAT   Tau (>0)\n");
-    fprintf(stderr, "  -o, --rho              FLOAT   Rho (>0)\n");
-    fprintf(stderr, "  -t, --timesteps        UINT    Timestep count\n");
-    fprintf(stderr, "  -H, --hidden_neurons   UINT    Hidden layer size\n");
-    fprintf(stderr, "  -s, --seed             UINT    Random seed\n");
-    fprintf(stderr, "  -p, --epochs           UINT    Training epochs\n");
-    fprintf(stderr, "  -B, --batch_size       UINT    Training batch size\n");
-    fprintf(
-        stderr,
-        "  -p, --training_percent FLOAT   Training percent of total data\n");
-    fprintf(stderr,
-            "  -N, --network_json_out FILE    Network json out filename\n");
-    fprintf(stderr, "  -h, --help                     Show this help\n");
+    fprintf(stderr, "Usage: %s [OPTIONS]...\n\n", prog);
+    fprintf(stderr, "Required:\n");
+    fprintf(stderr, "  -n, --network_json         FILE    Network JSON path\n");
+    fprintf(stderr, "  -d, --data_file            FILE    Data file path\n");
+    fprintf(stderr, "  -l, --label_file           FILE    Label file path\n");
+    fprintf(stderr, "  -a, --train_data_file      FILE    Train data file path\n");
+    fprintf(stderr, "  -i, --train_label_file     FILE    Train label file path\n");
+    fprintf(stderr, "  -j, --test_data_file       FILE    Test data file path\n");
+    fprintf(stderr, "  -k, --test_label_file      FILE    Test label file path\n");
+    fprintf(stderr, "\nEither (-d + -l) OR (-a + -i + -j + -k) required.\n\n");
+    fprintf(stderr, "Options:\n");
+    fprintf(stderr, "  -b, --timeseries                    Enable timeseries mode\n");
+    fprintf(stderr, "  -S, --connectivity     FLOAT        Neuron connection chance (0,1]\n");
+    fprintf(stderr, "  -r, --learning_rate    FLOAT        Learning rate (0,1]\n");
+    fprintf(stderr, "  -e, --decay_rate       FLOAT        Decay rate (0,1]\n");
+    fprintf(stderr, "  -u, --tau              FLOAT        Tau (>0)\n");
+    fprintf(stderr, "  -o, --rho              FLOAT        Rho (>0)\n");
+    fprintf(stderr, "  -t, --timesteps        UINT         Timestep count\n");
+    fprintf(stderr, "  -H, --hidden_neurons   UINT         Hidden layer size\n");
+    fprintf(stderr, "  -s, --seed             UINT         Random seed\n");
+    fprintf(stderr, "  -p, --epochs           UINT         Training epochs\n");
+    fprintf(stderr, "  -B, --batch_size       UINT         Batch size\n");
+    fprintf(stderr, "  -P, --training_percent FLOAT        Train split ratio (0,1]\n");
+    fprintf(stderr, "  -N, --network_json_out FILE         Output network JSON\n");
+    fprintf(stderr, "  -T, --threads          UINT         Thread count\n");
+    fprintf(stderr, "  -h, --help                          Show this help\n");
 }
 
 int main(int argc, char* argv[]) {
-    char* network_json_file = NULL;
-    char* data_file         = NULL;
-    char* label_file        = NULL;
-    char* train_data_file   = NULL;
-    char* train_label_file  = NULL;
-    char* test_data_file    = NULL;
-    char* test_label_file   = NULL;
-    bool timeseries         = false;
-    double connectivity     = 0.2;
-    double learning_rate    = 0.008;
-    double decay_rate       = 0.0001;
-    double tau              = 0.95;
-    double rho              = 1.4;
-    size_t timesteps        = 32;
-    size_t hidden_neurons   = 16;
-    unsigned long seed      = (unsigned long)time(NULL);
-    size_t epochs           = 10;
-    size_t batch_size       = 1;
-    double training_percent = 0.8;
-    char* network_json_out  = NULL;
-    size_t threads          = 1;
-
-    static struct option long_options[] = {
-        {"network_json", required_argument, 0, 'n'},
-        {"data_file", required_argument, 0, 'd'},
-        {"label_file", required_argument, 0, 'l'},
-        {"train_data_file", required_argument, 0, 'a'},
-        {"train_label_file", required_argument, 0, 'i'},
-        {"test_data_file", required_argument, 0, 'j'},
-        {"test_label_file", required_argument, 0, 'k'},
-        {"timeseries", no_argument, 0, 'b'},
-        {"connectivity", required_argument, 0, 'c'},
-        {"learning_rate", required_argument, 0, 'r'},
-        {"decay_rate", required_argument, 0, 'e'},
-        {"tau", required_argument, 0, 'u'},
-        {"rho", required_argument, 0, 'o'},
-        {"timesteps", required_argument, 0, 't'},
-        {"hidden_neurons", required_argument, 0, 'H'},
-        {"seed", required_argument, 0, 's'},
-        {"epochs", required_argument, 0, 'p'},
-        {"batch_size", required_argument, 0, 'B'},
-        {"training_percent", required_argument, 0, 'P'},
-        {"network_json_out", required_argument, 0, 'N'},
-        {"threads", required_argument, 0, 'T'},
-        {"help", no_argument, 0, 'h'},
-        {0, 0, 0, 0},
-    };
-
-    int c;
-    char* endptr;
-
-    while ((c = getopt_long(argc, argv,
-                            "n:d:l:a:i:j:k:b:c:r:e:u:o:t:H:s:hp:B:P:N:T:",
-                            long_options, NULL)) != -1) {
-        switch (c) {
-        case 'n':
-            network_json_file = optarg;
-            break;
-        case 'd':
-            data_file = optarg;
-            break;
-        case 'l':
-            label_file = optarg;
-            break;
-        case 'a':
-            train_data_file = optarg;
-            break;
-        case 'i':
-            train_label_file = optarg;
-            break;
-        case 'j':
-            test_data_file = optarg;
-            break;
-        case 'k':
-            test_label_file = optarg;
-            break;
-        case 'b':
-            timeseries = true;
-            break;
-        case 'c':
-            connectivity = strtod(optarg, &endptr);
-            if (*endptr != '\0' || connectivity <= 0.0 || connectivity > 1.0) {
-                fprintf(stderr,
-                        "Error: Invalid or out-of-range --connectivity\n");
-                return 1;
-            }
-            break;
-        case 'r':
-            learning_rate = strtod(optarg, &endptr);
-            if (*endptr != '\0' || learning_rate <= 0.0 ||
-                learning_rate > 1.0) {
-                fprintf(stderr,
-                        "Error: Invalid or out-of-range --learning_rate\n");
-                return 1;
-            }
-            break;
-        case 'e':
-            decay_rate = strtod(optarg, &endptr);
-            if (*endptr != '\0' || decay_rate <= 0.0 || decay_rate > 1.0) {
-                fprintf(stderr,
-                        "Error: Invalid or out-of-range --decay_rate\n");
-                return 1;
-            }
-            break;
-        case 'u':
-            tau = strtod(optarg, &endptr);
-            if (*endptr != '\0' || tau <= 0.0) {
-                fprintf(stderr, "Error: Invalid or out-of-range --tau\n");
-                return 1;
-            }
-            break;
-        case 'o':
-            rho = strtod(optarg, &endptr);
-            if (*endptr != '\0' || rho <= 0.0) {
-                fprintf(stderr, "Error: Invalid or out-of-range --rho\n");
-                return 1;
-            }
-            break;
-        case 't':
-            timesteps = strtoull(optarg, &endptr, 0);
-            if (*endptr != '\0' || timesteps == 0) {
-                fprintf(stderr, "Error: Invalid or out-of-range --timesteps\n");
-                return 1;
-            }
-            break;
-        case 'H':
-            hidden_neurons = strtoull(optarg, &endptr, 0);
-            if (*endptr != '\0' || hidden_neurons == 0) {
-                fprintf(stderr,
-                        "Error: Invalid or out-of-range --hidden_neurons\n");
-                return 1;
-            }
-            break;
-        case 's':
-            seed = strtoull(optarg, &endptr, 0);
-            if (*endptr != '\0') {
-                fprintf(stderr, "Error: Invalid --seed\n");
-                return 1;
-            }
-            break;
-        case 'p':
-            epochs = strtoull(optarg, &endptr, 0);
-            if (*endptr != '\0') {
-                fprintf(stderr, "Error: Invalid --epochs\n");
-                return 1;
-            }
-            break;
-        case 'B':
-            batch_size = strtoull(optarg, &endptr, 0);
-            if (*endptr != '\0') {
-                fprintf(stderr, "Error: Invalid --batch_size\n");
-                return 1;
-            }
-            break;
-        case 'P':
-            training_percent = strtod(optarg, &endptr);
-            if (*endptr != '\0' || training_percent <= 0.0 ||
-                training_percent > 1.0) {
-                fprintf(stderr,
-                        "Error: Invalid or out-of-range --training_percent\n");
-                return 1;
-            }
-            break;
-        case 'N':
-            network_json_out = optarg;
-            break;
-        case 'T':
-            threads = strtoull(optarg, &endptr, 0);
-            if (*endptr != '\0') {
-                fprintf(stderr, "Error: Invalid --threads\n");
-                return 1;
-            }
-            break;
-        case 'h':
-            print_usage(argv[0]);
-            return 0;
-        case '?':
-            print_usage(argv[0]);
-            return 1;
-        }
-    }
-
-    // Can only have data/label files OR train/test data/label files
-    // This also includes the training_percentage parameter
-    if (network_json_file == NULL) {
-        fprintf(stderr, "Error: --network_json is required.\n");
+    CliConfig cfg;
+    int rc = parse_cli(argc, argv, &cfg);
+    if (rc != 0) {
         print_usage(argv[0]);
         return 1;
     }
 
-    if (!(data_file && label_file) && !(train_data_file && train_label_file &&
-                                        test_data_file && test_label_file)) {
-        fprintf(stderr,
-                "Error: either (--data_file AND --label_file) OR "
-                "(--train_data_file AND --train_label_file AND "
-                "--test_data_file AND --test_label_file) are required.\n");
+    if (cfg.show_help) {
+        print_usage(argv[0]);
+        return 0;
+    }
+
+    if (cfg.network_json_file.empty()) {
+        cli_error("--network_json is required");
         print_usage(argv[0]);
         return 1;
     }
+
+    bool have_simple = !cfg.data_file.empty() && !cfg.label_file.empty();
+    bool have_split = !cfg.train_data_file.empty() &&
+                      !cfg.train_label_file.empty() &&
+                      !cfg.test_data_file.empty() &&
+                      !cfg.test_label_file.empty();
+
+    if (have_simple && have_split) {
+        cli_error("cannot specify both (-d + -l) and (-a + -i + -j + -k); choose one");
+        print_usage(argv[0]);
+        return 1;
+    }
+
+    if (!have_simple && !have_split) {
+        cli_error("either (-d + -l) OR (-a + -i + -j + -k) are required");
+        print_usage(argv[0]);
+        return 1;
+    }
+
+    char* network_json_file = const_cast<char*>(cfg.network_json_file.c_str());
+    char* data_file = const_cast<char*>(cfg.data_file.c_str());
+    char* label_file = const_cast<char*>(cfg.label_file.c_str());
+    char* train_data_file = const_cast<char*>(cfg.train_data_file.c_str());
+    char* train_label_file = const_cast<char*>(cfg.train_label_file.c_str());
+    char* test_data_file = const_cast<char*>(cfg.test_data_file.c_str());
+    char* test_label_file = const_cast<char*>(cfg.test_label_file.c_str());
+    bool timeseries = cfg.timeseries;
+    double connectivity = cfg.connectivity;
+    double learning_rate = cfg.learning_rate;
+    double decay_rate = cfg.decay_rate;
+    double tau = cfg.tau;
+    double rho = cfg.rho;
+    size_t timesteps = cfg.timesteps;
+    size_t hidden_neurons = cfg.hidden_neurons;
+    unsigned long seed = cfg.seed;
+    size_t epochs = cfg.epochs;
+    size_t batch_size = cfg.batch_size;
+    double training_percent = cfg.training_percent;
+    char* network_json_out = const_cast<char*>(cfg.network_json_out.c_str());
+    size_t threads = cfg.threads;
 
     srand(seed);
     srand48(seed);
@@ -816,10 +384,108 @@ int main(int argc, char* argv[]) {
 
     Network* n = new Network();
     n->from_json(emptynet);
-    if (!n) {
-        fprintf(stderr, "%s:%s:%d: Unable to create network.\n", __FILE__,
-                __FUNCTION__, __LINE__);
-        exit(1);
+
+    // Auto-detect: if network has nodes/edges, try to load metadata and
+    // override all CLI params.  Only generate from scratch when the network
+    // is truly empty (no nodes or edges).
+    if (n->num_nodes() > 0 && n->num_edges() > 0) {
+        bool has_other = false;
+        for (size_t ki = 0; ki < n->data_keys().size(); ki++) {
+            if (n->data_keys()[ki] == "other") {
+                has_other = true;
+                break;
+            }
+        }
+
+        if (has_other) {
+            json other = n->get_data("other");
+            printf("Warning: Loading network from %s. CLI arguments will be "
+                   "overridden by saved metadata:\n",
+                   network_json_file);
+
+            // Helper lambda: read a double from metadata and override CLI value
+            auto override_double = [&](const std::string& key,
+                                       double& target,
+                                       const char* param_name) {
+                if (other.count(key)) {
+                    target = other[key].get<double>();
+                    printf("[metadata override] %s: %.10g (from saved network)\n",
+                           param_name, target);
+                }
+            };
+
+            // Helper lambda: read a size_t from metadata and override CLI value
+            auto override_size = [&](const std::string& key,
+                                     size_t& target,
+                                     const char* param_name) {
+                if (other.count(key)) {
+                    target = other[key].get<size_t>();
+                    printf("[metadata override] %s: %zu (from saved network)\n",
+                           param_name, target);
+                }
+            };
+
+            // Helper lambda: read a bool from metadata and override CLI value
+            auto override_bool = [&](const std::string& key,
+                                     bool& target,
+                                     const char* param_name) {
+                if (other.count(key)) {
+                    target = other[key].get<bool>();
+                    printf("[metadata override] %s: %s (from saved network)\n",
+                           param_name, target ? "true" : "false");
+                }
+            };
+
+            // Helper lambda: read a string from metadata and override CLI value
+            auto override_string = [&](const std::string& key,
+                                       char*& target,
+                                       const char* param_name) {
+                if (other.count(key)) {
+                    std::string val = other[key].get<std::string>();
+                    if (target != NULL) free(target);
+                    target = strdup(val.c_str());
+                    printf("[metadata override] %s: %s (from saved network)\n",
+                           param_name, target);
+                }
+            };
+
+            override_double("connectivity", connectivity,
+                            "--connectivity");
+            override_double("learning_rate", learning_rate,
+                            "--learning_rate");
+            override_double("decay_rate", decay_rate,
+                            "--decay_rate");
+            override_double("tau", tau, "--tau");
+            override_double("rho", rho, "--rho");
+            override_size("timesteps", timesteps, "--timesteps");
+            override_size("hidden_neurons", hidden_neurons,
+                          "--hidden_neurons");
+            override_size("seed", seed, "--seed");
+            override_size("epochs", epochs, "--epochs");
+            override_size("batch_size", batch_size, "--batch_size");
+            override_double("training_percent", training_percent,
+                            "--training_percent");
+            override_size("threads", threads, "--threads");
+            override_bool("timeseries", timeseries, "--timeseries");
+            override_string("data_file", data_file, "--data_file");
+            override_string("label_file", label_file, "--label_file");
+            override_string("train_data_file", train_data_file,
+                            "--train_data_file");
+            override_string("train_label_file", train_label_file,
+                            "--train_label_file");
+            override_string("test_data_file", test_data_file,
+                            "--test_data_file");
+            override_string("test_label_file", test_label_file,
+                            "--test_label_file");
+            override_string("network_json_out", network_json_out,
+                            "--network_json_out");
+
+            printf("Loaded metadata from %s\n", network_json_file);
+        } else {
+            fprintf(stderr,
+                    "Warning: Network has nodes/edges but no metadata found. "
+                    "Using default CLI parameters.\n");
+        }
     }
 
     bool discrete        = n->get_data("proc_params")["discrete"];
@@ -870,43 +536,139 @@ int main(int argc, char* argv[]) {
     size_t neuron_count  = 0;
     size_t synapse_count = 0;
 
-    for (size_t i = 0; i < NUM_LAYERS; i++) {
-        for (size_t j = 0; j < layer_sizes[i]; j++) {
-            n->add_node(neuron_count)->set("Threshold", max_threshold);
+    if (n->num_nodes() == 0) {
+        // Generate nodes/edges if the network is empty
+        for (size_t i = 0; i < NUM_LAYERS; i++) {
+            for (size_t j = 0; j < layer_sizes[i]; j++) {
+                n->add_node(neuron_count)->set("Threshold", max_threshold);
 
-            if (i == 0) {
-                n->add_input(neuron_count);
-            } else if (i == NUM_LAYERS - 1) {
-                n->add_output(neuron_count);
+                if (i == 0) {
+                    n->add_input(neuron_count);
+                } else if (i == NUM_LAYERS - 1) {
+                    n->add_output(neuron_count);
+                }
+
+                neuron_count++;
             }
-
-            neuron_count++;
         }
-    }
 
-    for (size_t i = 0; i < total_neurons; i++) {
-        for (size_t j = 0; j < total_neurons; j++) {
-            if (drand48() < (1.0 - connectivity)) {
-                continue;
+        for (size_t i = 0; i < total_neurons; i++) {
+            for (size_t j = 0; j < total_neurons; j++) {
+                if (drand48() < (1.0 - connectivity)) {
+                    continue;
+                }
+
+                Edge* e = n->add_edge(i, j);
+                synapse_count++;
+
+                double weight = normal(0.0, 0.1);
+                if (discrete) {
+                    weight = quantize(weight, scale, min_weight, max_weight) /
+                             scale_factor;
+                }
+                int delay = rand() % 7 + 1;
+
+                e->set(n->get_edge_property("Weight")->index, weight);
+                e->set(n->get_edge_property("Delay")->index, delay);
             }
-
-            Edge* e = n->add_edge(i, j);
-            synapse_count++;
-
-            double weight = normal(0.0, 0.1);
-            if (discrete) {
-                weight = quantize(weight, scale, min_weight, max_weight) /
-                         scale_factor;
-            }
-            int delay = rand() % 7 + 1;
-
-            e->set(n->get_edge_property("Weight")->index, weight);
-            e->set(n->get_edge_property("Delay")->index, delay);
         }
-    }
 
-    printf("Neurons: %zu, Synapses: %zu\n", neuron_count, synapse_count);
+        printf("Neurons: %zu, Synapses: %zu\n", neuron_count, synapse_count);
+    } else {
+        // Use existing network structure
+        neuron_count  = n->num_nodes();
+        synapse_count = n->num_edges();
+        printf("Resuming training with Neurons: %zu, Synapses: %zu\n",
+               neuron_count, synapse_count);
+    }
     n->make_sorted_node_vector();
+
+    // --- Capture run metadata for full reproducibility ---
+    // CLI arguments
+    json cli_args = json::array();
+    for (int i = 0; i < argc; i++) {
+        cli_args.push_back(std::string(argv[i]));
+    }
+
+    // Git commit hash
+    std::string git_commit;
+    {
+        FILE* fp = popen("git rev-parse HEAD 2>/dev/null", "r");
+        if (fp) {
+            char buf[64] = {};
+            if (fgets(buf, sizeof(buf), fp)) {
+                git_commit = buf;
+                if (!git_commit.empty() && git_commit.back() == '\n')
+                    git_commit.pop_back();
+            }
+            pclose(fp);
+        }
+    }
+
+    // Compile timestamp
+    auto compile_time = std::time(nullptr);
+
+    // Start time
+    struct timeval tv;
+    gettimeofday(&tv, nullptr);
+
+    // Build metadata for Associated_Data -> other
+    json run_metadata = json::object();
+    run_metadata["cli_args"] = cli_args;
+    run_metadata["git_commit"] = git_commit.empty() ? "unknown" : git_commit;
+    run_metadata["compile_time"] = compile_time;
+    run_metadata["start_time"] = (double)tv.tv_sec + tv.tv_usec / 1000000.0;
+    run_metadata["seed"] = seed;
+    run_metadata["connectivity"] = connectivity;
+    run_metadata["learning_rate"] = learning_rate;
+    run_metadata["decay_rate"] = decay_rate;
+    run_metadata["tau"] = tau;
+    run_metadata["rho"] = rho;
+    run_metadata["timesteps"] = timesteps;
+    run_metadata["hidden_neurons"] = hidden_neurons;
+    run_metadata["epochs"] = epochs;
+    run_metadata["batch_size"] = batch_size;
+    run_metadata["training_percent"] = training_percent;
+    run_metadata["threads"] = threads;
+    run_metadata["timeseries"] = timeseries;
+    run_metadata["network_json"] = network_json_file ? std::string(network_json_file) : "";
+    run_metadata["data_file"] = data_file ? std::string(data_file) : "";
+    run_metadata["label_file"] = label_file ? std::string(label_file) : "";
+    run_metadata["train_data_file"] = train_data_file ? std::string(train_data_file) : "";
+    run_metadata["train_label_file"] = train_label_file ? std::string(train_label_file) : "";
+    run_metadata["test_data_file"] = test_data_file ? std::string(test_data_file) : "";
+    run_metadata["test_label_file"] = test_label_file ? std::string(test_label_file) : "";
+    run_metadata["network_json_out"] = network_json_out ? std::string(network_json_out) : "";
+    run_metadata["input_neurons"] = input_neurons;
+    run_metadata["output_neurons"] = output_neurons;
+    run_metadata["total_neurons"] = total_neurons;
+    run_metadata["neuron_count"] = neuron_count;
+    run_metadata["synapse_count"] = synapse_count;
+    run_metadata["discrete"] = discrete;
+    run_metadata["min_potential"] = min_potential;
+    run_metadata["min_weight"] = min_weight;
+    run_metadata["max_weight"] = max_weight;
+    run_metadata["max_threshold"] = max_threshold;
+    run_metadata["leak_mode"] = leak_prop;
+    run_metadata["scale"] = scale;
+    run_metadata["scale_factor"] = discrete ? scale_factor : 1.0;
+
+    // Merge with existing Associated_Data -> other if any
+    json existing_other = json::object();
+    bool has_other = false;
+    for (size_t ki = 0; ki < n->data_keys().size(); ki++) {
+        if (n->data_keys()[ki] == "other") { has_other = true; break; }
+    }
+    if (has_other) {
+        existing_other = n->get_data("other");
+    }
+    // Existing keys take priority (e.g. proc_name), new metadata fills rest
+    for (auto it = run_metadata.begin(); it != run_metadata.end(); ++it) {
+        if (existing_other.find(it.key()) == existing_other.end()) {
+            existing_other[it.key()] = it.value();
+        }
+    }
+    n->set_data("other", existing_other);
 
     vector<vector<double>> weights(total_neurons);
     vector<vector<int>> delays(total_neurons);
@@ -1090,7 +852,16 @@ int main(int argc, char* argv[]) {
             best_train_acc, test_loss, best_test_loss, test_correct,
             best_test_acc);
 
-        if (network_json_out) {
+        if (!cfg.network_json_out.empty()) {
+            // Update runtime metrics in metadata
+            json meta = n->get_data("other");
+            meta["best_train_loss"] = best_train_loss;
+            meta["best_test_loss"] = best_test_loss;
+            meta["best_train_acc"] = best_train_acc;
+            meta["best_test_acc"] = best_test_acc;
+            meta["epoch"] = epoch + 1;
+            n->set_data("other", meta);
+
             json j;
             n->to_json(j);
             ofstream fout(network_json_out);
