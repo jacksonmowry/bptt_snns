@@ -861,6 +861,3 @@ License: MPL2 / LGPLv3 / GPLv3.
 [[https://github.com/ProjectPhysX/OpenCL-Wrapper][OpenCL-Wrapper]] by Dr. Moritz Lehmann — Lightweight C++ wrapper for OpenCL that simplifies GPU-accelerated computation.
 The project has been rearranged and modified slightly to fit the needs of this project.
 License: Custom open-source license (educational, non-military research, and non-military commercial use).
-
-* License
-TENNLab Backpropagation Through Time Demo by Jackson Mowry
