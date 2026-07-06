@@ -849,3 +849,15 @@ x <stdin>
     N           Min           Max        Median           Avg        Stddev
 x 12074            -1             1 -0.0013236494 -0.0045577614    0.27270209
 #+end_src
+
+* Dependencies
+This project uses the following third-party libraries.
+
+** Eigen
+[[https://eigen.tuxfamily.org/][Eigen]] — C++ template library for linear algebra (matrices, vectors, numerical solvers).
+License: MPL2 / LGPLv3 / GPLv3.
+
+** OpenCL-Wrapper
+[[https://github.com/ProjectPhysX/OpenCL-Wrapper][OpenCL-Wrapper]] by Dr. Moritz Lehmann — Lightweight C++ wrapper for OpenCL that simplifies GPU-accelerated computation.
+The project has been rearranged and modified slightly to fit the needs of this project.
+License: Custom open-source license (educational, non-military research, and non-military commercial use).
