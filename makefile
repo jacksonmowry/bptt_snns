@@ -8,11 +8,11 @@ CC ?= gcc
 
 FR_LIB = framework-open/lib/libframework.a
 FR_INCLUDES = framework-open/include/
-FR_CFLAGS = -std=c++11 -Wall -Wextra -Iinclude -Iframework-open/include -Iframework-open/include/utils $(CFLAGS)
+FR_CFLAGS = -std=c++11 -Wall -Wextra -Iinclude -Iframework-open/include -Iframework-open/include/utils -Ivendor/OpenCL-Wrapper/include $(CFLAGS)
 FR_OBJ = framework-open/obj/framework.o framework-open/obj/processor_help.o framework-open/obj/properties.o
 
 RISP_OBJ = framework-open/obj/risp.o framework-open/obj/risp_static.o
-BPTT_OBJ = obj/shared.o obj/math_utils.o obj/data_utils.o obj/network_utils.o obj/forward_backward.o obj/optimizer.o obj/threading.o obj/csv.o
+BPTT_OBJ = obj/shared.o obj/math_utils.o obj/data_utils.o obj/network_utils.o obj/forward_backward.o obj/optimizer.o obj/threading.o obj/csv.o obj/kernel.o
 
 FRAMEWORK_DIR = framework-open/
 
@@ -66,6 +66,9 @@ obj/threading.o: src/threading.cpp
 	$(CXX) $(FR_CFLAGS) -o $@ -c $^
 
 obj/csv.o: src/csv.cpp 
+	$(CXX) $(FR_CFLAGS) -o $@ -c $^
+
+obj/kernel.o: vendor/OpenCL-Wrapper/src/kernel.cpp
 	$(CXX) $(FR_CFLAGS) -o $@ -c $^
 
 # Utility ######################################################################

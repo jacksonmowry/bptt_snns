@@ -2,6 +2,8 @@
 include
 -I
 framework-open/include
+-I
+vendor/OpenCL-Wrapper/include
 -Wall
 -Wextra
 -std=c++11

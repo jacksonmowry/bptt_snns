@@ -1,9 +1,9 @@
 #pragma once
 
-#include <vector>
-#include <cstddef>
-#include <Eigen/Dense>
 #include "framework.hpp"
+#include <Eigen/Dense>
+#include <cstddef>
+#include <vector>
 
 struct TrainingBundle {
     const std::vector<std::vector<double>>* weights;
@@ -59,5 +59,8 @@ struct NetworkConfiguration {
     double min_potential;
     bool leak;
     double scale_factor;
+    int steps;
     bool discrete;
+    double min_weight;
+    double max_weight;
 };

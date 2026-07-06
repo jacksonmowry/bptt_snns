@@ -1,6 +1,5 @@
 #pragma once
 
-#include <cstddef>
 #include "csv.h"
 #include "framework.hpp"
 
