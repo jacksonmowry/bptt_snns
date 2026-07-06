@@ -17,3 +17,83 @@ You'll need both data/label CSVs, the application will parse everything for you.
 bin/bptt_learning --network_json networks/risp_f_emptynet.json --data_file mnist_data.csv --label_file mnist_label.csv --learning_rate 0.0084 --decay_rate 0.0001 --tau 0.95 --rho 1.4 --timesteps 32 --hidden_neurons 64 --epochs 1000 --batch_size 10 --connectivity 0.1
 #+end_src
 
+* Resuming Training
+** Pre-train a network
+Save the trained network with =--network_json_out=. This writes the full network JSON with metadata embedded in =Associated_Data -> other=.
+
+#+begin_src shell
+bin/bptt_learning --network_json networks/risp_f_emptynet.json \
+  --data_file mnist_data.csv --label_file mnist_label.csv \
+  --learning_rate 0.0084 --decay_rate 0.0001 --tau 0.95 --rho 1.4 \
+  --timesteps 32 --hidden_neurons 64 --epochs 100 --batch_size 10 \
+  --connectivity 0.1 \
+  --network_json_out models/checked_network.json
+#+end_src
+
+** Reload and continue training
+Use the same =--network_json= pointing to a saved network. When the network has nodes/edges and embedded metadata, all CLI arguments are overridden by the saved values. The program prints a warning listing every overridden parameter. You only need to provide the network file and data — no hyperparameters required.
+
+#+begin_src shell
+bin/bptt_learning --network_json models/checked_network.json \
+  --data_file mnist_data.csv --label_file mnist_label.csv
+#+end_src
+
+If the network is empty (no nodes/edges), it generates a fresh network from scratch using the default CLI parameters. If the network has structure but no metadata, it warns and falls back to defaults:
+
+#+begin_src text
+Warning: Loading network from models/checked_network.json. CLI arguments will be overridden by saved metadata:
+[metadata override] --learning_rate: 0.0084 (from saved network)
+[metadata override] --decay_rate: 0.0001 (from saved network)
+[metadata override] --tau: 0.95 (from saved network)
+[metadata override] --rho: 1.4 (from saved network)
+[metadata override] --timesteps: 32 (from saved network)
+[metadata override] --hidden_neurons: 64 (from saved network)
+[metadata override] --seed: 1234567890 (from saved network)
+[metadata override] --epochs: 100 (from saved network)
+[metadata override] --batch_size: 10 (from saved network)
+[metadata override] --connectivity: 0.1 (from saved network)
+[metadata override] --training_percent: 0.8 (from saved network)
+[metadata override] --data_file: mnist_data.csv (from saved network)
+[metadata override] --label_file: mnist_label.csv (from saved network)
+Loaded metadata from models/checked_network.json
+#+end_src
+
+* Testing
+
+Golden output testing ensures deterministic reproducibility — same inputs and seed
+produce byte-identical stdout and trained network across builds.
+
+** Running Tests
+
+#+begin_src shell
+./tests/run_golden_tests.sh
+#+end_src
+
+Runs all tests in =tests/golden/= and compares stdout + network JSON against
+golden baselines. Only =compile_time= and =start_time= are stripped from network
+comparison — all other metadata is compared verbatim.
+
+** Regenerating Golden Files
+
+#+begin_src shell
+./tests/update_golden.sh [test_name]
+#+end_src
+
+Without arguments, regenerates golden files for all tests. With a test name
+(full =golden_test_N_xxx= or short =N_xxx=), regenerates only that test.
+This overwrites existing =.out= and =.net.json= files in-place.
+
+** Adding a Test
+
+  1. Create =tests/golden/N_<name>= directory
+  2. Add =golden_test_N_<name>.cfg= with =key=value= CLI arguments
+  3. Run =tests/update_golden.sh golden_test_N_<name>= to generate golden files
+  4. Run =tests/run_golden_tests.sh= to verify they match
+
+See =tests/golden_tests.org= for full documentation and directory structure.
+
+** Test Registry
+
+| Test Config | Description |
+|-------------+-------------|
+| =golden_test_1_iris_10ep= | Iris 80/20 split, 10 epochs, seed 42 — baseline pipeline verification |

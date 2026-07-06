@@ -1,0 +1,12 @@
+Neurons: 27, Synapses: 148
+Beginning training
+Epoch:    1/10, Loss:    1.09223 (Best:    1.09223), Acc:   0.391667 (Best:   0.391667), TestLoss:    1.09429 (Best:    1.09429), TestAcc:   0.566667 (Best:   0.566667)
+Epoch:    2/10, Loss:    1.07115 (Best:    1.07115), Acc:   0.633333 (Best:   0.633333), TestLoss:    1.08108 (Best:    1.08108), TestAcc:   0.633333 (Best:   0.633333)
+Epoch:    3/10, Loss:    1.03636 (Best:    1.03636), Acc:       0.65 (Best:       0.65), TestLoss:    1.07929 (Best:    1.07929), TestAcc:   0.666667 (Best:   0.666667)
+Epoch:    4/10, Loss:    1.00918 (Best:    1.00918), Acc:   0.716667 (Best:   0.716667), TestLoss:    1.08043 (Best:    1.07929), TestAcc:        0.7 (Best:        0.7)
+Epoch:    5/10, Loss:    1.00341 (Best:    1.00341), Acc:   0.841667 (Best:   0.841667), TestLoss:    1.06291 (Best:    1.06291), TestAcc:   0.666667 (Best:        0.7)
+Epoch:    6/10, Loss:   0.995099 (Best:   0.995099), Acc:   0.858333 (Best:   0.858333), TestLoss:    1.05753 (Best:    1.05753), TestAcc:        0.7 (Best:        0.7)
+Epoch:    7/10, Loss:    1.00058 (Best:   0.995099), Acc:   0.841667 (Best:   0.858333), TestLoss:    1.08689 (Best:    1.05753), TestAcc:   0.666667 (Best:        0.7)
+Epoch:    8/10, Loss:   0.993361 (Best:   0.993361), Acc:   0.883333 (Best:   0.883333), TestLoss:    1.04815 (Best:    1.04815), TestAcc:        0.8 (Best:        0.8)
+Epoch:    9/10, Loss:    1.00781 (Best:   0.993361), Acc:   0.808333 (Best:   0.883333), TestLoss:    1.07416 (Best:    1.04815), TestAcc:        0.7 (Best:        0.8)
+Epoch:   10/10, Loss:   0.995334 (Best:   0.993361), Acc:   0.883333 (Best:   0.883333), TestLoss:    1.06449 (Best:    1.04815), TestAcc:   0.666667 (Best:        0.8)

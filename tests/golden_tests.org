@@ -1,0 +1,79 @@
+* Golden Tests
+Golden output testing ensures deterministic reproducibility — same inputs and seed produce byte-identical stdout and trained network across builds.
+
+** Test Organization
+Tests are organized hierarchically under =tests/golden/<dir>/= where =<dir>= is a short identifier for the test. Each test directory contains:
+  - =golden_test_N_<name>.cfg= — CLI key=value configuration
+  - =golden_test_N_<name>.out= — golden stdout output
+  - =golden_test_N_<name>.net.json= — golden trained network JSON
+
+#+begin_src text
+tests/
+├── golden_tests.org           # This file — full docs and registry
+├── run_golden_tests.sh        # Runs all tests, compares against golden
+├── update_golden.sh           # Regenerates golden files in-place
+└── golden/
+    └── 1_iris_10ep/
+        ├── golden_test_1_iris_10ep.cfg
+        ├── golden_test_1_iris_10ep.out
+        └── golden_test_1_iris_10ep.net.json
+#+end_src
+
+** Test Anatomy
+Each golden test is defined by a =.cfg= file. The runner parses =key=value= pairs into =--key= CLI arguments, runs the binary, then compares:
+  1. stdout against =golden_test_N_<name>.out=
+  2. trained network JSON against =golden_test_N_<name>.net.json=
+     - The comparison strips metadata that changes, such as timestamps
+
+** Config File Format (=golden_test_N_<name>.cfg=)
+Lines starting with =#= or blank lines are ignored.
+
+#+begin_src text
+# Iris baseline, 10 epochs, seed 42
+network_json=networks/iris_empty.json
+data_file=data/iris_data.csv
+label_file=data/iris_label.csv
+learning_rate=0.009
+epochs=10
+seed=42
+threads=1
+timesteps=32
+hidden_neurons=16
+batch_size=1
+connectivity=0.2
+decay_rate=0.0001
+tau=0.95
+rho=1.4
+#+end_src
+
+** Adding a New Test
+1. Create a test directory:
+#+begin_src shell
+mkdir -p tests/golden/N_<name>
+#+end_src
+2. Create the config file =golden_test_N_<name>.cfg= inside it.
+3. Regenerate golden files in-place:
+#+begin_src shell
+tests/update_golden.sh N_<name>
+#+end_src
+This runs the binary with the config and saves =.out= and =.net.json= files to the test directory, overwriting any existing golden files.
+4. Verify the test passes:
+#+begin_src shell
+tests/run_golden_tests.sh N_<name>
+#+end_src
+5. To regenerate golden files for ALL tests:
+#+begin_src shell
+tests/update_golden.sh
+#+end_src
+
+** Scripts
+*** =update_golden.sh=
+Regenerates golden files in-place.
+- Usage: =./tests/update_golden.sh [test_name]=
+- With no argument, regenerates all tests. With a test name (full =golden_test_N_xxx= or short =N_xxx=), regenerates only that test.
+*** =run_golden_tests.sh=
+Runs all discovered tests and compares output against golden baselines.
+- Returns 0 if all pass, 1 if any fail.
+- Usage: =./tests/run_golden_tests.sh [test_name]=
+- With no argument, runs all tests. With a test name, runs only that test.
+
