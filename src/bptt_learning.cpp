@@ -527,7 +527,10 @@ int main(int argc, char* argv[]) {
         .min_potential = min_potential,
         .leak          = leak,
         .scale_factor  = scale_factor,
+        .steps         = scale,
         .discrete      = discrete,
+        .min_weight    = min_weight,
+        .max_weight    = max_weight,
     };
 
     size_t neuron_count  = 0;
