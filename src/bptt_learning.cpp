@@ -372,13 +372,6 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
-    char* network_json_file = const_cast<char*>(cfg.network_json_file.c_str());
-    char* data_file         = const_cast<char*>(cfg.data_file.c_str());
-    char* label_file        = const_cast<char*>(cfg.label_file.c_str());
-    char* train_data_file   = const_cast<char*>(cfg.train_data_file.c_str());
-    char* train_label_file  = const_cast<char*>(cfg.train_label_file.c_str());
-    char* test_data_file    = const_cast<char*>(cfg.test_data_file.c_str());
-    char* test_label_file   = const_cast<char*>(cfg.test_label_file.c_str());
     bool timeseries         = cfg.timeseries;
     double connectivity     = cfg.connectivity;
     double learning_rate    = cfg.learning_rate;
@@ -391,7 +384,6 @@ int main(int argc, char* argv[]) {
     size_t epochs           = cfg.epochs;
     size_t batch_size       = cfg.batch_size;
     double training_percent = cfg.training_percent;
-    char* network_json_out  = const_cast<char*>(cfg.network_json_out.c_str());
     size_t threads          = cfg.threads;
 
     srand(seed);
@@ -402,14 +394,16 @@ int main(int argc, char* argv[]) {
 
     if (timeseries) {
         assert(false);
-        load_dataset_2d(data_file, label_file, training_percent, &train, &test);
+        load_dataset_2d(cfg.data_file.c_str(), cfg.label_file.c_str(), training_percent, &train, &test);
     } else {
-        if (data_file && label_file) {
-            load_dataset(data_file, label_file, training_percent, &train,
-                         &test);
+        if (!cfg.data_file.empty() && !cfg.label_file.empty()) {
+            load_dataset(cfg.data_file.c_str(), cfg.label_file.c_str(),
+                         training_percent, &train, &test);
         } else {
-            load_dataset_single(train_data_file, train_label_file, &train);
-            load_dataset_single(test_data_file, test_label_file, &test);
+            load_dataset_single(cfg.train_data_file.c_str(),
+                                cfg.train_label_file.c_str(), &train);
+            load_dataset_single(cfg.test_data_file.c_str(),
+                                cfg.test_label_file.c_str(), &test);
         }
     }
 
@@ -423,7 +417,7 @@ int main(int argc, char* argv[]) {
     size_t total_neurons  = input_neurons + hidden_neurons + output_neurons;
 
     json emptynet;
-    ifstream fin(network_json_file);
+    ifstream fin(cfg.network_json_file);
     fin >> emptynet;
     fin.close();
 
@@ -446,7 +440,7 @@ int main(int argc, char* argv[]) {
             json other = n->get_data("other");
             printf("Warning: Loading network from %s. CLI arguments will be "
                    "overridden by saved metadata:\n",
-                   network_json_file);
+                   cfg.network_json_file.c_str());
 
             // Helper lambda: read a double from metadata and override CLI value
             auto override_double = [&](const std::string& key, double& target,
@@ -480,16 +474,13 @@ int main(int argc, char* argv[]) {
             };
 
             // Helper lambda: read a string from metadata and override CLI value
-            auto override_string = [&](const std::string& key, char*& target,
+            auto override_string = [&](const std::string& key,
+                                       std::string& target,
                                        const char* param_name) {
                 if (other.count(key)) {
-                    std::string val = other[key].get<std::string>();
-                    if (target != NULL) {
-                        free(target);
-                    }
-                    target = strdup(val.c_str());
+                    target = other[key].get<std::string>();
                     printf("[metadata override] %s: %s (from saved network)\n",
-                           param_name, target);
+                           param_name, target.c_str());
                 }
             };
 
@@ -507,20 +498,20 @@ int main(int argc, char* argv[]) {
                             "--training_percent");
             override_size("threads", threads, "--threads");
             override_bool("timeseries", timeseries, "--timeseries");
-            override_string("data_file", data_file, "--data_file");
-            override_string("label_file", label_file, "--label_file");
-            override_string("train_data_file", train_data_file,
+            override_string("data_file", cfg.data_file, "--data_file");
+            override_string("label_file", cfg.label_file, "--label_file");
+            override_string("train_data_file", cfg.train_data_file,
                             "--train_data_file");
-            override_string("train_label_file", train_label_file,
+            override_string("train_label_file", cfg.train_label_file,
                             "--train_label_file");
-            override_string("test_data_file", test_data_file,
+            override_string("test_data_file", cfg.test_data_file,
                             "--test_data_file");
-            override_string("test_label_file", test_label_file,
+            override_string("test_label_file", cfg.test_label_file,
                             "--test_label_file");
-            override_string("network_json_out", network_json_out,
+            override_string("network_json_out", cfg.network_json_out,
                             "--network_json_out");
 
-            printf("Loaded metadata from %s\n", network_json_file);
+            printf("Loaded metadata from %s\n", cfg.network_json_file.c_str());
         } else {
             fprintf(stderr,
                     "Warning: Network has nodes/edges but no metadata found. "
@@ -672,20 +663,14 @@ int main(int argc, char* argv[]) {
     run_metadata["training_percent"] = training_percent;
     run_metadata["threads"]          = threads;
     run_metadata["timeseries"]       = timeseries;
-    run_metadata["network_json"] =
-        network_json_file ? std::string(network_json_file) : "";
-    run_metadata["data_file"]  = data_file ? std::string(data_file) : "";
-    run_metadata["label_file"] = label_file ? std::string(label_file) : "";
-    run_metadata["train_data_file"] =
-        train_data_file ? std::string(train_data_file) : "";
-    run_metadata["train_label_file"] =
-        train_label_file ? std::string(train_label_file) : "";
-    run_metadata["test_data_file"] =
-        test_data_file ? std::string(test_data_file) : "";
-    run_metadata["test_label_file"] =
-        test_label_file ? std::string(test_label_file) : "";
-    run_metadata["network_json_out"] =
-        network_json_out ? std::string(network_json_out) : "";
+    run_metadata["network_json"]     = cfg.network_json_file;
+    run_metadata["data_file"]        = cfg.data_file;
+    run_metadata["label_file"]       = cfg.label_file;
+    run_metadata["train_data_file"]  = cfg.train_data_file;
+    run_metadata["train_label_file"] = cfg.train_label_file;
+    run_metadata["test_data_file"]   = cfg.test_data_file;
+    run_metadata["test_label_file"]  = cfg.test_label_file;
+    run_metadata["network_json_out"] = cfg.network_json_out;
     run_metadata["input_neurons"]  = input_neurons;
     run_metadata["output_neurons"] = output_neurons;
     run_metadata["total_neurons"]  = total_neurons;
@@ -914,7 +899,7 @@ int main(int argc, char* argv[]) {
 
             json j;
             n->to_json(j);
-            ofstream fout(network_json_out);
+            ofstream fout(cfg.network_json_out);
             if (!fout) {
                 fprintf(stderr,
                         "Failed to open networks/trained.json for writing\n");
