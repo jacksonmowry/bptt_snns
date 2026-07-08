@@ -26,6 +26,7 @@ struct CliConfig {
     std::string network_json_out;
     size_t threads = 1;
     bool show_help = false;
+    bool opencl    = false;
 };
 
 int parse_cli(int argc, char* argv[], CliConfig* cfg);

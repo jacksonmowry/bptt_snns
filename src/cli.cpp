@@ -6,6 +6,7 @@
 #include <cstring>
 #include <ctime>
 #include <string>
+#include <unistd.h>
 
 static int cli_error(const char* fmt, ...) {
     va_list ap;
@@ -76,36 +77,71 @@ int parse_cli(int argc, char* argv[], CliConfig* cfg) {
                 return cli_error("--network_json requires a value");
             }
             cfg->network_json_file = argv[i];
+
+            if (access(cfg->network_json_file.c_str(), F_OK)) {
+                return cli_error("Failed to open --network_json \"%s\"",
+                                 cfg->network_json_file.c_str());
+            }
         } else if (arg == "--data_file" || arg == "-d") {
             if (++i >= argc) {
                 return cli_error("--data_file requires a value");
             }
             cfg->data_file = argv[i];
+
+            if (access(cfg->data_file.c_str(), F_OK)) {
+                return cli_error("Failed to open --data_file \"%s\"",
+                                 cfg->data_file.c_str());
+            }
         } else if (arg == "--label_file" || arg == "-l") {
             if (++i >= argc) {
                 return cli_error("--label_file requires a value");
             }
             cfg->label_file = argv[i];
+
+            if (access(cfg->label_file.c_str(), F_OK)) {
+                return cli_error("Failed to open --label_file \"%s\"",
+                                 cfg->label_file.c_str());
+            }
         } else if (arg == "--train_data_file" || arg == "-a") {
             if (++i >= argc) {
                 return cli_error("--train_data_file requires a value");
             }
             cfg->train_data_file = argv[i];
+
+            if (access(cfg->train_data_file.c_str(), F_OK)) {
+                return cli_error("Failed to open --train_data_file \"%s\"",
+                                 cfg->train_data_file.c_str());
+            }
         } else if (arg == "--train_label_file" || arg == "-i") {
             if (++i >= argc) {
                 return cli_error("--train_label_file requires a value");
             }
             cfg->train_label_file = argv[i];
+
+            if (access(cfg->train_label_file.c_str(), F_OK)) {
+                return cli_error("Failed to open --train_label_file \"%s\"",
+                                 cfg->train_label_file.c_str());
+            }
         } else if (arg == "--test_data_file" || arg == "-j") {
             if (++i >= argc) {
                 return cli_error("--test_data_file requires a value");
             }
             cfg->test_data_file = argv[i];
+
+            if (access(cfg->test_data_file.c_str(), F_OK)) {
+                return cli_error("Failed to open --test_data_file \"%s\"",
+                                 cfg->test_data_file.c_str());
+            }
         } else if (arg == "--test_label_file" || arg == "-k") {
             if (++i >= argc) {
                 return cli_error("--test_label_file requires a value");
             }
             cfg->test_label_file = argv[i];
+
+            if (access(cfg->test_label_file.c_str(), F_OK)) {
+                return cli_error("Failed to open --test_label_file \"%s\"",
+                                 cfg->test_label_file.c_str());
+            }
         } else if (arg == "--timeseries" || arg == "-b") {
             cfg->timeseries = true;
         } else if (arg == "--connectivity" || arg == "-c" || arg == "-S") {
@@ -220,6 +256,12 @@ int parse_cli(int argc, char* argv[], CliConfig* cfg) {
                 return cli_error("--network_json_out requires a value");
             }
             cfg->network_json_out = argv[i];
+
+            if (access(cfg->network_json_out.c_str(), W_OK)) {
+                return cli_error(
+                    "Failed to open --network_json_out \"%s\" for writing",
+                    cfg->network_json_out.c_str());
+            }
         } else if (arg == "--threads" || arg == "-T") {
             unsigned long v;
             int rc = parse_ulong_arg(i, argc, argv, &v, "threads");
@@ -230,6 +272,8 @@ int parse_cli(int argc, char* argv[], CliConfig* cfg) {
                 return cli_error("--threads must be > 0");
             }
             cfg->threads = v;
+        } else if (arg == "--opencl") {
+            cfg->opencl = true;
         } else {
             return cli_error("Unknown argument: %s", arg.c_str());
         }
@@ -274,5 +318,8 @@ void print_usage(const char* prog) {
     fprintf(stderr,
             "  -N, --network_json_out FILE         Output network JSON\n");
     fprintf(stderr, "  -T, --threads          UINT         Thread count\n");
+    fprintf(
+        stderr,
+        " N/A, --opencl                        Enable OpenCL Acceleration\n");
     fprintf(stderr, "  -h, --help                          Show this help\n");
 }

@@ -52,6 +52,7 @@ struct NetworkConfiguration {
     size_t output_neurons;
     size_t layer_offsets[3];
     size_t total_neurons;
+    size_t max_incoming;
 
     size_t timesteps;
     bool timeseries;
@@ -63,4 +64,5 @@ struct NetworkConfiguration {
     bool discrete;
     double min_weight;
     double max_weight;
+    double spike_value_factor;
 };

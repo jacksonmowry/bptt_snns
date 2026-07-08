@@ -72,7 +72,7 @@ obj/threading.o: src/threading.cpp
 obj/csv.o: src/csv.cpp 
 	$(CXX) $(FR_CFLAGS) -o $@ -c $^
 
-obj/kernel.o: vendor/OpenCL-Wrapper/src/kernel.cpp
+obj/kernel.o: src/kernel.cpp
 	$(CXX) $(FR_CFLAGS) -o $@ -c $^
 
 obj/cli.o: src/cli.cpp

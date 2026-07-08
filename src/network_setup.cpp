@@ -95,18 +95,17 @@ load_and_init_network(const std::string& json_file, double& connectivity,
 
 void build_run_metadata(
     neuro::Network* n, int argc, char* argv[], const CliConfig& cfg,
-    const Dataset* train, const Dataset* test, size_t input_neurons,
-    size_t output_neurons, size_t total_neurons, size_t neuron_count,
-    size_t synapse_count, bool discrete, double min_potential,
-    double min_weight, double max_weight, double max_threshold,
-    const std::string& leak_prop, int scale, double scale_factor,
-    double connectivity, double learning_rate, double decay_rate, double tau,
-    double rho, size_t timesteps, size_t hidden_neurons, unsigned long seed,
-    size_t epochs, size_t batch_size, double training_percent, size_t threads,
-    bool timeseries) {
+    size_t input_neurons, size_t output_neurons, size_t total_neurons,
+    size_t neuron_count, size_t synapse_count, bool discrete,
+    double min_potential, double min_weight, double max_weight,
+    double max_threshold, const std::string& leak_prop, int scale,
+    double scale_factor, double connectivity, double learning_rate,
+    double decay_rate, double tau, double rho, size_t timesteps,
+    size_t hidden_neurons, unsigned long seed, size_t epochs, size_t batch_size,
+    double training_percent, size_t threads, bool timeseries) {
     // CLI arguments
     json cli_args = json::array();
-    for (int i = 0; i < argc; i++) {
+    for (int i = 1; i < argc; i++) {
         cli_args.push_back(std::string(argv[i]));
     }
 
@@ -169,30 +168,6 @@ void build_run_metadata(
     run_metadata["leak_mode"]        = leak_prop;
     run_metadata["scale"]            = scale;
     run_metadata["scale_factor"]     = discrete ? scale_factor : 1.0;
-
-    // Train data min/max arrays
-    {
-        json train_min = json::array();
-        json train_max = json::array();
-        for (int i = 0; i < train->cols; i++) {
-            train_min.push_back(train->min_vals[i]);
-            train_max.push_back(train->max_vals[i]);
-        }
-        run_metadata["train_data_min"] = train_min;
-        run_metadata["train_data_max"] = train_max;
-    }
-
-    // Test data min/max arrays (omit if test set empty)
-    if (test->observations > 0) {
-        json test_min = json::array();
-        json test_max = json::array();
-        for (int i = 0; i < test->cols; i++) {
-            test_min.push_back(test->min_vals[i]);
-            test_max.push_back(test->max_vals[i]);
-        }
-        run_metadata["test_data_min"] = test_min;
-        run_metadata["test_data_max"] = test_max;
-    }
 
     // Merge with existing Associated_Data -> other if any
     json existing_other = json::object();
