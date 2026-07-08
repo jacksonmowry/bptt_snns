@@ -233,7 +233,7 @@ int main(int argc, char* argv[]) {
         Memory<double> correct(device, 1);
         Memory<double> loss(device, 1);
         Memory<float> spike_grad_history(device,
-                                          nc.total_neurons * nc.timesteps);
+                                         nc.total_neurons * nc.timesteps);
         Memory<double> voltage_grad_history(device,
                                             nc.total_neurons * nc.timesteps);
         Memory<double> future_mem_grad(device, nc.total_neurons);
@@ -294,6 +294,9 @@ int main(int argc, char* argv[]) {
             }
         }
 
+        m_weights.reset();
+        v_weights.reset();
+
         data.write_to_device();
         v_thresh.write_to_device();
         weights.write_to_device();
@@ -302,6 +305,8 @@ int main(int argc, char* argv[]) {
         incoming_ids.write_to_device();
         is_input_neuron.write_to_device();
         is_output_neuron.write_to_device();
+        m_weights.write_to_device();
+        v_weights.write_to_device();
 
         double b1_t = 1.0;
         double b2_t = 1.0;
@@ -309,12 +314,11 @@ int main(int argc, char* argv[]) {
         for (size_t epoch = 0; epoch < cfg.epochs; epoch++) {
             // No mini-batch for now
             delta_W.reset();
-            m_weights.reset();
-            v_weights.reset();
             correct.reset();
             loss.reset();
 
             for (int obs = 0; obs < train.observations; obs++) {
+                x.reset();
                 v.reset();
                 s.reset();
                 v_pre.reset();
@@ -339,24 +343,24 @@ int main(int argc, char* argv[]) {
 
                 // Backwards
                 for (short t = nc.timesteps - 1; t >= 0; t--) {
-                    backward_kernel.set_parameters(22, (ushort)t);
+                    backward_kernel.set_parameters(22, (short)t);
                     backward_kernel.run();
                 }
-
-                // Weight updates
-                // 9 current_batch_size
-                // 11 batch_start
-                // 12 epoch
-                // 15-16 b1_t b2_t
-                b1_t *= 0.9;
-                b2_t *= 0.999;
-                weight_updates_kernel.set_parameters(
-                    9, (ushort)1, (ushort)1);
-                weight_updates_kernel.set_parameters(11, (uint)obs);
-                weight_updates_kernel.set_parameters(12, (uint)epoch);
-                weight_updates_kernel.set_parameters(15, b1_t, b2_t);
-                weight_updates_kernel.run();
             }
+
+            // Weight updates
+            // 9 current_batch_size
+            // 11 batch_start
+            // 12 epoch
+            // 15-16 b1_t b2_t
+            b1_t *= 0.9;
+            b2_t *= 0.999;
+            weight_updates_kernel.set_parameters(9, (ushort)train.observations,
+                                                 (ushort)train.observations);
+            weight_updates_kernel.set_parameters(11, (uint)0);
+            weight_updates_kernel.set_parameters(12, (uint)epoch);
+            weight_updates_kernel.set_parameters(15, b1_t, b2_t);
+            weight_updates_kernel.run();
 
             correct.read_from_device();
             loss.read_from_device();
