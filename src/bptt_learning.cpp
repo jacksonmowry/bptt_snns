@@ -249,7 +249,7 @@ int main(int argc, char* argv[]) {
         Kernel forward_kernel(
             device, forward_work_size, "risp_forward_kernel", x, v_thresh,
             weights, delays, incoming, incoming_ids, is_input_neuron, v, s,
-            v_pre, (short)nc.leak, (short)nc.min_potential / nc.scale_factor,
+            v_pre, (short)nc.leak, (short)(nc.min_potential / nc.scale_factor),
             (short)nc.total_neurons, (ushort)nc.timesteps, (ushort)0,
             (ushort)nc.max_incoming);
 
@@ -262,7 +262,7 @@ int main(int argc, char* argv[]) {
             device, backward_work_size, "risp_backward_kernel", dL_ds, s, v_pre,
             v_thresh, is_output_neuron, weights, delays, incoming, incoming_ids,
             spike_grad_history, voltage_grad_history, future_mem_grad, delta_W,
-            (short)nc.leak, (short)nc.min_potential, (double)tau, (double)rho,
+            (short)nc.leak, (double)nc.min_potential, (double)tau, (double)rho,
             (ushort)nc.total_neurons, (ushort)nc.output_neurons,
             (short)nc.timesteps, (ushort)nc.max_incoming,
             (double)nc.scale_factor, (short)0);
@@ -311,62 +311,103 @@ int main(int argc, char* argv[]) {
         double b1_t = 1.0;
         double b2_t = 1.0;
 
+        // Shuffle order for SGD
+        vector<size_t> batch_order(train.observations);
+        for (int i = 0; i < train.observations; i++) {
+            batch_order[i] = (size_t)i;
+        }
+
+        double best_acc = 0.0;
+        double best_loss = DBL_MAX;
+
         for (size_t epoch = 0; epoch < cfg.epochs; epoch++) {
-            // No mini-batch for now
-            delta_W.reset();
-            correct.reset();
-            loss.reset();
+            double epoch_loss = 0.0;
+            size_t epoch_correct = 0;
 
-            for (int obs = 0; obs < train.observations; obs++) {
-                x.reset();
-                v.reset();
-                s.reset();
-                v_pre.reset();
-                dL_ds.reset();
-                spike_grad_history.reset();
-                voltage_grad_history.reset();
-                future_mem_grad.reset();
-
-                // Encode data
-                encode_kernel.set_parameters(5, (uint)obs);
-                encode_kernel.run();
-
-                // Forward pass
-                for (size_t t = 0; t < nc.timesteps; t++) {
-                    forward_kernel.set_parameters(14, (ushort)t);
-                    forward_kernel.run();
-                }
-
-                // Loss
-                loss_kernel.set_parameters(7, (ushort)(train.labels[obs]));
-                loss_kernel.run();
-
-                // Backwards
-                for (short t = nc.timesteps - 1; t >= 0; t--) {
-                    backward_kernel.set_parameters(22, (short)t);
-                    backward_kernel.run();
-                }
+            // Shuffle batch order each epoch
+            for (int i = 0; i < train.observations; i++) {
+                int j = rand() % train.observations;
+                size_t tmp = batch_order[i];
+                batch_order[i] = batch_order[j];
+                batch_order[j] = tmp;
             }
 
-            // Weight updates
-            // 9 current_batch_size
-            // 11 batch_start
-            // 12 epoch
-            // 15-16 b1_t b2_t
-            b1_t *= 0.9;
-            b2_t *= 0.999;
-            weight_updates_kernel.set_parameters(9, (ushort)train.observations,
-                                                 (ushort)train.observations);
-            weight_updates_kernel.set_parameters(11, (uint)0);
-            weight_updates_kernel.set_parameters(12, (uint)epoch);
-            weight_updates_kernel.set_parameters(15, b1_t, b2_t);
-            weight_updates_kernel.run();
+            // Mini-batch SGD loop
+            for (int batch_start = 0; batch_start < train.observations;
+                 batch_start += (int)batch_size) {
+                size_t current_batch_size = min(
+                    batch_size, (size_t)(train.observations - batch_start));
 
-            correct.read_from_device();
-            loss.read_from_device();
+                // Reset accumulators for this batch
+                delta_W.reset();
+                correct.reset();
+                loss.reset();
 
-            printf("Loss: %g, Correct: %g\n", loss[0] / train.observations,
-                   correct[0] / train.observations);
+                for (size_t b = 0; b < current_batch_size; b++) {
+                    size_t obs = batch_order[(size_t)batch_start + b];
+
+                    x.reset();
+                    v.reset();
+                    s.reset();
+                    v_pre.reset();
+                    dL_ds.reset();
+                    spike_grad_history.reset();
+                    voltage_grad_history.reset();
+                    future_mem_grad.reset();
+
+                    // Encode data
+                    encode_kernel.set_parameters(5, (uint)obs);
+                    encode_kernel.run();
+
+                    // Forward pass
+                    for (size_t t = 0; t < nc.timesteps; t++) {
+                        forward_kernel.set_parameters(14, (ushort)t);
+                        forward_kernel.run();
+                    }
+
+                    // Loss
+                    loss_kernel.set_parameters(
+                        7, (ushort)(train.labels[obs]));
+                    loss_kernel.run();
+
+                    // Backwards
+                    for (short t = nc.timesteps - 1; t >= 0; t--) {
+                        backward_kernel.set_parameters(22, (short)t);
+                        backward_kernel.run();
+                    }
+                }
+
+                // Weight updates
+                // 9 current_batch_size, 10 batch_size
+                // 11 batch_start, 12 epoch
+                // 15-16 b1_t b2_t
+                b1_t *= 0.9;
+                b2_t *= 0.999;
+                weight_updates_kernel.set_parameters(
+                    9, (ushort)current_batch_size, (ushort)batch_size);
+                weight_updates_kernel.set_parameters(11, (uint)batch_start);
+                weight_updates_kernel.set_parameters(12, (uint)epoch);
+                weight_updates_kernel.set_parameters(15, b1_t, b2_t);
+                weight_updates_kernel.run();
+
+                correct.read_from_device();
+                loss.read_from_device();
+                epoch_loss += loss[0];
+                epoch_correct += (size_t)correct[0];
+            }
+
+            double avg_train_loss = epoch_loss / (double)train.observations;
+            double avg_train_acc  = epoch_correct / (double)train.observations;
+
+            if (avg_train_loss < best_loss) {
+                best_loss = avg_train_loss;
+            }
+
+            if (avg_train_acc > best_acc) {
+                best_acc = avg_train_acc;
+            }
+            printf("Epoch: %4zu/%zu, Loss: %10g / %10g, Acc: %10g / %10g\n",
+                   epoch + 1, cfg.epochs, avg_train_loss, best_loss, avg_train_acc, best_acc);
         }
 
         exit(0);

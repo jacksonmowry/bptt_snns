@@ -8,7 +8,7 @@ CC ?= gcc
 
 FR_LIB = framework-open/lib/libframework.a
 FR_INCLUDES = framework-open/include/
-FR_CFLAGS = -std=c++11 -Wall -Wextra -O2 -march=native -Iinclude -Iframework-open/include -Iframework-open/include/utils -Ivendor/OpenCL-Wrapper/include $(CFLAGS)
+FR_CFLAGS = -std=c++11 -Wall -Wextra -O3 -march=native -flto -Iinclude -Iframework-open/include -Iframework-open/include/utils -Ivendor/OpenCL-Wrapper/include $(CFLAGS)
 FR_OBJ = framework-open/obj/framework.o framework-open/obj/processor_help.o framework-open/obj/properties.o
 
 RISP_OBJ = framework-open/obj/risp.o framework-open/obj/risp_static.o
