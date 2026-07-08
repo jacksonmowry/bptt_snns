@@ -36,11 +36,11 @@ void encode(Memory<double>& data, const Dataset& d) {
             double inv_x = 1.0 - x;
 
             if (x > 0.0) {
-                data[(row * d.cols * 2) + (col * 2)] = 1.0 / x;
+                data[(row * d.cols * 2) + (col * 2)] = double(1.0 / x);
             }
 
             if (inv_x > 0.0) {
-                data[(row * d.cols * 2) + (col * 2 + 1)] = 1.0 / inv_x;
+                data[(row * d.cols * 2) + (col * 2 + 1)] = double(1.0 / inv_x);
             }
         }
     }
@@ -219,6 +219,7 @@ int main(int argc, char* argv[]) {
 
         Memory<short> x(device, nc.input_neurons * nc.timesteps);
         Memory<double> data(device, train.observations * train.cols * 2);
+        Memory<double> test_data(device, test.observations * test.cols * 2);
         Memory<short> v_thresh(device, nc.total_neurons);
         Memory<short> weights(device, nc.total_neurons * nc.max_incoming);
         Memory<ushort> delays(device, nc.total_neurons * nc.max_incoming);
@@ -230,19 +231,19 @@ int main(int argc, char* argv[]) {
         Memory<char> s(device, nc.total_neurons * nc.timesteps);
         Memory<short> v_pre(device, nc.total_neurons * nc.timesteps);
         Memory<float> dL_ds(device, nc.output_neurons);
-        Memory<double> correct(device, 1);
-        Memory<double> loss(device, 1);
+        Memory<float> correct(device, 1);
+        Memory<float> loss(device, 1);
         Memory<float> spike_grad_history(device,
                                          nc.total_neurons * nc.timesteps);
-        Memory<double> voltage_grad_history(device,
-                                            nc.total_neurons * nc.timesteps);
-        Memory<double> future_mem_grad(device, nc.total_neurons);
-        Memory<double> delta_W(device, nc.total_neurons * nc.max_incoming);
-        Memory<double> m_weights(device, nc.total_neurons * nc.max_incoming);
-        Memory<double> v_weights(device, nc.total_neurons * nc.max_incoming);
+        Memory<float> voltage_grad_history(device,
+                                           nc.total_neurons * nc.timesteps);
+        Memory<float> future_mem_grad(device, nc.total_neurons);
+        Memory<float> delta_W(device, nc.total_neurons * nc.max_incoming);
+        Memory<float> m_weights(device, nc.total_neurons * nc.max_incoming);
+        Memory<float> v_weights(device, nc.total_neurons * nc.max_incoming);
 
         Kernel encode_kernel(device, encode_work_size,
-                             "risp_encode_inputs_kernel", x, data, train.cols,
+                             "risp_encode_inputs_kernel", x, data, (int)train.cols,
                              (int)nc.input_neurons, (int)nc.timesteps, (uint)0,
                              (short)nc.spike_value_factor);
 
@@ -250,7 +251,7 @@ int main(int argc, char* argv[]) {
             device, forward_work_size, "risp_forward_kernel", x, v_thresh,
             weights, delays, incoming, incoming_ids, is_input_neuron, v, s,
             v_pre, (short)nc.leak, (short)(nc.min_potential / nc.scale_factor),
-            (short)nc.total_neurons, (ushort)nc.timesteps, (ushort)0,
+            (ushort)nc.total_neurons, (ushort)nc.timesteps, (ushort)0,
             (ushort)nc.max_incoming);
 
         Kernel loss_kernel(device, loss_work_size, "risp_loss_kernel", s, dL_ds,
@@ -262,22 +263,23 @@ int main(int argc, char* argv[]) {
             device, backward_work_size, "risp_backward_kernel", dL_ds, s, v_pre,
             v_thresh, is_output_neuron, weights, delays, incoming, incoming_ids,
             spike_grad_history, voltage_grad_history, future_mem_grad, delta_W,
-            (short)nc.leak, (double)nc.min_potential, (double)tau, (double)rho,
+            (short)nc.leak, (float)nc.min_potential, (float)tau, (float)rho,
             (ushort)nc.total_neurons, (ushort)nc.output_neurons,
             (short)nc.timesteps, (ushort)nc.max_incoming,
-            (double)nc.scale_factor, (short)0);
+            (float)nc.scale_factor, (short)0);
 
         Kernel weight_updates_kernel(
             device, weight_updates_work_size, "weight_updates_kernel", incoming,
             m_weights, v_weights, delta_W, weights, (ushort)nc.total_neurons,
-            (ushort)nc.max_incoming, (double)learning_rate, (double)decay_rate,
-            (ushort)1, (ushort)batch_size, (uint)0, (uint)0, (double)0.9,
-            (double)0.999, (double)0.0, (double)0.0, (ushort)nc.timesteps,
-            (uint)train.observations, (double)nc.scale_factor,
+            (ushort)nc.max_incoming, (float)learning_rate, (float)decay_rate,
+            (ushort)1, (ushort)batch_size, (uint)0, (uint)0, (float)0.9f,
+            (float)0.999f, (float)0.0f, (float)0.0f, (ushort)nc.timesteps,
+            (uint)train.observations, (float)nc.scale_factor,
             (short)nc.min_weight, (short)nc.max_weight, (int)nc.steps);
 
         // Temporary handling for numeric instability
         encode(data, train);
+        encode(test_data, test);
 
         for (size_t i = 0; i < nc.total_neurons; i++) {
             v_thresh[i]         = state->thresholds[i] / nc.scale_factor;
@@ -298,6 +300,7 @@ int main(int argc, char* argv[]) {
         v_weights.reset();
 
         data.write_to_device();
+        test_data.write_to_device();
         v_thresh.write_to_device();
         weights.write_to_device();
         delays.write_to_device();
@@ -319,6 +322,8 @@ int main(int argc, char* argv[]) {
 
         double best_acc = 0.0;
         double best_loss = DBL_MAX;
+        double best_test_acc = 0.0;
+        double best_test_loss = DBL_MAX;
 
         for (size_t epoch = 0; epoch < cfg.epochs; epoch++) {
             double epoch_loss = 0.0;
@@ -387,7 +392,7 @@ int main(int argc, char* argv[]) {
                     9, (ushort)current_batch_size, (ushort)batch_size);
                 weight_updates_kernel.set_parameters(11, (uint)batch_start);
                 weight_updates_kernel.set_parameters(12, (uint)epoch);
-                weight_updates_kernel.set_parameters(15, b1_t, b2_t);
+                weight_updates_kernel.set_parameters(15, (float)b1_t, (float)b2_t);
                 weight_updates_kernel.run();
 
                 correct.read_from_device();
@@ -406,8 +411,67 @@ int main(int argc, char* argv[]) {
             if (avg_train_acc > best_acc) {
                 best_acc = avg_train_acc;
             }
-            printf("Epoch: %4zu/%zu, Loss: %10g / %10g, Acc: %10g / %10g\n",
-                   epoch + 1, cfg.epochs, avg_train_loss, best_loss, avg_train_acc, best_acc);
+            // ---- Test evaluation (forward + loss only) ----
+            double epoch_test_loss = 0.0;
+            size_t epoch_test_correct = 0;
+
+            if (test.observations > 0) {
+                correct.reset();
+                loss.reset();
+
+                // Swap encode_kernel data buffer to test_data (param pos 1)
+                encode_kernel.set_parameters(1, test_data);
+
+                for (int obs = 0; obs < (int)test.observations; obs++) {
+                    x.reset();
+                    v.reset();
+                    s.reset();
+                    v_pre.reset();
+                    dL_ds.reset();
+
+                    // Encode test observation
+                    encode_kernel.set_parameters(2, (int)test.cols);
+                    encode_kernel.set_parameters(5, (uint)obs);
+                    encode_kernel.run();
+
+                    // Forward pass
+                    for (size_t t = 0; t < nc.timesteps; t++) {
+                        forward_kernel.set_parameters(14, (ushort)t);
+                        forward_kernel.run();
+                    }
+
+                    // Loss
+                    loss_kernel.set_parameters(
+                        7, (ushort)(test.labels[obs]));
+                    loss_kernel.run();
+
+                }
+
+                correct.read_from_device();
+                loss.read_from_device();
+                epoch_test_correct += (size_t)correct[0];
+                epoch_test_loss += loss[0];
+
+                // Restore encode_kernel data buffer to train data
+                encode_kernel.set_parameters(1, data);
+            }
+
+            double avg_test_loss = test.observations > 0
+                ? epoch_test_loss / (double)test.observations : 0.0;
+            double avg_test_acc  = test.observations > 0
+                ? epoch_test_correct / (double)test.observations : 0.0;
+
+            if (test.observations > 0) {
+                if (avg_test_loss < best_test_loss) {
+                    best_test_loss = avg_test_loss;
+                }
+                if (avg_test_acc > best_test_acc) {
+                    best_test_acc = avg_test_acc;
+                }
+            }
+
+            printf("Epoch: %4zu/%zu, Loss: %10g / %10g, Acc: %10g / %10g, Test Loss: %10g / %10g, Test Acc: %10g / %10g\n",
+                   epoch + 1, cfg.epochs, avg_train_loss, best_loss, avg_train_acc, best_acc, avg_test_loss, best_test_loss, avg_test_acc, best_test_acc);
         }
 
         exit(0);
