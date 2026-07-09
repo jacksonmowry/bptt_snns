@@ -350,7 +350,8 @@ int main(int argc, char* argv[]) {
         const size_t encode_work_size   = nc.input_neurons;
         const size_t forward_work_size  = nc.total_neurons;
         const size_t loss_work_size     = nc.output_neurons;
-        const size_t backward_work_size = nc.total_neurons * nc.max_incoming;
+        const size_t backward_grad_work_size   = nc.total_neurons;
+        const size_t backward_delta_w_work_size = nc.total_neurons * nc.max_incoming;
         const size_t weight_updates_work_size =
             nc.total_neurons * nc.max_incoming;
 
@@ -376,6 +377,7 @@ int main(int argc, char* argv[]) {
                                            nc.total_neurons * nc.timesteps);
         Memory<float> future_mem_grad(device, nc.total_neurons);
         Memory<float> delta_W(device, nc.total_neurons * nc.max_incoming);
+        Memory<float> neuron_grad(device, nc.total_neurons);
         Memory<float> m_weights(device, nc.total_neurons * nc.max_incoming);
         Memory<float> v_weights(device, nc.total_neurons * nc.max_incoming);
 
@@ -396,14 +398,20 @@ int main(int argc, char* argv[]) {
                            (ushort)nc.output_neurons, (ushort)nc.timesteps,
                            (ushort)0);
 
-        Kernel backward_kernel(
-            device, backward_work_size, "risp_backward_kernel", dL_ds, s, v_pre,
-            v_thresh, is_output_neuron, weights, delays, incoming, incoming_ids,
-            spike_grad_history, voltage_grad_history, future_mem_grad, delta_W,
+        Kernel backward_grad_kernel(
+            device, backward_grad_work_size, "risp_backward_grad_kernel", dL_ds,
+            s, v_pre, v_thresh, is_output_neuron, spike_grad_history,
+            voltage_grad_history, future_mem_grad, neuron_grad,
             (short)nc.leak, (float)nc.min_potential, (float)tau, (float)rho,
             (ushort)nc.total_neurons, (ushort)nc.output_neurons,
-            (short)nc.timesteps, (ushort)nc.max_incoming,
-            (float)nc.scale_factor, (short)0);
+            (short)nc.timesteps, (float)nc.scale_factor, (short)0);
+
+        Kernel backward_delta_w_kernel(
+            device, backward_delta_w_work_size,
+            "risp_backward_delta_w_kernel", neuron_grad, s, weights, delays,
+            incoming, incoming_ids, spike_grad_history, delta_W,
+            (ushort)nc.total_neurons, (ushort)nc.max_incoming,
+            (short)nc.timesteps, (float)nc.scale_factor, (short)0);
 
         Kernel weight_updates_kernel(
             device, weight_updates_work_size, "weight_updates_kernel", incoming,
@@ -517,8 +525,10 @@ int main(int argc, char* argv[]) {
 
                     // Backwards
                     for (short t = nc.timesteps - 1; t >= 0; t--) {
-                        backward_kernel.set_parameters(22, (short)t);
-                        timed_run(backward_kernel, "backward");
+                        backward_grad_kernel.set_parameters(17, (short)t);
+                        timed_run(backward_grad_kernel, "backward_grad");
+                        backward_delta_w_kernel.set_parameters(12, (short)t);
+                        timed_run(backward_delta_w_kernel, "backward_delta_w");
                     }
                 }
 
@@ -649,7 +659,6 @@ int main(int argc, char* argv[]) {
         /* Export if requested */
         if (!cfg.network_json_out.empty()) {
             export_network_json(n, cfg.network_json_out);
-            printf("Network exported to %s\n", cfg.network_json_out.c_str());
         }
 
         exit(0);

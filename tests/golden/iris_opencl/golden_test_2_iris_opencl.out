@@ -24,6 +24,4 @@ Epoch:    7/10, Loss:   0.874565 /   0.874565, Acc:   0.941667 /   0.941667, Tes
 Epoch:    8/10, Loss:   0.857747 /   0.857747, Acc:   0.933333 /   0.941667, Test Loss:   0.857643 /   0.857643, Test Acc:   0.766667 /        0.9
 Epoch:    9/10, Loss:   0.937291 /   0.857747, Acc:       0.65 /   0.941667, Test Loss:   0.869579 /   0.857643, Test Acc:   0.666667 /        0.9
 Epoch:   10/10, Loss:   0.869605 /   0.857747, Acc:        0.8 /   0.941667, Test Loss:   0.845254 /   0.845254, Test Acc:   0.733333 /        0.9
-  [CPU eval @ epoch   10] Test Loss:   0.845254, Test Acc:   0.733333
 Final CPU Test Loss:   0.845254, Final CPU Test Acc:   0.733333
-Network exported to /tmp/tmp.kcdwHHB6qJ
