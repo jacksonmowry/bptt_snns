@@ -1,0 +1,26 @@
+Neurons: 27, Synapses: 546
+|----------------.------------------------------------------------------------|
+| Device ID    0 | 12th Gen Intel(R) Core(TM) i5-12400F                       |
+| Device ID    1 | Intel(R) Arc(TM) Pro B60 Graphics                          |
+|----------------'------------------------------------------------------------|
+|----------------.------------------------------------------------------------|
+| Device ID      | 1                                                          |
+| Device Name    | Intel(R) Arc(TM) Pro B60 Graphics                          |
+| Device Vendor  | Intel(R) Corporation                                       |
+| Device Driver  | 26.22.38646 (Linux)                                        |
+| OpenCL Version | OpenCL C 3.0                                               |
+| Compute Units  | 160 at 2400 MHz (2560 cores, 12.288 TFLOPs/s)              |
+| Memory, Cache  | 24480 MB VRAM, 18432 KB global / 128 KB local              |
+| Buffer Limits  | 23256 MB global, 23814144 KB constant                      |
+|----------------'------------------------------------------------------------|
+| Info: OpenCL C code successfully compiled.                                  |
+Epoch:    1/10, Loss:    1.10139 /    1.10139, Acc:       0.15 /       0.15, Test Loss:     1.0429 /     1.0429, Test Acc:        0.6 /        0.6
+Epoch:    2/10, Loss:    1.01967 /    1.01967, Acc:      0.825 /      0.825, Test Loss:   0.972549 /   0.972549, Test Acc:        0.7 /        0.7
+Epoch:    3/10, Loss:   0.962706 /   0.962706, Acc:   0.891667 /   0.891667, Test Loss:   0.927752 /   0.927752, Test Acc:   0.733333 /   0.733333
+Epoch:    4/10, Loss:   0.925514 /   0.925514, Acc:   0.933333 /   0.933333, Test Loss:   0.892536 /   0.892536, Test Acc:   0.733333 /   0.733333
+Epoch:    5/10, Loss:   0.898394 /   0.898394, Acc:   0.891667 /   0.933333, Test Loss:   0.870328 /   0.870328, Test Acc:        0.9 /        0.9
+Epoch:    6/10, Loss:   0.882679 /   0.882679, Acc:   0.908333 /   0.933333, Test Loss:    0.86812 /    0.86812, Test Acc:        0.9 /        0.9
+Epoch:    7/10, Loss:   0.874565 /   0.874565, Acc:   0.941667 /   0.941667, Test Loss:   0.910507 /    0.86812, Test Acc:        0.8 /        0.9
+Epoch:    8/10, Loss:   0.857747 /   0.857747, Acc:   0.933333 /   0.941667, Test Loss:   0.857643 /   0.857643, Test Acc:   0.766667 /        0.9
+Epoch:    9/10, Loss:   0.937291 /   0.857747, Acc:       0.65 /   0.941667, Test Loss:   0.869579 /   0.857643, Test Acc:   0.666667 /        0.9
+Epoch:   10/10, Loss:   0.869605 /   0.857747, Acc:        0.8 /   0.941667, Test Loss:   0.845254 /   0.845254, Test Acc:   0.733333 /        0.9
