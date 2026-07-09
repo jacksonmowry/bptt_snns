@@ -22,7 +22,7 @@ all: framework-open/bin/network_tool \
 
 # Applications ################################################################
 bin/bptt_learning: src/bptt_learning.cpp $(BPTT_OBJ) $(RISP_OBJ) $(FR_LIB)
-	$(CXX) $(FR_CFLAGS) -o $@ $^ -lOpenCL
+	$(CXX) $(FR_CFLAGS) -o $@ $^ -Lvendor/lib -lOpenCL
 
 bin/interactive_mode: src/interactive_mode.cpp
 	$(CXX) $(FR_CFLAGS) -o $@ $^
