@@ -277,6 +277,11 @@ int parse_cli(int argc, char* argv[], CliConfig* cfg) {
                 return cli_error("--opencl requires a value (true/false)");
             }
             cfg->opencl = (std::string(argv[i]) == "true");
+        } else if (arg == "--opencl_timings") {
+            if (++i >= argc) {
+                return cli_error("--opencl_timings requires a value (true/false)");
+            }
+            cfg->opencl_timings = (std::string(argv[i]) == "true");
         } else if (arg == "--cpu_eval_interval") {
             unsigned long v;
             int rc = parse_ulong_arg(i, argc, argv, &v, "cpu_eval_interval");
@@ -333,5 +338,7 @@ void print_usage(const char* prog) {
         " N/A, --opencl                        Enable OpenCL Acceleration\n");
     fprintf(stderr,
             " N/A, --cpu_eval_interval UINT      CPU test every N epochs (0=off)\n");
+    fprintf(stderr,
+            " N/A, --opencl_timings          Enable OpenCL kernel timing report\n");
     fprintf(stderr, "  -h, --help                          Show this help\n");
 }

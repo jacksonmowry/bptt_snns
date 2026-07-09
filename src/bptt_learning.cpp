@@ -13,6 +13,7 @@
 #include <algorithm>
 #include <cassert>
 #include <cfloat>
+#include <chrono>
 #include <cstddef>
 #include <cstdio>
 #include <cstdlib>
@@ -28,6 +29,66 @@
 
 using namespace std;
 using namespace neuro;
+
+/* ------------------------------------------------------------------ */
+/* OpenCL timing helpers                                                */
+/* ------------------------------------------------------------------ */
+struct KernelTiming {
+    string    name;
+    double    total_us;   // accumulated microseconds
+    uint64_t  calls;      // number of .run() invocations
+    KernelTiming() : name(""), total_us(0.0), calls(0) {}
+    KernelTiming(const string& n, double u, uint64_t c)
+        : name(n), total_us(u), calls(c) {}
+};
+
+static vector<KernelTiming> g_kernels;
+static bool                  g_timing_enabled = false;
+
+void timing_start(bool enabled) {
+    g_timing_enabled = enabled;
+    if (!enabled) return;
+    g_kernels.clear();
+    g_kernels.reserve(8);
+}
+
+void timing_add(const char* name, double us) {
+    if (!g_timing_enabled) return;
+    for (auto& kt : g_kernels) {
+        if (kt.name == name) {
+            kt.total_us += us;
+            kt.calls++;
+            return;
+        }
+    }
+    g_kernels.push_back(KernelTiming(name, us, 1));
+}
+
+void timing_print(double total_us) {
+    if (!g_timing_enabled || g_kernels.empty()) return;
+
+    printf("\n===== OpenCL Kernel Timing Report ============================\n");
+    printf("%-30s %14s %10s %10s\n", "Kernel", "Time (ms)", "Calls", "Share");
+    printf("%-30s %14s %10s %10s\n", "------------------------------", "--------------",
+           "----------", "----------");
+
+    for (auto& kt : g_kernels) {
+        double pct = (total_us > 0) ? (kt.total_us / total_us * 100.0) : 0.0;
+        printf("%-30s %13.3f ms %10zu %9.2f%%\n",
+               kt.name.c_str(), kt.total_us / 1000.0, kt.calls, pct);
+    }
+    printf("%-30s %13.3f ms\n", "TOTAL", total_us / 1000.0);
+    printf("=============================================================\n\n");
+}
+
+template <typename... Args>
+void timed_run(Kernel& kernel, const char* name, Args&&... args) {
+    auto t0 = chrono::high_resolution_clock::now();
+    kernel.run(std::forward<Args>(args)...);
+    auto t1 = chrono::high_resolution_clock::now();
+    double us = chrono::duration<double, std::micro>(t1 - t0).count();
+    timing_add(name, us);
+}
 
 void encode(Memory<double>& data, const Dataset& d) {
     for (int row = 0; row < d.observations; row++) {
@@ -401,6 +462,9 @@ int main(int argc, char* argv[]) {
         double best_test_acc = 0.0;
         double best_test_loss = DBL_MAX;
 
+        timing_start(cfg.opencl_timings);
+        auto t_start = chrono::high_resolution_clock::now();
+
         for (size_t epoch = 0; epoch < cfg.epochs; epoch++) {
             double epoch_loss = 0.0;
             size_t epoch_correct = 0;
@@ -438,23 +502,23 @@ int main(int argc, char* argv[]) {
 
                     // Encode data
                     encode_kernel.set_parameters(5, (uint)obs);
-                    encode_kernel.run();
+                    timed_run(encode_kernel, "encode");
 
                     // Forward pass
                     for (size_t t = 0; t < nc.timesteps; t++) {
                         forward_kernel.set_parameters(14, (ushort)t);
-                        forward_kernel.run();
+                        timed_run(forward_kernel, "forward");
                     }
 
                     // Loss
                     loss_kernel.set_parameters(
                         7, (ushort)(train.labels[obs]));
-                    loss_kernel.run();
+                    timed_run(loss_kernel, "loss");
 
                     // Backwards
                     for (short t = nc.timesteps - 1; t >= 0; t--) {
                         backward_kernel.set_parameters(22, (short)t);
-                        backward_kernel.run();
+                        timed_run(backward_kernel, "backward");
                     }
                 }
 
@@ -469,7 +533,7 @@ int main(int argc, char* argv[]) {
                 weight_updates_kernel.set_parameters(11, (uint)batch_start);
                 weight_updates_kernel.set_parameters(12, (uint)epoch);
                 weight_updates_kernel.set_parameters(15, (float)b1_t, (float)b2_t);
-                weight_updates_kernel.run();
+                timed_run(weight_updates_kernel, "weight_updates");
 
                 correct.read_from_device();
                 loss.read_from_device();
@@ -508,18 +572,18 @@ int main(int argc, char* argv[]) {
                     // Encode test observation
                     encode_kernel.set_parameters(2, (int)test.cols);
                     encode_kernel.set_parameters(5, (uint)obs);
-                    encode_kernel.run();
+                    timed_run(encode_kernel, "encode");
 
                     // Forward pass
                     for (size_t t = 0; t < nc.timesteps; t++) {
                         forward_kernel.set_parameters(14, (ushort)t);
-                        forward_kernel.run();
+                        timed_run(forward_kernel, "forward");
                     }
 
                     // Loss
                     loss_kernel.set_parameters(
                         7, (ushort)(test.labels[obs]));
-                    loss_kernel.run();
+                    timed_run(loss_kernel, "loss");
 
                 }
 
@@ -563,6 +627,10 @@ int main(int argc, char* argv[]) {
                        epoch + 1, cpu_result.first, cpu_result.second);
             }
         }
+
+        auto t_end = chrono::high_resolution_clock::now();
+        double total_us = chrono::duration<double, std::micro>(t_end - t_start).count();
+        timing_print(total_us);
 
         /* Final: read GPU weights, CPU eval, export network JSON */
         weights.read_from_device();
