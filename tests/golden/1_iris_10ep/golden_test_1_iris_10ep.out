@@ -1,5 +1,3 @@
-Neurons: 27, Synapses: 148
-Beginning training
 Epoch:    1/10, Loss:    1.09223 (Best:    1.09223), Acc:   0.391667 (Best:   0.391667), TestLoss:    1.09429 (Best:    1.09429), TestAcc:   0.566667 (Best:   0.566667)
 Epoch:    2/10, Loss:    1.07115 (Best:    1.07115), Acc:   0.633333 (Best:   0.633333), TestLoss:    1.08108 (Best:    1.08108), TestAcc:   0.633333 (Best:   0.633333)
 Epoch:    3/10, Loss:    1.03636 (Best:    1.03636), Acc:       0.65 (Best:       0.65), TestLoss:    1.07929 (Best:    1.07929), TestAcc:   0.666667 (Best:   0.666667)

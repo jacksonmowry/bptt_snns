@@ -14,6 +14,14 @@ GOLDEN_DIR="$SCRIPT_DIR/golden"
 ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 BIN="$ROOT_DIR/bin/bptt_learning"
 
+# Filter stdout: keep only lines with essential metrics (epoch, final, CPU eval).
+# Strips: "Neurons:", "Beginning training", device tables, OpenCL compile info,
+# kernel timing report, etc.
+filter_stdout() {
+	local input="$1" output="$2"
+	grep -E '^(Epoch:|Final |  \[CPU eval)' "$input" >"$output" || true
+}
+
 # --- helpers ---
 
 build_if_needed() {
@@ -42,6 +50,9 @@ parse_cfg() {
 # (truly build-variant). All other metadata — cli_args, best_loss, epoch,
 # network_json_out, etc. — is compared as-is. Test-runner plumbing
 # (--network_json_out paths) is normalized away since those are not test data.
+#
+# On mismatch, prints a full line-by-line unified diff of the normalized
+# pretty-printed JSON so differences are easy to spot.
 compare_networks() {
 	local actual="$1" expected="$2"
 	python3 - "$actual" "$expected" <<'PYEOF'
@@ -72,10 +83,15 @@ b = normalize(sys.argv[2])
 if a == b:
     print("PASS")
 else:
-    sa, sb = json.dumps(a, sort_keys=True, indent=2), json.dumps(b, sort_keys=True, indent=2)
-    diff = list(difflib.unified_diff(sa.splitlines(), sb.splitlines(), lineterm=""))
+    sa = json.dumps(a, sort_keys=True, indent=2)
+    sb = json.dumps(b, sort_keys=True, indent=2)
+    diff = list(difflib.unified_diff(
+        sb.splitlines(), sa.splitlines(),
+        fromfile="golden (expected)", tofile="actual",
+        lineterm=""
+    ))
     print("FAIL")
-    for line in diff[:40]:
+    for line in diff:
         print(line)
 PYEOF
 }
@@ -132,7 +148,8 @@ for cfg_file in "${cfgs[@]}"; do
 	# Temp files for this run
 	tmp_stdout="$(mktemp)"
 	tmp_net="$(mktemp)"
-	trap 'rm -f "$tmp_stdout" "$tmp_net"' EXIT
+	tmp_filtered="$(mktemp)"
+	trap 'rm -f "$tmp_stdout" "$tmp_net" "$tmp_filtered"' EXIT
 
 	# Run
 	if ! "$BIN" "${cli_args[@]}" --network_json_out "$tmp_net" >"$tmp_stdout" 2>&1; then
@@ -143,13 +160,16 @@ for cfg_file in "${cfgs[@]}"; do
 		continue
 	fi
 
+	# Filter stdout to essential lines
+	filter_stdout "$tmp_stdout" "$tmp_filtered"
+
 	pass=true
 
-	# Compare stdout against golden .out
+	# Compare filtered stdout against golden .out
 	if [ -f "$golden_out" ]; then
-		if ! diff -q "$golden_out" "$tmp_stdout" >/dev/null 2>&1; then
+		if ! diff -q "$golden_out" "$tmp_filtered" >/dev/null 2>&1; then
 			echo "FAIL: $test_name (stdout mismatch)"
-			diff -u "$golden_out" "$tmp_stdout" | head -30
+			diff -u "$golden_out" "$tmp_filtered"
 			pass=false
 		fi
 	fi

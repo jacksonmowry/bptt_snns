@@ -179,7 +179,7 @@ void export_network_json(neuro::Network* n, const std::string& path) {
         fprintf(stderr, "Failed to open %s for writing\n", path.c_str());
         exit(1);
     }
-    fout << j << std::endl;
+    fout << j.dump(2) << std::endl;
     fout.close();
 }
 
