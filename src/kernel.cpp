@@ -17,20 +17,20 @@ string opencl_c_container() {
                 return;
             }
 
-            ushort base_idx = neuron_id * timesteps;
+            uint base_idx = neuron_id * timesteps;
             for (double i = 0.0f; i < (double)timesteps; i += val) {
-                x[base_idx + (ushort)i] = spike_value_factor;
+                x[base_idx + (uint)i] = spike_value_factor;
             }
         }
 
         kernel void risp_forward_kernel(
             global const short* x, global const short* v_thresh,
-            global const short* weights, global const ushort* delays,
-            global const ushort* incoming, global const ushort* incoming_ids,
+            global const short* weights, global const uint* delays,
+            global const uint* incoming, global const uint* incoming_ids,
             global const uchar* is_input_neuron, global short* v,
             global char* s, global short* v_pre, short v_decay, short v_rest,
-            ushort num_neurons, ushort num_steps, ushort timestep,
-            ushort max_incoming) {
+            uint num_neurons, uint num_steps, uint timestep,
+            uint max_incoming) {
             const uint neuron_id = get_global_id(0);
             if (neuron_id >= (uint)num_neurons) {
                 return;
@@ -39,7 +39,7 @@ string opencl_c_container() {
             short V_thresh = v_thresh[neuron_id];
             short V_rest   = v_rest;
             short V        = timestep == 0 ? 0 : v[neuron_id];
-            ushort idx     = neuron_id * num_steps + timestep;
+            uint idx     = neuron_id * num_steps + timestep;
             bool has_event = false;
 
             short total_input = 0;
@@ -53,7 +53,7 @@ string opencl_c_container() {
 
             // Check presynaptic neurons for spikes
             for (int i = 0; i < incoming[neuron_id]; i++) {
-                const ushort incoming_id =
+                const uint incoming_id =
                     incoming_ids[neuron_id * max_incoming + i];
                 const short weight = weights[neuron_id * max_incoming + i];
                 const short source_ts =
@@ -101,8 +101,8 @@ string opencl_c_container() {
 
         kernel void risp_loss_kernel(
             global const char* s, global float* dL_ds, global float* correct,
-            global float* loss, ushort num_neurons, ushort num_output_neurons,
-            ushort num_steps, ushort target_idx) {
+            global float* loss, uint num_neurons, uint num_output_neurons,
+            uint num_steps, uint target_idx) {
             const uint neuron_id = get_global_id(0);
             // Serial for now
             if (neuron_id > 0) {
@@ -154,8 +154,8 @@ string opencl_c_container() {
             global float* spike_grad_history,
             global float* voltage_grad_history, global float* future_mem_grad,
             global float* neuron_grad, short v_decay, float v_rest,
-            float tau_rho, float scale_rho, ushort num_neurons,
-            ushort num_output_neurons, short num_steps, float scale_factor,
+            float tau_rho, float scale_rho, uint num_neurons,
+            uint num_output_neurons, short num_steps, float scale_factor,
             short timestep) {
             const uint neuron_id = get_global_id(0);
             if (neuron_id >= (uint)num_neurons) {
@@ -209,10 +209,10 @@ string opencl_c_container() {
         // Uses neuron_grad to update delta_W and spike_grad_history.
         kernel void risp_backward_delta_w_kernel(
             global const float* neuron_grad, global const char* s,
-            global const short* weights, global const ushort* delays,
-            global const ushort* incoming, global const ushort* incoming_ids,
+            global const short* weights, global const uint* delays,
+            global const uint* incoming, global const uint* incoming_ids,
             global float* spike_grad_history, global float* delta_W,
-            ushort num_neurons, ushort max_incoming, short num_steps,
+            uint num_neurons, uint max_incoming, short num_steps,
             float scale_factor, short timestep) {
             const uint global_id = get_global_id(0);
 
@@ -223,7 +223,7 @@ string opencl_c_container() {
                 return;
             }
 
-            ushort incoming_id = incoming_ids[global_id];
+            uint incoming_id = incoming_ids[global_id];
             short source_ts    = timestep - (short)delays[global_id];
             float weight       = weights[global_id] * scale_factor;
 
@@ -243,12 +243,12 @@ string opencl_c_container() {
         }
 
         kernel void weight_updates_kernel(
-            global const ushort* incoming, global float* m_weights,
+            global const uint* incoming, global float* m_weights,
             global float* v_weights, global float* delta_W,
-            global short* weights, ushort num_neurons, ushort max_incoming,
-            float learning_rate, float decay_rate, ushort current_batch_size,
-            ushort batch_size, uint batch_start, uint epoch, float beta1,
-            float beta2, float b1_t, float b2_t, ushort timesteps,
+            global short* weights, uint num_neurons, uint max_incoming,
+            float learning_rate, float decay_rate, uint current_batch_size,
+            uint batch_size, uint batch_start, uint epoch, float beta1,
+            float beta2, float b1_t, float b2_t, uint timesteps,
             uint num_observations, float scale_factor, short min_weight,
             short max_weight, int steps) {
             const uint global_id  = get_global_id(0);

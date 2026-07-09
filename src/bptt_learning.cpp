@@ -360,9 +360,9 @@ int main(int argc, char* argv[]) {
         Memory<double> test_data(device, test.observations * test.cols * 2);
         Memory<short> v_thresh(device, nc.total_neurons);
         Memory<short> weights(device, nc.total_neurons * nc.max_incoming);
-        Memory<ushort> delays(device, nc.total_neurons * nc.max_incoming);
-        Memory<ushort> incoming(device, nc.total_neurons);
-        Memory<ushort> incoming_ids(device, nc.total_neurons * nc.max_incoming);
+        Memory<uint> delays(device, nc.total_neurons * nc.max_incoming);
+        Memory<uint> incoming(device, nc.total_neurons);
+        Memory<uint> incoming_ids(device, nc.total_neurons * nc.max_incoming);
         Memory<uchar> is_input_neuron(device, nc.total_neurons);
         Memory<uchar> is_output_neuron(device, nc.total_neurons);
         Memory<short> v(device, nc.total_neurons);
@@ -390,35 +390,35 @@ int main(int argc, char* argv[]) {
             device, forward_work_size, "risp_forward_kernel", x, v_thresh,
             weights, delays, incoming, incoming_ids, is_input_neuron, v, s,
             v_pre, (short)nc.leak, (short)(nc.min_potential / nc.scale_factor),
-            (ushort)nc.total_neurons, (ushort)nc.timesteps, (ushort)0,
-            (ushort)nc.max_incoming);
+            (uint)nc.total_neurons, (uint)nc.timesteps, (uint)0,
+            (uint)nc.max_incoming);
 
         Kernel loss_kernel(device, loss_work_size, "risp_loss_kernel", s, dL_ds,
-                           correct, loss, (ushort)nc.total_neurons,
-                           (ushort)nc.output_neurons, (ushort)nc.timesteps,
-                           (ushort)0);
+                           correct, loss, (uint)nc.total_neurons,
+                           (uint)nc.output_neurons, (uint)nc.timesteps,
+                           (uint)0);
 
         Kernel backward_grad_kernel(
             device, backward_grad_work_size, "risp_backward_grad_kernel", dL_ds,
             s, v_pre, v_thresh, is_output_neuron, spike_grad_history,
             voltage_grad_history, future_mem_grad, neuron_grad,
             (short)nc.leak, (float)nc.min_potential, (float)tau, (float)rho,
-            (ushort)nc.total_neurons, (ushort)nc.output_neurons,
+            (uint)nc.total_neurons, (uint)nc.output_neurons,
             (short)nc.timesteps, (float)nc.scale_factor, (short)0);
 
         Kernel backward_delta_w_kernel(
             device, backward_delta_w_work_size,
             "risp_backward_delta_w_kernel", neuron_grad, s, weights, delays,
             incoming, incoming_ids, spike_grad_history, delta_W,
-            (ushort)nc.total_neurons, (ushort)nc.max_incoming,
+            (uint)nc.total_neurons, (uint)nc.max_incoming,
             (short)nc.timesteps, (float)nc.scale_factor, (short)0);
 
         Kernel weight_updates_kernel(
             device, weight_updates_work_size, "weight_updates_kernel", incoming,
-            m_weights, v_weights, delta_W, weights, (ushort)nc.total_neurons,
-            (ushort)nc.max_incoming, (float)learning_rate, (float)decay_rate,
-            (ushort)1, (ushort)batch_size, (uint)0, (uint)0, (float)0.9f,
-            (float)0.999f, (float)0.0f, (float)0.0f, (ushort)nc.timesteps,
+            m_weights, v_weights, delta_W, weights, (uint)nc.total_neurons,
+            (uint)nc.max_incoming, (float)learning_rate, (float)decay_rate,
+            (uint)1, (uint)batch_size, (uint)0, (uint)0, (float)0.9f,
+            (float)0.999f, (float)0.0f, (float)0.0f, (uint)nc.timesteps,
             (uint)train.observations, (float)nc.scale_factor,
             (short)nc.min_weight, (short)nc.max_weight, (int)nc.steps);
 
@@ -514,13 +514,13 @@ int main(int argc, char* argv[]) {
 
                     // Forward pass
                     for (size_t t = 0; t < nc.timesteps; t++) {
-                        forward_kernel.set_parameters(14, (ushort)t);
+                        forward_kernel.set_parameters(14, (uint)t);
                         timed_run(forward_kernel, "forward");
                     }
 
                     // Loss
                     loss_kernel.set_parameters(
-                        7, (ushort)(train.labels[obs]));
+                        7, (uint)(train.labels[obs]));
                     timed_run(loss_kernel, "loss");
 
                     // Backwards
@@ -539,7 +539,7 @@ int main(int argc, char* argv[]) {
                 b1_t *= 0.9;
                 b2_t *= 0.999;
                 weight_updates_kernel.set_parameters(
-                    9, (ushort)current_batch_size, (ushort)batch_size);
+                    9, (uint)current_batch_size, (uint)batch_size);
                 weight_updates_kernel.set_parameters(11, (uint)batch_start);
                 weight_updates_kernel.set_parameters(12, (uint)epoch);
                 weight_updates_kernel.set_parameters(15, (float)b1_t, (float)b2_t);
@@ -586,13 +586,13 @@ int main(int argc, char* argv[]) {
 
                     // Forward pass
                     for (size_t t = 0; t < nc.timesteps; t++) {
-                        forward_kernel.set_parameters(14, (ushort)t);
+                        forward_kernel.set_parameters(14, (uint)t);
                         timed_run(forward_kernel, "forward");
                     }
 
                     // Loss
                     loss_kernel.set_parameters(
-                        7, (ushort)(test.labels[obs]));
+                        7, (uint)(test.labels[obs]));
                     timed_run(loss_kernel, "loss");
 
                 }
