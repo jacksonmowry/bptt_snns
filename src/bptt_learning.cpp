@@ -20,6 +20,7 @@
 #include <ctime>
 #include <fstream>
 #include <iostream>
+#include <nlohmann/json.hpp>
 #include <pthread.h>
 #include <string>
 #include <unordered_set>
@@ -44,6 +45,81 @@ void encode(Memory<double>& data, const Dataset& d) {
             }
         }
     }
+}
+
+/* Read GPU weights back into state->weights (double, scale_factor-applied). */
+void read_gpu_weights(const Memory<short>& gpu_weights,
+                      size_t total_neurons,
+                      size_t max_incoming,
+                      const std::vector<std::vector<double>>& state_weights,
+                      double scale_factor,
+                      std::vector<std::vector<double>>& weights) {
+    weights.resize(total_neurons);
+    for (size_t i = 0; i < total_neurons; i++) {
+        size_t inc = state_weights[i].size();
+        weights[i].resize(inc);
+        for (size_t j = 0; j < inc; j++) {
+            weights[i][j] = (double)gpu_weights[(i * max_incoming) + j] * scale_factor;
+        }
+    }
+}
+
+/* Write weights from a vector-of-vectors back into Network edges. */
+void write_weights_to_network(neuro::Network* n,
+                              size_t total_neurons,
+                              bool discrete,
+                              double scale_factor,
+                              const std::vector<std::vector<double>>& weights) {
+    for (size_t i = 0; i < total_neurons; i++) {
+        auto& incoming = n->get_node(i)->incoming;
+        for (size_t j = 0; j < incoming.size() && j < weights[i].size(); j++) {
+            incoming[j]->set("Weight",
+                weights[i][j] / (discrete ? scale_factor : 1.0));
+        }
+    }
+}
+
+/* Run CPU-only forward+loss on test set. Returns {loss, accuracy}. */
+std::pair<double, double> cpu_eval_test(neuro::Network* n,
+                                        const NetworkConfiguration& nc,
+                                        const Dataset& test,
+                                        const std::vector<std::vector<double>>& weights,
+                                        const std::vector<std::vector<int>>& delays,
+                                        const std::vector<double>& thresholds,
+                                        double rho, double tau) {
+    if (test.observations == 0) return {0.0, 0.0};
+
+    TrainingBundle tb(nc.total_neurons, nc.timesteps, nc.output_neurons,
+                      rho, tau, &weights, &delays, &thresholds);
+
+    neuro::Processor* p = nullptr;
+    load_network(&p, n);
+
+    double total_loss  = 0.0;
+    size_t total_correct = 0;
+
+    for (int obs = 0; obs < test.observations; obs++) {
+        EvaluationResults er = forward(&tb, p, &test, (size_t)obs, &nc);
+        total_loss    += er.loss;
+        total_correct += (size_t)er.correct;
+    }
+
+    delete p;
+    return {total_loss / test.observations,
+            (double)total_correct / test.observations};
+}
+
+/* Export network to JSON file. */
+void export_network_json(neuro::Network* n, const std::string& path) {
+    nlohmann::json j;
+    n->to_json(j);
+    std::ofstream fout(path);
+    if (!fout) {
+        fprintf(stderr, "Failed to open %s for writing\n", path.c_str());
+        exit(1);
+    }
+    fout << j << std::endl;
+    fout.close();
 }
 
 int main(int argc, char* argv[]) {
@@ -472,6 +548,40 @@ int main(int argc, char* argv[]) {
 
             printf("Epoch: %4zu/%zu, Loss: %10g / %10g, Acc: %10g / %10g, Test Loss: %10g / %10g, Test Acc: %10g / %10g\n",
                    epoch + 1, cfg.epochs, avg_train_loss, best_loss, avg_train_acc, best_acc, avg_test_loss, best_test_loss, avg_test_acc, best_test_acc);
+
+            /* Periodic CPU eval: read GPU weights back, run CPU forward+loss on test */
+            if (cfg.cpu_eval_interval > 0 && (epoch + 1) % cfg.cpu_eval_interval == 0) {
+                weights.read_from_device();
+                std::vector<std::vector<double>> cpu_weights;
+                read_gpu_weights(weights, nc.total_neurons, max_incoming,
+                                 state->weights, nc.scale_factor, cpu_weights);
+                write_weights_to_network(n, nc.total_neurons, discrete,
+                                         nc.scale_factor, cpu_weights);
+                std::pair<double,double> cpu_result = cpu_eval_test(n, nc, test,
+                    cpu_weights, state->delays, state->thresholds, rho, tau);
+                printf("  [CPU eval @ epoch %4zu] Test Loss: %10g, Test Acc: %10g\n",
+                       epoch + 1, cpu_result.first, cpu_result.second);
+            }
+        }
+
+        /* Final: read GPU weights, CPU eval, export network JSON */
+        weights.read_from_device();
+        std::vector<std::vector<double>> final_weights;
+        read_gpu_weights(weights, nc.total_neurons, max_incoming,
+                         state->weights, nc.scale_factor, final_weights);
+
+        /* CPU final test eval */
+        write_weights_to_network(n, nc.total_neurons, discrete,
+                                 nc.scale_factor, final_weights);
+        std::pair<double,double> final_result = cpu_eval_test(n, nc, test,
+            final_weights, state->delays, state->thresholds, rho, tau);
+        printf("Final CPU Test Loss: %10g, Final CPU Test Acc: %10g\n",
+               final_result.first, final_result.second);
+
+        /* Export if requested */
+        if (!cfg.network_json_out.empty()) {
+            export_network_json(n, cfg.network_json_out);
+            printf("Network exported to %s\n", cfg.network_json_out.c_str());
         }
 
         exit(0);

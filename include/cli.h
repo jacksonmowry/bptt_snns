@@ -27,6 +27,7 @@ struct CliConfig {
     size_t threads = 1;
     bool show_help = false;
     bool opencl    = false;
+    size_t cpu_eval_interval = 0; // every N epochs, read GPU weights & eval on CPU
 };
 
 int parse_cli(int argc, char* argv[], CliConfig* cfg);

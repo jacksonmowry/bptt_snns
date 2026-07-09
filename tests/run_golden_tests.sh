@@ -17,25 +17,25 @@ BIN="$ROOT_DIR/bin/bptt_learning"
 # --- helpers ---
 
 build_if_needed() {
-    if [ ! -f "$BIN" ] || [ "$ROOT_DIR/src/bptt_learning.cpp" -nt "$BIN" ]; then
-        echo "Building..."
-        make -C "$ROOT_DIR" -j"$(nproc)" 2>&1 | tail -1
-    fi
+	if [ ! -f "$BIN" ] || [ "$ROOT_DIR/src/bptt_learning.cpp" -nt "$BIN" ]; then
+		echo "Building..."
+		make -C "$ROOT_DIR" -j"$(nproc)" 2>&1 | tail -1
+	fi
 }
 
 # Parse a .cfg file into an associative array.
 # Format: key=value, lines starting with # or empty lines are ignored.
 parse_cfg() {
-    local cfg_file="$1"
-    declare -gA TEST_ARGS
-    while IFS= read -r line; do
-        line="${line%%#*}"        # strip comments
-        line="${line// /}"        # strip spaces
-        [[ -z "$line" ]] && continue
-        local key="${line%%=*}"
-        local val="${line#*=}"
-        TEST_ARGS["$key"]="$val"
-    done < "$cfg_file"
+	local cfg_file="$1"
+	declare -gA TEST_ARGS
+	while IFS= read -r line; do
+		line="${line%%#*}" # strip comments
+		line="${line// /}" # strip spaces
+		[[ -z "$line" ]] && continue
+		local key="${line%%=*}"
+		local val="${line#*=}"
+		TEST_ARGS["$key"]="$val"
+	done <"$cfg_file"
 }
 
 # Compare two network JSONs. Only compile_time and start_time are stripped
@@ -43,8 +43,8 @@ parse_cfg() {
 # network_json_out, etc. — is compared as-is. Test-runner plumbing
 # (--network_json_out paths) is normalized away since those are not test data.
 compare_networks() {
-    local actual="$1" expected="$2"
-    python3 - "$actual" "$expected" <<'PYEOF'
+	local actual="$1" expected="$2"
+	python3 - "$actual" "$expected" <<'PYEOF'
 import json, sys, difflib
 
 def normalize(json_path):
@@ -86,92 +86,92 @@ build_if_needed
 
 # Decide which tests to run
 if [ $# -ge 1 ]; then
-    test_name="$1"
-    if [[ "$test_name" != golden_test_* ]]; then
-        test_name="golden_test_${test_name}"
-    fi
-    cfg_file="$(find "$GOLDEN_DIR" -name "${test_name}.cfg" -type f 2>/dev/null | head -1)"
-    if [ -z "$cfg_file" ]; then
-        echo "Error: config not found for ${test_name}"
-        exit 1
-    fi
-    cfgs=("$cfg_file")
+	test_name="$1"
+	if [[ "$test_name" != golden_test_* ]]; then
+		test_name="golden_test_${test_name}"
+	fi
+	cfg_file="$(find "$GOLDEN_DIR" -name "${test_name}.cfg" -type f 2>/dev/null | head -1)"
+	if [ -z "$cfg_file" ]; then
+		echo "Error: config not found for ${test_name}"
+		exit 1
+	fi
+	cfgs=("$cfg_file")
 else
-    # All tests — find all .cfg files recursively
-    cfgs=()
-    while IFS= read -r -d '' f; do
-        cfgs+=("$f")
-    done < <(find "$GOLDEN_DIR" -name "golden_test_*.cfg" -type f -print0 2>/dev/null)
+	# All tests — find all .cfg files recursively
+	cfgs=()
+	while IFS= read -r -d '' f; do
+		cfgs+=("$f")
+	done < <(find "$GOLDEN_DIR" -name "golden_test_*.cfg" -type f -print0 2>/dev/null)
 fi
 
 if [ ${#cfgs[@]} -eq 0 ]; then
-    echo "No golden tests found in $GOLDEN_DIR"
-    exit 1
+	echo "No golden tests found in $GOLDEN_DIR"
+	exit 1
 fi
 
 PASSED=0
 FAILED=0
 
 for cfg_file in "${cfgs[@]}"; do
-    test_name="$(basename "$cfg_file" .cfg)"
-    test_dir="$(dirname "$cfg_file")"
+	test_name="$(basename "$cfg_file" .cfg)"
+	test_dir="$(dirname "$cfg_file")"
 
-    golden_out="$test_dir/${test_name}.out"
-    golden_net="$test_dir/${test_name}.net.json"
+	golden_out="$test_dir/${test_name}.out"
+	golden_net="$test_dir/${test_name}.net.json"
 
-    # Parse config
-    declare -A TEST_ARGS=()
-    parse_cfg "$cfg_file"
+	# Parse config
+	declare -A TEST_ARGS=()
+	parse_cfg "$cfg_file"
 
-    # Build CLI
-    cli_args=()
-    for key in "${!TEST_ARGS[@]}"; do
-        cli_args+=( "--${key}" "${TEST_ARGS[$key]}" )
-    done
+	# Build CLI
+	cli_args=()
+	for key in "${!TEST_ARGS[@]}"; do
+		cli_args+=("--${key}" "${TEST_ARGS[$key]}")
+	done
 
-    # Temp files for this run
-    tmp_stdout="$(mktemp)"
-    tmp_net="$(mktemp)"
-    trap 'rm -f "$tmp_stdout" "$tmp_net"' EXIT
+	# Temp files for this run
+	tmp_stdout="$(mktemp)"
+	tmp_net="$(mktemp)"
+	trap 'rm -f "$tmp_stdout" "$tmp_net"' EXIT
 
-    # Run
-    if ! "$BIN" "${cli_args[@]}" --network_json_out "$tmp_net" > "$tmp_stdout" 2>&1; then
-        "$BIN" "${cli_args[@]}" --network_json_out "$tmp_net"
-        echo "FAIL: $test_name (command failed)"
-        FAILED=$((FAILED + 1))
-        unset TEST_ARGS
-        continue
-    fi
+	# Run
+	if ! "$BIN" "${cli_args[@]}" --network_json_out "$tmp_net" >"$tmp_stdout" 2>&1; then
+		"$BIN" "${cli_args[@]}" --network_json_out "$tmp_net"
+		echo "FAIL: $test_name (command failed)"
+		FAILED=$((FAILED + 1))
+		unset TEST_ARGS
+		continue
+	fi
 
-    pass=true
+	pass=true
 
-    # Compare stdout against golden .out
-    if [ -f "$golden_out" ]; then
-        if ! diff -q "$golden_out" "$tmp_stdout" > /dev/null 2>&1; then
-            echo "FAIL: $test_name (stdout mismatch)"
-            diff -u "$golden_out" "$tmp_stdout" | head -30
-            pass=false
-        fi
-    fi
+	# Compare stdout against golden .out
+	if [ -f "$golden_out" ]; then
+		if ! diff -q "$golden_out" "$tmp_stdout" >/dev/null 2>&1; then
+			echo "FAIL: $test_name (stdout mismatch)"
+			diff -u "$golden_out" "$tmp_stdout" | head -30
+			pass=false
+		fi
+	fi
 
-    # Compare network JSON against golden .net.json
-    if [ -f "$golden_net" ]; then
-        net_result="$(compare_networks "$tmp_net" "$golden_net")"
-        if [[ "$net_result" == FAIL* ]]; then
-            echo "FAIL: $test_name (network JSON mismatch)"
-            echo "$net_result" | tail -n +2
-            pass=false
-        fi
-    fi
+	# Compare network JSON against golden .net.json
+	if [ -f "$golden_net" ]; then
+		net_result="$(compare_networks "$tmp_net" "$golden_net")"
+		if [[ "$net_result" == FAIL* ]]; then
+			echo "FAIL: $test_name (network JSON mismatch)"
+			echo "$net_result" | tail -n +2
+			pass=false
+		fi
+	fi
 
-    if $pass; then
-        echo "PASS: $test_name"
-        PASSED=$((PASSED + 1))
-    else
-        FAILED=$((FAILED + 1))
-    fi
+	if $pass; then
+		echo "PASS: $test_name"
+		PASSED=$((PASSED + 1))
+	else
+		FAILED=$((FAILED + 1))
+	fi
 
-    unset TEST_ARGS
+	unset TEST_ARGS
 done
 
 echo ""

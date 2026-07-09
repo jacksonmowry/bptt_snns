@@ -273,7 +273,17 @@ int parse_cli(int argc, char* argv[], CliConfig* cfg) {
             }
             cfg->threads = v;
         } else if (arg == "--opencl") {
-            cfg->opencl = true;
+            if (++i >= argc) {
+                return cli_error("--opencl requires a value (true/false)");
+            }
+            cfg->opencl = (std::string(argv[i]) == "true");
+        } else if (arg == "--cpu_eval_interval") {
+            unsigned long v;
+            int rc = parse_ulong_arg(i, argc, argv, &v, "cpu_eval_interval");
+            if (rc) {
+                return rc;
+            }
+            cfg->cpu_eval_interval = v;
         } else {
             return cli_error("Unknown argument: %s", arg.c_str());
         }
@@ -321,5 +331,7 @@ void print_usage(const char* prog) {
     fprintf(
         stderr,
         " N/A, --opencl                        Enable OpenCL Acceleration\n");
+    fprintf(stderr,
+            " N/A, --cpu_eval_interval UINT      CPU test every N epochs (0=off)\n");
     fprintf(stderr, "  -h, --help                          Show this help\n");
 }
