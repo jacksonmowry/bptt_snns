@@ -14,7 +14,7 @@
 #define CL_HPP_TARGET_OPENCL_VERSION 120 // macOS only supports OpenCL 1.2
 #endif                                   // macOS
 #include "utilities.hpp"
-#include <CL/opencl.hpp>
+#include "my_opencl.hpp"
 using cl::Event;
 
 static const string driver_installation_instructions =
