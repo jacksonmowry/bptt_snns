@@ -329,6 +329,8 @@ bool opencl_train(const CliConfig& cfg, neuro::Network* n,
     for (size_t epoch = 0; epoch < epochs; epoch++) {
         double epoch_loss    = 0.0;
         size_t epoch_correct = 0;
+        correct.reset();
+        loss.reset();
 
         // Shuffle batch order each epoch
         for (int i = 0; i < train.observations; i++) {
@@ -346,8 +348,6 @@ bool opencl_train(const CliConfig& cfg, neuro::Network* n,
 
             // Reset accumulators for this batch
             delta_W.reset();
-            correct.reset();
-            loss.reset();
 
             for (size_t b = 0; b < current_batch_size; b++) {
                 size_t obs = batch_order[(size_t)batch_start + b];
@@ -393,12 +393,11 @@ bool opencl_train(const CliConfig& cfg, neuro::Network* n,
             weight_updates_kernel.set_parameters(12, (uint)epoch);
             weight_updates_kernel.set_parameters(15, (float)b1_t, (float)b2_t);
             timed_run(weight_updates_kernel, "weight_updates");
-
-            correct.read_from_device();
-            loss.read_from_device();
-            epoch_loss += loss[0];
-            epoch_correct += (size_t)correct[0];
         }
+        correct.read_from_device();
+        loss.read_from_device();
+        epoch_loss += loss[0];
+        epoch_correct += (size_t)correct[0];
 
         double avg_train_loss = epoch_loss / (double)train.observations;
         double avg_train_acc  = epoch_correct / (double)train.observations;
@@ -445,6 +444,8 @@ bool opencl_train(const CliConfig& cfg, neuro::Network* n,
                 timed_run(loss_kernel, "loss");
             }
 
+            // We only need to read these once an epoch, cuts down on memory
+            // bandwidth
             correct.read_from_device();
             loss.read_from_device();
             epoch_test_correct += (size_t)correct[0];
