@@ -20,7 +20,6 @@ struct TrainingBundle {
 
     Eigen::VectorXd future_mem_grad_;
     Eigen::Matrix<double, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor> sgh;
-    Eigen::Matrix<double, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor> vgh;
     Eigen::VectorXd dL_dV_;
     Eigen::VectorXd v_pre_t_;
     Eigen::VectorXd dV_post_dV_pre_;

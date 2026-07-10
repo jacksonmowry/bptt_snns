@@ -76,7 +76,6 @@ EvaluationResults forward(TrainingBundle* tb, Processor* p, const Dataset* d,
 void backward(TrainingBundle* tb, const NetworkConfiguration* nc) {
     tb->future_mem_grad_.setZero();
     tb->sgh.setZero();
-    tb->vgh.setZero();
     tb->dL_dV_.setZero();
     tb->v_pre_t_.setZero();
     tb->dV_post_dV_pre_.setZero();
@@ -91,7 +90,7 @@ void backward(TrainingBundle* tb, const NetworkConfiguration* nc) {
                                               nc->output_neurons) /
             nc->timesteps;
 
-        tb->dL_dV_   = tb->vgh.col(t) + tb->future_mem_grad_;
+        tb->dL_dV_   = tb->future_mem_grad_;
         tb->v_pre_t_ = Eigen::Map<const Eigen::VectorXd>(&tb->v_pre[t][0],
                                                          nc->total_neurons);
 
