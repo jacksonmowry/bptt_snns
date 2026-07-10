@@ -41,7 +41,7 @@ string opencl_c_container() {
             const uint idx       = neuron_id * num_steps + timestep;
             const uint inc_count = incoming[neuron_id];
 
-            bool has_event = false;
+            bool has_event    = false;
             short total_input = 0;
 
             if (is_input_neuron[neuron_id]) {
@@ -59,15 +59,17 @@ string opencl_c_container() {
 
             // Check presynaptic neurons for spikes
             for (uint i = 0u; i < inc_count; i++) {
-                const uint inc_off   = ids_base + i;
+                const uint inc_off     = ids_base + i;
                 const uint incoming_id = incoming_ids[inc_off];
-                const short source_ts  = (short)timestep - (short)delays[inc_off];
+                const short source_ts =
+                    (short)timestep - (short)delays[inc_off];
 
                 if (source_ts < 0) {
                     continue;
                 }
 
-                const char source_spike = s[incoming_id * num_steps + (uint)source_ts];
+                const char source_spike =
+                    s[incoming_id * num_steps + (uint)source_ts];
                 if (source_spike) {
                     has_event = true;
                     total_input += weights[inc_off];
@@ -100,10 +102,10 @@ string opencl_c_container() {
             s[idx]       = (char)has_spiked;
         }
 
-        kernel void risp_loss_kernel(
-            global const char* s, global float* dL_ds, global float* correct,
-            global float* loss, uint num_neurons, uint num_output_neurons,
-            uint num_steps, uint target_idx) {
+        kernel void risp_loss_kernel(global const char* s, global float* dL_ds,
+                                     global float* correct, global float* loss,
+                                     uint num_neurons, uint num_output_neurons,
+                                     uint num_steps, uint target_idx) {
             const uint neuron_id = get_global_id(0);
             // Serial for now
             if (neuron_id > 0) {
@@ -111,14 +113,14 @@ string opencl_c_container() {
             }
 
             const uint out_base = num_neurons - num_output_neurons;
-            float sum     = 0.0f;
-            uint max_idx   = 0;
-            float max_val = 0.0f;
+            float sum           = 0.0f;
+            uint max_idx        = 0;
+            float max_val       = 0.0f;
 
             // Pass 1: accumulate spikes, compute mean, find max
             for (uint i = 0; i < num_output_neurons; i++) {
                 const uint base_idx = (i + out_base) * num_steps;
-                float spike_sum = 0.0f;
+                float spike_sum     = 0.0f;
                 for (uint t = 0; t < num_steps; t++) {
                     spike_sum += s[base_idx + t];
                 }
@@ -154,12 +156,13 @@ string opencl_c_container() {
         kernel void risp_backward_grad_kernel(
             global const float* dL_ds, global const char* s,
             global const short* v_pre, global const short* v_thresh,
-            global const uchar* is_output_neuron,
+            global const float* gradient_accumulators,
+            global const uint* outgoing, global const uchar* is_output_neuron,
             global float* spike_grad_history, global float* future_mem_grad,
             global float* neuron_grad, short v_decay, float v_rest,
             float tau_rho, float scale_rho, uint num_neurons,
             uint num_output_neurons, short num_steps, float scale_factor,
-            short timestep) {
+            uint max_outgoing, short timestep) {
             const uint neuron_id = get_global_id(0);
             if (neuron_id >= num_neurons) {
                 return;
@@ -169,28 +172,40 @@ string opencl_c_container() {
             const uint out_start = num_neurons - num_output_neurons;
 
             // Sum spike_grad_history for this neuron at this timestep.
-            float spike_grad_sum = spike_grad_history[idx];
+            // float spike_grad_sum = spike_grad_history[idx];
+            float spike_grad_sum = 0.0f;
+            uint num_outgoing    = outgoing[neuron_id];
+            for (int i = 0; i < num_outgoing; i++) {
+                spike_grad_sum +=
+                    gradient_accumulators[(timestep * num_neurons *
+                                           max_outgoing) +
+                                          (neuron_id * max_outgoing) + (i)];
+            }
             if (is_output_neuron[neuron_id]) {
                 spike_grad_sum +=
                     dL_ds[neuron_id - out_start] / (float)num_steps;
             }
 
-            const float dL_dV        = future_mem_grad[neuron_id];
-            const float v_pre_t      = v_pre[idx] * scale_factor;
-            const float v_thresh_t   = v_thresh[neuron_id] * scale_factor;
+            const float dL_dV          = future_mem_grad[neuron_id];
+            const float v_pre_t        = v_pre[idx] * scale_factor;
+            const float v_thresh_t     = v_thresh[neuron_id] * scale_factor;
             const float dV_post_dV_pre = 1.0f - (s[idx] > 0 ? 1.0f : 0.0f);
-            const float dV_post_ds_t = v_rest > 0 ? (v_rest - v_pre_t) : -v_pre_t;
-            const float ds_t_dV_pre  = (scale_rho / (2.0f * tau_rho)) *
+            const float dV_post_ds_t =
+                v_rest > 0 ? (v_rest - v_pre_t) : -v_pre_t;
+            const float ds_t_dV_pre =
+                (scale_rho / (2.0f * tau_rho)) *
                 exp(-fabs(v_pre_t - v_thresh_t) / tau_rho);
 
             // Factor ds_t_dV_pre out of common terms
-            const float grad = dL_dV * dV_post_dV_pre +
+            const float grad =
+                dL_dV * dV_post_dV_pre +
                 (dL_dV * dV_post_ds_t + spike_grad_sum) * ds_t_dV_pre;
 
             neuron_grad[neuron_id] = grad;
 
             if (timestep > 0) {
-                const float dV_leak = v_pre_t >= v_rest ? (1.0f - (float)v_decay) : 0.0f;
+                const float dV_leak =
+                    v_pre_t >= v_rest ? (1.0f - (float)v_decay) : 0.0f;
                 if (dV_leak == 0.0f) {
                     future_mem_grad[neuron_id] = 0.0f;
                 } else {
@@ -205,15 +220,15 @@ string opencl_c_container() {
             global const float* neuron_grad, global const char* s,
             global const short* weights, global const uint* delays,
             global const uint* incoming, global const uint* incoming_ids,
-            global float* spike_grad_history, global float* delta_W,
-            uint num_neurons, uint max_incoming, short num_steps,
-            float scale_factor, short timestep) {
+            global const uint* gradient_slot, global float* spike_grad_history,
+            global float* delta_W, global float* gradient_accumulators,
+            uint num_neurons, uint max_incoming, uint max_outgoing,
+            short num_steps, float scale_factor, short timestep) {
             const uint global_id = get_global_id(0);
 
             const uint neuron_id  = global_id / max_incoming;
             const uint synapse_id = global_id % max_incoming;
-            if (neuron_id >= num_neurons ||
-                synapse_id >= incoming[neuron_id]) {
+            if (neuron_id >= num_neurons || synapse_id >= incoming[neuron_id]) {
                 return;
             }
 
@@ -224,13 +239,16 @@ string opencl_c_container() {
             }
 
             const float grad = neuron_grad[neuron_id];
-            const uint src_idx = incoming_id * (uint)num_steps + (uint)source_ts;
+            const uint src_idx =
+                incoming_id * (uint)num_steps + (uint)source_ts;
             const char source_spike = s[src_idx];
 
             delta_W[global_id] += source_spike * grad;
-            atomic_fetch_add(
-                (atomic_float*)&spike_grad_history[src_idx],
-                grad * weights[global_id] * scale_factor);
+            gradient_accumulators[(source_ts * num_neurons * max_outgoing) +
+                                  (incoming_id * max_outgoing) +
+                                  (gradient_slot[(neuron_id * max_incoming) +
+                                                 synapse_id])] =
+                grad * weights[global_id] * scale_factor;
         }
 
         kernel void weight_updates_kernel(
@@ -252,7 +270,7 @@ string opencl_c_container() {
 
             const float inv_batch =
                 1.0f / ((float)current_batch_size * (float)timesteps);
-            const float delta = delta_W[global_id] * inv_batch;
+            const float delta  = delta_W[global_id] * inv_batch;
             delta_W[global_id] = 0.0f;
 
             const float one_minus_beta1 = 1.0f - beta1;
@@ -261,8 +279,10 @@ string opencl_c_container() {
             const float one_minus_b2_t  = 1.0f - b2_t;
 
             // Adam moment updates
-            const float new_m = beta1 * m_weights[global_id] + one_minus_beta1 * delta;
-            const float new_v = beta2 * v_weights[global_id] + one_minus_beta2 * delta * delta;
+            const float new_m =
+                beta1 * m_weights[global_id] + one_minus_beta1 * delta;
+            const float new_v =
+                beta2 * v_weights[global_id] + one_minus_beta2 * delta * delta;
             m_weights[global_id] = new_m;
             v_weights[global_id] = new_v;
 
@@ -271,17 +291,20 @@ string opencl_c_container() {
             const float vW_hat = sqrt(new_v / one_minus_b2_t + 1.0e-8f);
 
             // Effective learning rate (warmup on epoch 0)
-            const float lr = (epoch == 0)
-                ? ((batch_start + batch_size) / (float)num_observations) * learning_rate
-                : learning_rate;
+            const float lr =
+                (epoch == 0)
+                    ? ((batch_start + batch_size) / (float)num_observations) *
+                          learning_rate
+                    : learning_rate;
 
             float weight = weights[global_id] * scale_factor;
             weight -= lr * mW_hat / vW_hat;
-            weight *= (1.0f - lr * decay_rate);  // fused weight decay
+            weight *= (1.0f - lr * decay_rate); // fused weight decay
             weight = clamp(weight, -1.0f, 1.0f);
             weight = round(weight / scale_factor);
 
-            weights[global_id] = (short)clamp(weight, (float)min_weight, (float)max_weight);
+            weights[global_id] =
+                (short)clamp(weight, (float)min_weight, (float)max_weight);
         }
 
     );

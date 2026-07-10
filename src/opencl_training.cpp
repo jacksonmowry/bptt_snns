@@ -218,7 +218,7 @@ bool opencl_train(const CliConfig& cfg, neuro::Network* n,
     Memory<float> m_weights(device, nc.total_neurons * nc.max_incoming);
     Memory<float> v_weights(device, nc.total_neurons * nc.max_incoming);
     Memory<uint> outgoing(device, nc.total_neurons);
-    Memory<uint> gradient_slot(device, nc.total_neurons * nc.max_outgoing);
+    Memory<uint> gradient_slot(device, nc.total_neurons * nc.max_incoming);
     Memory<float> gradient_accumulators(
         device, nc.timesteps * nc.total_neurons * nc.max_outgoing);
 
@@ -240,17 +240,18 @@ bool opencl_train(const CliConfig& cfg, neuro::Network* n,
 
     Kernel backward_grad_kernel(
         device, backward_grad_work_size, "risp_backward_grad_kernel", dL_ds, s,
-        v_pre, v_thresh, is_output_neuron, spike_grad_history, future_mem_grad,
-        neuron_grad, (short)nc.leak, (float)nc.min_potential, (float)tau,
-        (float)rho, (uint)nc.total_neurons, (uint)nc.output_neurons,
-        (short)nc.timesteps, (float)nc.scale_factor, (short)0);
+        v_pre, v_thresh, gradient_accumulators, outgoing, is_output_neuron,
+        spike_grad_history, future_mem_grad, neuron_grad, (short)nc.leak,
+        (float)nc.min_potential, (float)tau, (float)rho, (uint)nc.total_neurons,
+        (uint)nc.output_neurons, (short)nc.timesteps, (float)nc.scale_factor,
+        (uint)nc.max_outgoing, (short)0);
 
     Kernel backward_delta_w_kernel(
         device, backward_delta_w_work_size, "risp_backward_delta_w_kernel",
-        neuron_grad, s, weights, delays, incoming, incoming_ids,
-        spike_grad_history, delta_W, (uint)nc.total_neurons,
-        (uint)nc.max_incoming, (short)nc.timesteps, (float)nc.scale_factor,
-        (short)0);
+        neuron_grad, s, weights, delays, incoming, incoming_ids, gradient_slot,
+        spike_grad_history, delta_W, gradient_accumulators,
+        (uint)nc.total_neurons, (uint)nc.max_incoming, (uint)nc.max_outgoing,
+        (short)nc.timesteps, (float)nc.scale_factor, (short)0);
 
     Kernel weight_updates_kernel(
         device, weight_updates_work_size, "weight_updates_kernel", incoming,
@@ -286,7 +287,7 @@ bool opencl_train(const CliConfig& cfg, neuro::Network* n,
             neuro::Edge* edge  = node->incoming[j];
             size_t incoming_id = edge->from->id;
 
-            gradient_slot[i * nc.max_outgoing + j] = outgoing[incoming_id];
+            gradient_slot[i * nc.max_incoming + j] = outgoing[incoming_id];
             outgoing[incoming_id]++;
         }
     }
@@ -376,9 +377,9 @@ bool opencl_train(const CliConfig& cfg, neuro::Network* n,
 
                 // Backwards
                 for (short t = nc.timesteps - 1; t >= 0; t--) {
-                    backward_grad_kernel.set_parameters(16, (short)t);
+                    backward_grad_kernel.set_parameters(19, (short)t);
                     timed_run(backward_grad_kernel, "backward_grad");
-                    backward_delta_w_kernel.set_parameters(12, (short)t);
+                    backward_delta_w_kernel.set_parameters(15, (short)t);
                     timed_run(backward_delta_w_kernel, "backward_delta_w");
                 }
             }
