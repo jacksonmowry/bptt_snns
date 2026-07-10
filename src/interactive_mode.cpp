@@ -1,4 +1,6 @@
 #include "nlohmann/json.hpp"
+#include <algorithm>
+#include <cmath>
 #include <cstring>
 #include <fstream>
 #include <iostream>
@@ -88,37 +90,123 @@ int main(int argc, char* argv[]) {
     json network_json;
     try {
         fstream >> network_json;
+
+        // Fields live under Associated_Data.other
+        const json& other = network_json.at("Associated_Data").at("other");
+
+        // Extract metadata from loaded network JSON
+        size_t timesteps = other.value("timesteps", 0);
+
+        // Select min/max arrays based on --test flag
+        const json& data_min = args.test ? other.value("test_data_min", json::array())
+                                         : other.value("train_data_min", json::array());
+        const json& data_max = args.test ? other.value("test_data_max", json::array())
+                                         : other.value("train_data_max", json::array());
+
+        // Convert JSON arrays to vectors for use
+        vector<double> min_vals, max_vals;
+        for (auto& v : data_min) min_vals.push_back(v.get<double>());
+        for (auto& v : data_max) max_vals.push_back(v.get<double>());
+
+        // Validate extracted data
+        if (min_vals.size() != max_vals.size()) {
+            fprintf(stderr, "Error: min/max array size mismatch (%zu vs %zu)\n",
+                    min_vals.size(), max_vals.size());
+            fstream.close();
+            return 1;
+        }
+        size_t n = min_vals.size();
+        if (n == 0) {
+            fprintf(stderr, "Error: no min/max data found in JSON\n");
+            fstream.close();
+            return 1;
+        }
+        if (timesteps == 0) {
+            fprintf(stderr, "Error: timesteps must be > 0\n");
+            fstream.close();
+            return 1;
+        }
+        size_t input_neurons = n * 2;
+
+        // spikes[input_neuron][timestep] = true if spike fires
+        vector<vector<bool>> spikes(input_neurons, vector<bool>(timesteps, false));
+
+        printf("ML %s\n", args.network_json.c_str());
+
+        // Read batches of n floats from stdin until EOF
+        while (true) {
+            vector<double> values(n);
+            bool got_all = true;
+            for (size_t i = 0; i < n; i++) {
+                if (!(cin >> values[i])) {
+                    got_all = false;
+                    break;
+                }
+            }
+            if (!got_all) break;
+
+            // Reset spikes
+            for (size_t i = 0; i < input_neurons; i++) {
+                fill(spikes[i].begin(), spikes[i].end(), false);
+            }
+
+            // Encode spikes (non-timeseries logic from data_utils.cpp)
+            for (size_t input = 0; input < n; input++) {
+                double range = max_vals[input] - min_vals[input];
+                if (range <= 0.0) {
+                    fprintf(stderr, "Warning: range <= 0 for input %zu, skipping\n", input);
+                    continue;
+                }
+                double x = (values[input] - min_vals[input]) / range;
+                if (!std::isfinite(x)) {
+                    fprintf(stderr, "Warning: non-finite normalized value for input %zu, skipping\n", input);
+                    continue;
+                }
+                double inv_x = 1.0 - x;
+
+                if (x > 0.0) {
+                    double step = 1.0 / x;
+                    if (step > 0.0) {
+                        for (double j = 0.0; j < (double)timesteps; j += step) {
+                            spikes[input * 2][(size_t)j] = true;
+                        }
+                    }
+                }
+                if (inv_x > 0.0) {
+                    double step = 1.0 / inv_x;
+                    if (step > 0.0) {
+                        for (double j = 0.0; j < (double)timesteps; j += step) {
+                            spikes[input * 2 + 1][(size_t)j] = true;
+                        }
+                    }
+                }
+            }
+
+            // Print as 1/0 with no spacing
+            for (size_t i = 0; i < input_neurons; i++) {
+                printf("ASR %zu ", i);
+                for (size_t t = 0; t < timesteps; t++) {
+                    cout << (spikes[i][t] ? 1 : 0);
+                }
+                cout << endl;
+            }
+
+            printf("RUN %zu\n", timesteps);
+            printf("OC\n");
+            printf("CA\n");
+        }
+
+        fstream.close();
+        return 0;
+
     } catch (const json::exception& e) {
-        fprintf(stderr, "Error: failed to parse JSON: %s\n", e.what());
+        fprintf(stderr, "Error: JSON access failed: %s\n", e.what());
         fstream.close();
         return 1;
-    }
-    fstream.close();
-
-    // Fields live under Associated_Data.other
-    const json& other = network_json.at("Associated_Data").at("other");
-
-    // Extract metadata from loaded network JSON
-    size_t timesteps = other.value("timesteps", 0);
-
-    // Select min/max arrays based on --test flag
-    const json& data_min = args.test ? other.value("test_data_min", json::array())
-                                     : other.value("train_data_min", json::array());
-    const json& data_max = args.test ? other.value("test_data_max", json::array())
-                                     : other.value("train_data_max", json::array());
-
-    // Convert JSON arrays to vectors for use
-    vector<double> min_vals, max_vals;
-    for (auto& v : data_min) min_vals.push_back(v.get<double>());
-    for (auto& v : data_max) max_vals.push_back(v.get<double>());
-
-    // Skeleton: print parsed data for now
-    cout << "network_json loaded, " << network_json.size() << " top-level keys" << endl;
-    cout << "timesteps: " << timesteps << endl;
-    cout << "min_vals size: " << min_vals.size() << endl;
-    cout << "max_vals size: " << max_vals.size() << endl;
-    if (args.test) {
-        cout << "test mode enabled" << endl;
+    } catch (const std::exception& e) {
+        fprintf(stderr, "Error: %s\n", e.what());
+        fstream.close();
+        return 1;
     }
 
     return 0;

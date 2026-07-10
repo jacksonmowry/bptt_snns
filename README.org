@@ -850,6 +850,97 @@ x <stdin>
 x 12074            -1             1 -0.0013236494 -0.0045577614    0.27270209
 #+end_src
 
+* Running Networks in Interactive Mode
+To run a network with the =processor_tool_risp= binary we can do the following.
+
+Train a network.
+#+begin_src shell
+$ bin/bptt_learning --network_json networks/risp_f_emptynet.json --data_file data/iris_data.csv --label_file data/iris_label.csv --hidden_neurons 4 --connectivity 0.75 --timesteps 16 --training_percent 0.75 --epochs 100 --threads 10 --batch_size 10 --network_json_out iris_test.json
+Neurons: 15, Synapses: 169
+Beginning training
+Epoch:    1/100, Loss:    1.10756 (Best:    1.10756), Acc:  0.0982143 (Best:  0.0982143), TestLoss:    1.09377 (Best:    1.09377), TestAcc:   0.342105 (Best:   0.342105)
+...
+Epoch:   99/100, Loss:   0.752102 (Best:   0.749293), Acc:   0.946429 (Best:   0.973214), TestLoss:   0.752904 (Best:   0.744857), TestAcc:          1 (Best:          1)
+Epoch:  100/100, Loss:   0.744539 (Best:   0.744539), Acc:   0.964286 (Best:   0.973214), TestLoss:   0.760317 (Best:   0.744857), TestAcc:          1 (Best:          1)
+#+end_src
+
+We then run the network through =bin/interactive_mode= which accepts observations as space separated values on =stdin=. The flag =--test= specifies if we should use the training dataset min/max values for encoding, or the test values.
+#+begin_src shell
+$ head -1 data/iris_data.csv | sed 's/,/ /g' | bin/interactive_mode --test --network_json iris_test.json
+ML iris_test.json
+ASR 0 1000100001000010
+ASR 1 1111011110111101
+ASR 2 1101011010110101
+ASR 3 1010100101001010
+ASR 4 1000000000000000
+ASR 5 1111111111111111
+ASR 6 0000000000000000
+ASR 7 1111111111111111
+RUN 16
+OC
+CA
+#+end_src
+
+This produces the interactive commands you'd typically type into the processor tool. Now we can pipe this into the processor tool.
+#+begin_src shell
+$ head -1 data/iris_data.csv | sed 's/,/ /g' | bin/interactive_mode --test --network_json iris_test.json | framework-open/bin/processor_tool_risp 
+node 12 spike counts: 14
+node 13 spike counts: 0
+node 14 spike counts: 1
+
+$ tail -1 data/iris_data.csv | sed 's/,/ /g' | bin/interactive_mode --test --network_json iris_test.json | framework-open/bin/processor_tool_risp 
+node 12 spike counts: 1
+node 13 spike counts: 1
+node 14 spike counts: 13
+#+end_src
+
+We see the most spikes on the first output for the first observation and the last output for the last observation. Looking at the labels for these 2 examples we can confirm that we are spiking for the correct class in each case.
+
+#+begin_src shell
+$ head -1 data/iris_label.csv 
+0
+$ tail -1 data/iris_label.csv 
+2
+#+end_src
+
+** The same experiment with a discrete network
+#+begin_src shell
+$ bin/bptt_learning --network_json networks/risp_127.json --data_file data/iris_data.csv --label_file data/iris_label.csv --hidden_neurons 4 --connectivity 0.35 --timesteps 16 --training_percent 0.75 --epochs 100 --threads 10 --batch_size 10 --network_json_out iris_test.json
+Neurons: 15, Synapses: 82
+Beginning training
+Epoch:    1/100, Loss:    1.10512 (Best:    1.10512), Acc:   0.330357 (Best:   0.330357), TestLoss:    1.11345 (Best:    1.11345), TestAcc:   0.210526 (Best:   0.210526)
+...
+Epoch:  100/100, Loss:   0.922792 (Best:   0.922792), Acc:   0.955357 (Best:   0.964286), TestLoss:   0.907036 (Best:    0.89885), TestAcc:          1 (Best:          1)
+#+end_src
+
+#+begin_src shell
+$ head -1 data/iris_data.csv | sed 's/,/ /g' | bin/interactive_mode --test --network_json iris_test.json
+ML iris_test.json
+ASR 0 1000001000000100
+ASR 1 1111110111111011
+ASR 2 1101101011010110
+ASR 3 1010010100101001
+ASR 4 1000000000000010
+ASR 5 1111111111111101
+ASR 6 1000000000000000
+ASR 7 1111111111111111
+RUN 16
+OC
+CA
+#+end_src
+
+#+begin_src shell
+$ head -1 data/iris_data.csv | sed 's/,/ /g' | bin/interactive_mode --test --network_json iris_test.json | framework-open/bin/processor_tool_risp 
+node 12 spike counts: 5
+node 13 spike counts: 0
+node 14 spike counts: 0
+
+$ tail -1 data/iris_data.csv | sed 's/,/ /g' | bin/interactive_mode --test --network_json iris_test.json | framework-open/bin/processor_tool_risp 
+node 12 spike counts: 0
+node 13 spike counts: 2
+node 14 spike counts: 4
+#+end_src
+
 * Dependencies
 This project uses the following third-party libraries.
 
