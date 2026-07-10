@@ -1,6 +1,7 @@
 #pragma once
 
 #include "cli.h"
+#include "csv.h"
 #include "framework.hpp"
 #include "shared.h"
 #include <cstddef>
@@ -27,6 +28,7 @@ neuro::Network* load_and_init_network(const std::string& json_file,
 // Build and attach full reproducibility metadata to the network.
 void build_run_metadata(neuro::Network* n, int argc, char* argv[],
                         const CliConfig& cfg,
+                        const Dataset* train, const Dataset* test,
                         size_t input_neurons, size_t output_neurons,
                         size_t total_neurons, size_t neuron_count,
                         size_t synapse_count,

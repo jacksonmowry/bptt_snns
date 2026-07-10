@@ -145,6 +145,7 @@ int main(int argc, char* argv[]) {
     n->make_sorted_node_vector();
 
     build_run_metadata(n, argc, argv, cfg,
+                       &train, &test,
                        input_neurons, output_neurons, total_neurons,
                        neuron_count, synapse_count,
                        discrete,

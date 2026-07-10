@@ -136,6 +136,7 @@ for cfg_file in "${cfgs[@]}"; do
 
     # Run
     if ! "$BIN" "${cli_args[@]}" --network_json_out "$tmp_net" > "$tmp_stdout" 2>&1; then
+        "$BIN" "${cli_args[@]}" --network_json_out "$tmp_net"
         echo "FAIL: $test_name (command failed)"
         FAILED=$((FAILED + 1))
         unset TEST_ARGS
@@ -158,7 +159,7 @@ for cfg_file in "${cfgs[@]}"; do
         net_result="$(compare_networks "$tmp_net" "$golden_net")"
         if [[ "$net_result" == FAIL* ]]; then
             echo "FAIL: $test_name (network JSON mismatch)"
-            echo "$net_result" | tail -n +2 | head -30
+            echo "$net_result" | tail -n +2
             pass=false
         fi
     fi
