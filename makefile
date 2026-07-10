@@ -17,10 +17,14 @@ BPTT_OBJ = obj/shared.o obj/math_utils.o obj/data_utils.o obj/network_utils.o ob
 FRAMEWORK_DIR = framework-open/
 
 all: framework-open/bin/network_tool \
-	bin/bptt_learning
+	bin/bptt_learning \
+	bin/interactive_mode
 
 # Applications ################################################################
 bin/bptt_learning: src/bptt_learning.cpp $(BPTT_OBJ) $(RISP_OBJ) $(FR_LIB)
+	$(CXX) $(FR_CFLAGS) -o $@ $^
+
+bin/interactive_mode: src/interactive_mode.cpp
 	$(CXX) $(FR_CFLAGS) -o $@ $^
 
 # Libraries ###################################################################
