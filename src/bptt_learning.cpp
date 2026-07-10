@@ -145,6 +145,7 @@ int main(int argc, char* argv[]) {
         .layer_offsets  = {0, input_neurons, input_neurons + hidden_neurons},
         .total_neurons  = total_neurons,
         .max_incoming   = 0,
+        .max_outgoing   = 0,
         .timesteps      = timesteps,
         .timeseries     = timeseries,
         .min_potential  = min_potential,
@@ -170,13 +171,24 @@ int main(int argc, char* argv[]) {
     }
     nc.max_incoming = max_incoming;
 
+    // Compute max_outgoing from network topology
+    size_t max_outgoing = 0;
+    for (size_t i = 0; i < total_neurons; i++) {
+        auto* node = n->get_node(i);
+        size_t out_count = node->outgoing.size();
+        if (out_count > max_outgoing) {
+            max_outgoing = out_count;
+        }
+    }
+    nc.max_outgoing = max_outgoing;
+
     if (cfg.opencl) {
         if (!discrete) {
             fprintf(stderr,
                 "OpenCL support is not enabled for non-discrete networks.\n");
             exit(1);
         }
-        opencl_train(cfg, n, nc, train, test, state, max_incoming,
+        opencl_train(cfg, n, nc, train, test, state, max_incoming, max_outgoing,
                      epochs, batch_size, learning_rate, decay_rate,
                      rho, tau, true);
         exit(0);

@@ -52,6 +52,7 @@ struct NetworkConfiguration {
     size_t layer_offsets[3];
     size_t total_neurons;
     size_t max_incoming;
+    size_t max_outgoing;
 
     size_t timesteps;
     bool timeseries;

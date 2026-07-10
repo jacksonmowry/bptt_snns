@@ -180,6 +180,7 @@ bool opencl_train(const CliConfig& cfg,
                   const Dataset& test,
                   TrainingState* state,
                   size_t max_incoming,
+                  size_t max_outgoing,
                   size_t epochs,
                   size_t batch_size,
                   double learning_rate,
@@ -220,6 +221,14 @@ bool opencl_train(const CliConfig& cfg,
     Memory<float> neuron_grad(device, nc.total_neurons);
     Memory<float> m_weights(device, nc.total_neurons * nc.max_incoming);
     Memory<float> v_weights(device, nc.total_neurons * nc.max_incoming);
+
+    // Additional buffers for outgoing-edge gradient tracking
+    Memory<uint> outgoing(device, nc.total_neurons);
+    Memory<float> gradient_slot(device, nc.total_neurons * nc.max_outgoing);
+    Memory<float> gradient_accumulators(device,
+                                        nc.timesteps * nc.total_neurons * nc.max_outgoing,
+                                        1, false, true);
+
 
     Kernel encode_kernel(device, encode_work_size,
                          "risp_encode_inputs_kernel", x, data, (int)train.cols,
@@ -295,6 +304,8 @@ bool opencl_train(const CliConfig& cfg,
     is_output_neuron.write_to_device();
     m_weights.write_to_device();
     v_weights.write_to_device();
+    outgoing.write_to_device();
+    gradient_slot.write_to_device();
 
     double b1_t = 1.0;
     double b2_t = 1.0;
