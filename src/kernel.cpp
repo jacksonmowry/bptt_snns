@@ -155,8 +155,7 @@ string opencl_c_container() {
             global const float* dL_ds, global const char* s,
             global const short* v_pre, global const short* v_thresh,
             global const uchar* is_output_neuron,
-            global float* spike_grad_history,
-            global float* voltage_grad_history, global float* future_mem_grad,
+            global float* spike_grad_history, global float* future_mem_grad,
             global float* neuron_grad, short v_decay, float v_rest,
             float tau_rho, float scale_rho, uint num_neurons,
             uint num_output_neurons, short num_steps, float scale_factor,
@@ -176,7 +175,7 @@ string opencl_c_container() {
                     dL_ds[neuron_id - out_start] / (float)num_steps;
             }
 
-            const float dL_dV        = voltage_grad_history[idx] + future_mem_grad[neuron_id];
+            const float dL_dV        = future_mem_grad[neuron_id];
             const float v_pre_t      = v_pre[idx] * scale_factor;
             const float v_thresh_t   = v_thresh[neuron_id] * scale_factor;
             const float dV_post_dV_pre = 1.0f - (s[idx] > 0 ? 1.0f : 0.0f);

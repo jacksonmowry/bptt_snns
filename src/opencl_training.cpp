@@ -215,8 +215,6 @@ bool opencl_train(const CliConfig& cfg,
     Memory<float> loss(device, 1);
     Memory<float> spike_grad_history(device,
                                      nc.total_neurons * nc.timesteps);
-    Memory<float> voltage_grad_history(device,
-                                       nc.total_neurons * nc.timesteps);
     Memory<float> future_mem_grad(device, nc.total_neurons);
     Memory<float> delta_W(device, nc.total_neurons * nc.max_incoming);
     Memory<float> neuron_grad(device, nc.total_neurons);
@@ -243,7 +241,7 @@ bool opencl_train(const CliConfig& cfg,
     Kernel backward_grad_kernel(
         device, backward_grad_work_size, "risp_backward_grad_kernel", dL_ds,
         s, v_pre, v_thresh, is_output_neuron, spike_grad_history,
-        voltage_grad_history, future_mem_grad, neuron_grad,
+        future_mem_grad, neuron_grad,
         (short)nc.leak, (float)nc.min_potential, (float)tau, (float)rho,
         (uint)nc.total_neurons, (uint)nc.output_neurons,
         (short)nc.timesteps, (float)nc.scale_factor, (short)0);
@@ -347,7 +345,6 @@ bool opencl_train(const CliConfig& cfg,
                 v_pre.reset();
                 dL_ds.reset();
                 spike_grad_history.reset();
-                voltage_grad_history.reset();
                 future_mem_grad.reset();
 
                 // Encode data
@@ -367,7 +364,7 @@ bool opencl_train(const CliConfig& cfg,
 
                 // Backwards
                 for (short t = nc.timesteps - 1; t >= 0; t--) {
-                    backward_grad_kernel.set_parameters(17, (short)t);
+                    backward_grad_kernel.set_parameters(16, (short)t);
                     timed_run(backward_grad_kernel, "backward_grad");
                     backward_delta_w_kernel.set_parameters(12, (short)t);
                     timed_run(backward_delta_w_kernel, "backward_delta_w");
