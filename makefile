@@ -12,7 +12,7 @@ FR_CFLAGS = -std=c++11 -Wall -Wextra -O3 -march=native -flto -Iinclude -Ivendor 
 FR_OBJ = framework-open/obj/framework.o framework-open/obj/processor_help.o framework-open/obj/properties.o
 
 RISP_OBJ = framework-open/obj/risp.o framework-open/obj/risp_static.o
-BPTT_OBJ = obj/shared.o obj/math_utils.o obj/data_utils.o obj/network_utils.o obj/forward_backward.o obj/optimizer.o obj/threading.o obj/csv.o obj/kernel.o obj/cli.o obj/network_setup.o obj/training.o
+BPTT_OBJ = obj/shared.o obj/math_utils.o obj/data_utils.o obj/network_utils.o obj/forward_backward.o obj/optimizer.o obj/threading.o obj/csv.o obj/kernel.o obj/cli.o obj/network_setup.o obj/training.o obj/opencl_training.o
 
 FRAMEWORK_DIR = framework-open/
 
@@ -82,6 +82,9 @@ obj/network_setup.o: src/network_setup.cpp
 	$(CXX) $(FR_CFLAGS) -o $@ -c $^
 
 obj/training.o: src/training.cpp
+	$(CXX) $(FR_CFLAGS) -o $@ -c $^
+
+obj/opencl_training.o: src/opencl_training.cpp
 	$(CXX) $(FR_CFLAGS) -o $@ -c $^
 
 # Utility ######################################################################
