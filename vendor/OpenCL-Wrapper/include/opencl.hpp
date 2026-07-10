@@ -529,6 +529,7 @@ class Device {
   private:
     cl::Program cl_program;
     cl::CommandQueue cl_queue;
+    cl::CommandQueue cl_queue_profiling; // queue with CL_QUEUE_PROFILING_ENABLE
     bool exists = false;
     inline string enable_device_capabilities() const {
         return // enable FP64/FP16 capabilities if available
@@ -584,6 +585,10 @@ class Device {
         this->cl_queue = cl::CommandQueue(
             info.cl_context,
             info.cl_device); // queue to push commands for the device
+        this->cl_queue_profiling = cl::CommandQueue(
+            info.cl_context,
+            info.cl_device,
+            cl::QueueProperties::Profiling); // profiling queue
         cl::Program::Sources cl_source;
         const string kernel_code =
             enable_device_capabilities() + "\n" + opencl_c_code;
@@ -637,6 +642,7 @@ class Device {
     inline cl::Context get_cl_context() const { return info.cl_context; }
     inline cl::Program get_cl_program() const { return cl_program; }
     inline cl::CommandQueue get_cl_queue() const { return cl_queue; }
+    inline cl::CommandQueue get_cl_profiling_queue() const { return cl_queue_profiling; }
     inline bool is_initialized() const { return exists; }
 };
 
@@ -1340,4 +1346,18 @@ class Kernel {
         cl_queue.finish();
         return *this;
     }
+    inline Kernel& enqueue_run_profiled(Event* event_returned = nullptr) {
+        check_for_errors(device->get_cl_profiling_queue().enqueueNDRangeKernel(
+            cl_kernel, cl::NullRange, cl_range_global, cl_range_local,
+            nullptr, event_returned));
+        return *this;
+    }
 };
+
+/* Get GPU kernel execution time from profiling event in microseconds */
+inline double get_kernel_duration_us(const Event& evt) {
+    cl_ulong t0 = 0, t1 = 0;
+    evt.getProfilingInfo(CL_PROFILING_COMMAND_START, &t0);
+    evt.getProfilingInfo(CL_PROFILING_COMMAND_END, &t1);
+    return static_cast<double>(t1 - t0) / 1000.0;
+}

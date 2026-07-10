@@ -21,15 +21,21 @@ using namespace std;
 using namespace neuro;
 
 /* ------------------------------------------------------------------ */
-/* OpenCL timing helpers                                                */
+/* OpenCL timing helpers (GPU profiling via clGetEventProfilingInfo)    */
 /* ------------------------------------------------------------------ */
+/* Uses a profiling-enabled command queue to measure actual GPU kernel
+ * execution time.  Host-side overhead (driver, enqueue, CPU scheduling)
+ * is excluded.  Queue is synced every SYNC_INTERVAL enqueues to bound
+ * GPU command-queue depth.                                            */
 struct KernelTiming {
     string name;
-    double total_us; // accumulated microseconds
-    uint64_t calls;  // number of .run() invocations
-    KernelTiming() : name(""), total_us(0.0), calls(0) {}
+    double total_us; // accumulated GPU microseconds
+    double min_us;   // shortest single invocation
+    double max_us;   // longest single invocation
+    uint64_t calls;  // number of invocations
+    KernelTiming() : name(""), total_us(0.0), min_us(1e18), max_us(0.0), calls(0) {}
     KernelTiming(const string& n, double u, uint64_t c)
-        : name(n), total_us(u), calls(c) {}
+        : name(n), total_us(u), min_us(u), max_us(u), calls(c) {}
 };
 
 static vector<KernelTiming> g_kernels;
@@ -51,6 +57,8 @@ static void timing_add(const char* name, double us) {
     for (auto& kt : g_kernels) {
         if (kt.name == name) {
             kt.total_us += us;
+            kt.min_us    = std::min(kt.min_us, us);
+            kt.max_us    = std::max(kt.max_us, us);
             kt.calls++;
             return;
         }
@@ -64,27 +72,32 @@ static void timing_print(double total_us) {
     }
 
     printf(
-        "\n===== OpenCL Kernel Timing Report ============================\n");
-    printf("%-30s %14s %10s %10s\n", "Kernel", "Time (ms)", "Calls", "Share");
-    printf("%-30s %14s %10s %10s\n", "------------------------------",
-           "--------------", "----------", "----------");
+        "\n===== OpenCL Kernel Timing Report (GPU profiling) ===========\n");
+    printf("%-28s %10s %10s %10s %8s %10s\n", "Kernel", "Avg(us)", "Min(us)",
+           "Max(us)", "Calls", "Share");
+    printf("%-28s %10s %10s %10s %8s %10s\n", "----------------------------",
+           "----------", "----------", "----------", "--------", "----------");
 
     for (auto& kt : g_kernels) {
-        double pct = (total_us > 0) ? (kt.total_us / total_us * 100.0) : 0.0;
-        printf("%-30s %13.3f ms %10zu %9.2f%%\n", kt.name.c_str(),
-               kt.total_us / 1000.0, kt.calls, pct);
+        double avg  = (kt.calls > 0) ? (kt.total_us / kt.calls) : 0.0;
+        double pct  = (total_us > 0) ? (kt.total_us / total_us * 100.0) : 0.0;
+        printf("%-28s %10.1f %10.1f %10.1f %8zu %9.2f%%\n", kt.name.c_str(),
+               avg, kt.min_us, kt.max_us, kt.calls, pct);
     }
-    printf("%-30s %13.3f ms\n", "TOTAL", total_us / 1000.0);
+    printf("%-28s %13.3f ms\n", "TOTAL", total_us / 1000.0);
     printf("=============================================================\n\n");
 }
 
-template <typename... Args>
-static void timed_run(Kernel& kernel, const char* name, Args&&... args) {
-    auto t0 = chrono::high_resolution_clock::now();
-    kernel.run(std::forward<Args>(args)...);
-    auto t1   = chrono::high_resolution_clock::now();
-    double us = chrono::duration<double, std::micro>(t1 - t0).count();
-    timing_add(name, us);
+static void timed_run(Kernel& kernel, const char* name) {
+    if (g_timing_enabled) {
+        Event evt;
+        kernel.enqueue_run_profiled(&evt);
+        evt.wait();
+        double us = get_kernel_duration_us(evt);
+        timing_add(name, us);
+    } else {
+        kernel.run();
+    }
 }
 
 static void encode(Memory<double>& data, const Dataset& d) {
