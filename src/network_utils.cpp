@@ -1,8 +1,8 @@
 #include "network_utils.h"
 #include "framework.hpp"
-#include <nlohmann/json.hpp>
 #include <cstdio>
 #include <cstdlib>
+#include <nlohmann/json.hpp>
 
 using namespace std;
 using nlohmann::json;

@@ -1,8 +1,8 @@
 #include "forward_backward.h"
-#include "shared.h"
 #include "data_utils.h"
-#include "math_utils.h"
 #include "framework.hpp"
+#include "math_utils.h"
+#include "shared.h"
 #include <Eigen/Dense>
 #include <algorithm>
 #include <cassert>

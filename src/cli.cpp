@@ -1,8 +1,8 @@
 #include "cli.h"
-#include <cstdarg>
 #include <cerrno>
-#include <cstdlib>
+#include <cstdarg>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <ctime>
 #include <string>
@@ -62,7 +62,7 @@ static int parse_ulong_arg(int& i, int argc, char* argv[], unsigned long* out,
 }
 
 int parse_cli(int argc, char* argv[], CliConfig* cfg) {
-    int i = 1;
+    int i     = 1;
     cfg->seed = (unsigned long)time(NULL);
 
     while (i < argc) {
@@ -111,42 +111,64 @@ int parse_cli(int argc, char* argv[], CliConfig* cfg) {
         } else if (arg == "--connectivity" || arg == "-c" || arg == "-S") {
             double v;
             int rc = parse_double_arg(i, argc, argv, &v, "connectivity");
-            if (rc) return rc;
+            if (rc) {
+                return rc;
+            }
             rc = check_range(v, 0.0, 1.0, "connectivity");
-            if (rc) return rc;
+            if (rc) {
+                return rc;
+            }
             cfg->connectivity = v;
         } else if (arg == "--learning_rate" || arg == "-r") {
             double v;
             int rc = parse_double_arg(i, argc, argv, &v, "learning_rate");
-            if (rc) return rc;
+            if (rc) {
+                return rc;
+            }
             rc = check_range(v, 0.0, 1.0, "learning_rate");
-            if (rc) return rc;
+            if (rc) {
+                return rc;
+            }
             cfg->learning_rate = v;
         } else if (arg == "--decay_rate" || arg == "-e") {
             double v;
             int rc = parse_double_arg(i, argc, argv, &v, "decay_rate");
-            if (rc) return rc;
+            if (rc) {
+                return rc;
+            }
             rc = check_range(v, 0.0, 1.0, "decay_rate");
-            if (rc) return rc;
+            if (rc) {
+                return rc;
+            }
             cfg->decay_rate = v;
         } else if (arg == "--tau" || arg == "-u") {
             double v;
             int rc = parse_double_arg(i, argc, argv, &v, "tau");
-            if (rc) return rc;
+            if (rc) {
+                return rc;
+            }
             rc = check_pos(v, "tau");
-            if (rc) return rc;
+            if (rc) {
+                return rc;
+            }
             cfg->tau = v;
         } else if (arg == "--rho" || arg == "-o") {
             double v;
             int rc = parse_double_arg(i, argc, argv, &v, "rho");
-            if (rc) return rc;
+            if (rc) {
+                return rc;
+            }
             rc = check_pos(v, "rho");
-            if (rc) return rc;
+            if (rc) {
+                return rc;
+            }
             cfg->rho = v;
         } else if (arg == "--timesteps" || arg == "-t") {
             unsigned long v;
             int rc = parse_ulong_arg(i, argc, argv, &v, "timesteps");
-            if (rc) return rc;
+            if (rc) {
+                return rc;
+            }
             if (v == 0) {
                 return cli_error("--timesteps must be > 0");
             }
@@ -154,7 +176,9 @@ int parse_cli(int argc, char* argv[], CliConfig* cfg) {
         } else if (arg == "--hidden_neurons" || arg == "-H") {
             unsigned long v;
             int rc = parse_ulong_arg(i, argc, argv, &v, "hidden_neurons");
-            if (rc) return rc;
+            if (rc) {
+                return rc;
+            }
             if (v == 0) {
                 return cli_error("--hidden_neurons must be > 0");
             }
@@ -162,24 +186,34 @@ int parse_cli(int argc, char* argv[], CliConfig* cfg) {
         } else if (arg == "--seed" || arg == "-s") {
             unsigned long v;
             int rc = parse_ulong_arg(i, argc, argv, &v, "seed");
-            if (rc) return rc;
+            if (rc) {
+                return rc;
+            }
             cfg->seed = v;
         } else if (arg == "--epochs" || arg == "-p") {
             unsigned long v;
             int rc = parse_ulong_arg(i, argc, argv, &v, "epochs");
-            if (rc) return rc;
+            if (rc) {
+                return rc;
+            }
             cfg->epochs = v;
         } else if (arg == "--batch_size" || arg == "-B") {
             unsigned long v;
             int rc = parse_ulong_arg(i, argc, argv, &v, "batch_size");
-            if (rc) return rc;
+            if (rc) {
+                return rc;
+            }
             cfg->batch_size = v;
         } else if (arg == "--training_percent" || arg == "-P") {
             double v;
             int rc = parse_double_arg(i, argc, argv, &v, "training_percent");
-            if (rc) return rc;
+            if (rc) {
+                return rc;
+            }
             rc = check_range(v, 0.0, 1.0, "training_percent");
-            if (rc) return rc;
+            if (rc) {
+                return rc;
+            }
             cfg->training_percent = v;
         } else if (arg == "--network_json_out" || arg == "-N") {
             if (++i >= argc) {
@@ -189,7 +223,9 @@ int parse_cli(int argc, char* argv[], CliConfig* cfg) {
         } else if (arg == "--threads" || arg == "-T") {
             unsigned long v;
             int rc = parse_ulong_arg(i, argc, argv, &v, "threads");
-            if (rc) return rc;
+            if (rc) {
+                return rc;
+            }
             if (v == 0) {
                 return cli_error("--threads must be > 0");
             }

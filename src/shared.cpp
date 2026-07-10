@@ -16,5 +16,4 @@ TrainingBundle::TrainingBundle(size_t total_neurons, size_t timesteps,
       vgh(total_neurons, timesteps), dL_dV_(total_neurons),
       v_pre_t_(total_neurons), dV_post_dV_pre_(total_neurons),
       dV_post_ds_t_(total_neurons), ds_t_dV_pre_(total_neurons),
-      dV_leak_dV_t1_(total_neurons), grad_(total_neurons), rho(rho),
-      tau(tau) {}
+      dV_leak_dV_t1_(total_neurons), grad_(total_neurons), rho(rho), tau(tau) {}

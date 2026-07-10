@@ -1,7 +1,7 @@
 #include "data_utils.h"
 #include "framework.hpp"
-#include <unordered_set>
 #include <cassert>
+#include <unordered_set>
 
 size_t label_count(const Dataset* d) {
     std::unordered_set<double> us;

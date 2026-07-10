@@ -13,8 +13,8 @@
 #include <cassert>
 #include <cfloat>
 #include <cstddef>
-#include <cstdlib>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <ctime>
 #include <fstream>
@@ -45,10 +45,9 @@ int main(int argc, char* argv[]) {
     }
 
     bool have_simple = !cfg.data_file.empty() && !cfg.label_file.empty();
-    bool have_split  = !cfg.train_data_file.empty() &&
-                       !cfg.train_label_file.empty() &&
-                       !cfg.test_data_file.empty() &&
-                       !cfg.test_label_file.empty();
+    bool have_split =
+        !cfg.train_data_file.empty() && !cfg.train_label_file.empty() &&
+        !cfg.test_data_file.empty() && !cfg.test_label_file.empty();
     if (have_simple && have_split) {
         fprintf(stderr, "Error: cannot specify both (-d + -l) and "
                         "(-a + -i + -j + -k); choose one\n");
@@ -85,9 +84,8 @@ int main(int argc, char* argv[]) {
     size_t test_labels  = label_count(&test);
     assert(test.observations == 0 || train_labels == test_labels);
 
-    size_t input_neurons  = (cfg.timeseries)
-                                ? train.rows_per_observation * 2
-                                : train.cols * 2;
+    size_t input_neurons =
+        (cfg.timeseries) ? train.rows_per_observation * 2 : train.cols * 2;
     size_t output_neurons = train_labels;
     size_t hidden_neurons = cfg.hidden_neurons;
     size_t total_neurons  = input_neurons + hidden_neurons + output_neurons;
@@ -106,19 +104,18 @@ int main(int argc, char* argv[]) {
     bool timeseries      = cfg.timeseries;
 
     Network* n = load_and_init_network(
-        cfg.network_json_file,
-        connectivity, learning_rate, decay_rate, tau, rho,
-        timesteps, hidden_neurons, seed, epochs, batch_size,
-        training_pct, threads, timeseries);
+        cfg.network_json_file, connectivity, learning_rate, decay_rate, tau,
+        rho, timesteps, hidden_neurons, seed, epochs, batch_size, training_pct,
+        threads, timeseries);
 
-    bool discrete        = n->get_data("proc_params")["discrete"];
+    bool discrete         = n->get_data("proc_params")["discrete"];
     std::string leak_prop = n->get_data("proc_params")["leak_mode"];
-    bool leak            = leak_prop == "all";
-    double min_potential = n->get_data("proc_params")["min_potential"];
-    double min_weight    = n->get_data("proc_params")["min_weight"];
-    double max_weight    = n->get_data("proc_params")["max_weight"];
-    double max_threshold = n->get_data("proc_params")["max_threshold"];
-    int scale = 0;
+    bool leak             = leak_prop == "all";
+    double min_potential  = n->get_data("proc_params")["min_potential"];
+    double min_weight     = n->get_data("proc_params")["min_weight"];
+    double max_weight     = n->get_data("proc_params")["max_weight"];
+    double max_threshold  = n->get_data("proc_params")["max_threshold"];
+    int scale             = 0;
     if (discrete) {
         scale = max(abs(min_weight), abs(max_weight)) * 2 + 1;
         scale = pow(2.0, ceil(log2(scale)));
@@ -130,11 +127,10 @@ int main(int argc, char* argv[]) {
 
     size_t neuron_count, synapse_count;
     if (n->num_nodes() == 0) {
-        std::tie(neuron_count, synapse_count) =
-            generate_network(n, input_neurons, hidden_neurons, output_neurons,
-                             total_neurons, connectivity, discrete,
-                             scale, scale_factor, min_weight, max_weight,
-                             max_threshold);
+        std::tie(neuron_count, synapse_count) = generate_network(
+            n, input_neurons, hidden_neurons, output_neurons, total_neurons,
+            connectivity, discrete, scale, scale_factor, min_weight, max_weight,
+            max_threshold);
         printf("Neurons: %zu, Synapses: %zu\n", neuron_count, synapse_count);
     } else {
         neuron_count  = n->num_nodes();
@@ -144,34 +140,30 @@ int main(int argc, char* argv[]) {
     }
     n->make_sorted_node_vector();
 
-    build_run_metadata(n, argc, argv, cfg,
-                       &train, &test,
-                       input_neurons, output_neurons, total_neurons,
-                       neuron_count, synapse_count,
-                       discrete,
-                       min_potential, min_weight, max_weight, max_threshold,
-                       leak_prop, scale, scale_factor,
-                       connectivity, learning_rate, decay_rate, tau, rho,
-                       timesteps, hidden_neurons, seed, epochs, batch_size,
-                       training_pct, threads, timeseries);
+    build_run_metadata(n, argc, argv, cfg, &train, &test, input_neurons,
+                       output_neurons, total_neurons, neuron_count,
+                       synapse_count, discrete, min_potential, min_weight,
+                       max_weight, max_threshold, leak_prop, scale,
+                       scale_factor, connectivity, learning_rate, decay_rate,
+                       tau, rho, timesteps, hidden_neurons, seed, epochs,
+                       batch_size, training_pct, threads, timeseries);
 
     NetworkConfiguration nc = {
-        .n = n,
+        .n              = n,
         .input_neurons  = input_neurons,
         .hidden_neurons = hidden_neurons,
         .output_neurons = output_neurons,
-        .layer_offsets  = {0, input_neurons,
-                           input_neurons + hidden_neurons},
+        .layer_offsets  = {0, input_neurons, input_neurons + hidden_neurons},
         .total_neurons  = total_neurons,
-        .timesteps  = timesteps,
-        .timeseries = timeseries,
-        .min_potential = min_potential,
-        .leak          = leak,
-        .scale_factor  = scale_factor,
-        .steps         = scale,
-        .discrete      = discrete,
-        .min_weight    = min_weight,
-        .max_weight    = max_weight,
+        .timesteps      = timesteps,
+        .timeseries     = timeseries,
+        .min_potential  = min_potential,
+        .leak           = leak,
+        .scale_factor   = scale_factor,
+        .steps          = scale,
+        .discrete       = discrete,
+        .min_weight     = min_weight,
+        .max_weight     = max_weight,
     };
 
     TrainingState* state = init_training(n, nc, train, threads, rho, tau);
@@ -179,8 +171,8 @@ int main(int argc, char* argv[]) {
     init_network_weights(n, total_neurons, discrete, scale_factor,
                          state->weights, state->delays, state->thresholds);
 
-    run_training(cfg, n, nc, train, test, state,
-                 epochs, batch_size, learning_rate, decay_rate);
+    run_training(cfg, n, nc, train, test, state, epochs, batch_size,
+                 learning_rate, decay_rate);
 
     cleanup_training(state, threads);
     delete n;

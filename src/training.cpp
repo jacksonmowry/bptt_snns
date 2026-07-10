@@ -1,23 +1,21 @@
 #include "training.h"
 #include "cli.h"
-#include "network_utils.h"
 #include "forward_backward.h"
+#include "network_utils.h"
 #include "optimizer.h"
+#include <algorithm>
+#include <cfloat>
 #include <cstdio>
 #include <cstdlib>
-#include <cfloat>
-#include <algorithm>
 #include <fstream>
 #include <nlohmann/json.hpp>
 
 using namespace std;
 using nlohmann::json;
 
-TrainingState* init_training(neuro::Network* n,
-                             const NetworkConfiguration& nc,
-                             const Dataset& train,
-                             size_t threads,
-                             double rho, double tau) {
+TrainingState* init_training(neuro::Network* n, const NetworkConfiguration& nc,
+                             const Dataset& train, size_t threads, double rho,
+                             double tau) {
     TrainingState* state = new TrainingState();
     size_t total_neurons = nc.total_neurons;
 
@@ -34,19 +32,18 @@ TrainingState* init_training(neuro::Network* n,
     }
 
     // Threading
-    state->tas          = (ThreadArgs*)calloc(threads, sizeof(*state->tas));
-    state->tids         = (pthread_t*)calloc(threads, sizeof(*state->tids));
-    state->batch_order  = (size_t*)calloc(train.observations, sizeof(size_t));
+    state->tas         = (ThreadArgs*)calloc(threads, sizeof(*state->tas));
+    state->tids        = (pthread_t*)calloc(threads, sizeof(*state->tids));
+    state->batch_order = (size_t*)calloc(train.observations, sizeof(size_t));
 
     for (size_t i = 0; i < threads; i++) {
         state->tas[i] = ThreadArgs(
             total_neurons, nc.timesteps, nc.output_neurons, rho, tau,
             &state->weights, &state->delays, &state->thresholds,
-            nullptr, // nc set later
+            nullptr,                              // nc set later
             state->batch_order, nullptr, nullptr, // train/test set later
-            &state->max_idx, &state->work_idx, &state->done_count,
-            &state->mut, &state->have_work, &state->done_work,
-            &state->train_p, &state->die);
+            &state->max_idx, &state->work_idx, &state->done_count, &state->mut,
+            &state->have_work, &state->done_work, &state->train_p, &state->die);
 
         for (size_t neuron = 0; neuron < total_neurons; neuron++) {
             state->tas[i].tb.delta_W[neuron].resize(
@@ -62,22 +59,18 @@ TrainingState* init_training(neuro::Network* n,
     return state;
 }
 
-void run_training(const CliConfig& cfg,
-                  neuro::Network* n,
-                  NetworkConfiguration& nc,
-                  const Dataset& train,
-                  const Dataset& test,
-                  TrainingState* state,
-                  size_t epochs, size_t batch_size,
-                  double learning_rate, double decay_rate) {
-    size_t threads = cfg.threads;
+void run_training(const CliConfig& cfg, neuro::Network* n,
+                  NetworkConfiguration& nc, const Dataset& train,
+                  const Dataset& test, TrainingState* state, size_t epochs,
+                  size_t batch_size, double learning_rate, double decay_rate) {
+    size_t threads       = cfg.threads;
     size_t total_neurons = nc.total_neurons;
 
     // Patch nc and dataset refs into ThreadArgs
     for (size_t i = 0; i < threads; i++) {
-        state->tas[i].nc = &nc;
+        state->tas[i].nc    = &nc;
         state->tas[i].train = &train;
-        state->tas[i].test = &test;
+        state->tas[i].test  = &test;
         pthread_create(state->tids + i, NULL, worker, (void*)(state->tas + i));
     }
 
@@ -97,8 +90,8 @@ void run_training(const CliConfig& cfg,
             state->batch_order[i] = i;
         }
         for (int i = 0; i < train.observations; i++) {
-            size_t j       = rand() % train.observations;
-            size_t tmp     = state->batch_order[i];
+            size_t j              = rand() % train.observations;
+            size_t tmp            = state->batch_order[i];
             state->batch_order[i] = state->batch_order[j];
             state->batch_order[j] = tmp;
         }
@@ -143,9 +136,8 @@ void run_training(const CliConfig& cfg,
 
             weight_updates(&nc, &train, current_batch_size, batch_size,
                            batch_start, epoch, state->b1_t, state->b2_t,
-                           state->m_weights, state->v_weights,
-                           learning_rate, decay_rate,
-                           state->weights, state->delta_W);
+                           state->m_weights, state->v_weights, learning_rate,
+                           decay_rate, state->weights, state->delta_W);
         }
 
         // Training metrics
@@ -203,9 +195,8 @@ void run_training(const CliConfig& cfg,
             "Epoch: %4zu/%zu, Loss: %10g (Best: %10g), Acc: %10g (Best: %10g), "
             "TestLoss: %10g (Best: %10g), TestAcc: %10g (Best: %10g)\n",
             epoch + 1, epochs, avg_train_loss, state->best_train_loss,
-            avg_train_acc, state->best_train_acc,
-            test_loss, state->best_test_loss,
-            test_correct, state->best_test_acc);
+            avg_train_acc, state->best_train_acc, test_loss,
+            state->best_test_loss, test_correct, state->best_test_acc);
 
         if (!cfg.network_json_out.empty()) {
             json meta               = n->get_data("other");

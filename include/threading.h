@@ -1,11 +1,11 @@
 #pragma once
 
-#include <pthread.h>
-#include <cstddef>
-#include <vector>
 #include "csv.h"
-#include "shared.h"
 #include "framework.hpp"
+#include "shared.h"
+#include <cstddef>
+#include <pthread.h>
+#include <vector>
 
 struct ThreadArgs {
     TrainingBundle tb;
@@ -29,7 +29,8 @@ struct ThreadArgs {
     bool* die;
 
     ThreadArgs(size_t total_neurons, size_t timesteps, size_t output_neurons,
-               double rho, double tau, const std::vector<std::vector<double>>* weights,
+               double rho, double tau,
+               const std::vector<std::vector<double>>* weights,
                const std::vector<std::vector<int>>* delays,
                const std::vector<double>* thresholds, NetworkConfiguration* nc,
                const size_t* order, const Dataset* train, const Dataset* test,

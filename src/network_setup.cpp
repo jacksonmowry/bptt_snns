@@ -1,29 +1,22 @@
 #include "network_setup.h"
 #include "math_utils.h"
-#include <nlohmann/json.hpp>
 #include <cstdio>
 #include <cstdlib>
 #include <ctime>
 #include <fstream>
+#include <nlohmann/json.hpp>
 #include <string>
 #include <sys/time.h>
 
 using nlohmann::json;
 
-neuro::Network* load_and_init_network(const std::string& json_file,
-                                      double& connectivity,
-                                      double& learning_rate,
-                                      double& decay_rate,
-                                      double& tau,
-                                      double& rho,
-                                      size_t& timesteps,
-                                      size_t& hidden_neurons,
-                                      unsigned long& seed,
-                                      size_t& epochs,
-                                      size_t& batch_size,
-                                      double& training_percent,
-                                      size_t& threads,
-                                      bool& timeseries) {
+neuro::Network*
+load_and_init_network(const std::string& json_file, double& connectivity,
+                      double& learning_rate, double& decay_rate, double& tau,
+                      double& rho, size_t& timesteps, size_t& hidden_neurons,
+                      unsigned long& seed, size_t& epochs, size_t& batch_size,
+                      double& training_percent, size_t& threads,
+                      bool& timeseries) {
     json emptynet;
     std::ifstream fin(json_file);
     fin >> emptynet;
@@ -100,22 +93,17 @@ neuro::Network* load_and_init_network(const std::string& json_file,
     return n;
 }
 
-void build_run_metadata(neuro::Network* n, int argc, char* argv[],
-                        const CliConfig& cfg,
-                        const Dataset* train, const Dataset* test,
-                        size_t input_neurons, size_t output_neurons,
-                        size_t total_neurons, size_t neuron_count,
-                        size_t synapse_count,
-                        bool discrete,
-                        double min_potential, double min_weight, double max_weight,
-                        double max_threshold,
-                        const std::string& leak_prop,
-                        int scale, double scale_factor,
-                        double connectivity, double learning_rate,
-                        double decay_rate, double tau, double rho,
-                        size_t timesteps, size_t hidden_neurons,
-                        unsigned long seed, size_t epochs, size_t batch_size,
-                        double training_percent, size_t threads, bool timeseries) {
+void build_run_metadata(
+    neuro::Network* n, int argc, char* argv[], const CliConfig& cfg,
+    const Dataset* train, const Dataset* test, size_t input_neurons,
+    size_t output_neurons, size_t total_neurons, size_t neuron_count,
+    size_t synapse_count, bool discrete, double min_potential,
+    double min_weight, double max_weight, double max_threshold,
+    const std::string& leak_prop, int scale, double scale_factor,
+    double connectivity, double learning_rate, double decay_rate, double tau,
+    double rho, size_t timesteps, size_t hidden_neurons, unsigned long seed,
+    size_t epochs, size_t batch_size, double training_percent, size_t threads,
+    bool timeseries) {
     // CLI arguments
     json cli_args = json::array();
     for (int i = 0; i < argc; i++) {
@@ -168,19 +156,19 @@ void build_run_metadata(neuro::Network* n, int argc, char* argv[],
     run_metadata["test_data_file"]   = cfg.test_data_file;
     run_metadata["test_label_file"]  = cfg.test_label_file;
     run_metadata["network_json_out"] = cfg.network_json_out;
-    run_metadata["input_neurons"]  = input_neurons;
-    run_metadata["output_neurons"] = output_neurons;
-    run_metadata["total_neurons"]  = total_neurons;
-    run_metadata["neuron_count"]   = neuron_count;
-    run_metadata["synapse_count"]  = synapse_count;
-    run_metadata["discrete"]       = discrete;
-    run_metadata["min_potential"]  = min_potential;
-    run_metadata["min_weight"]     = min_weight;
-    run_metadata["max_weight"]     = max_weight;
-    run_metadata["max_threshold"]  = max_threshold;
-    run_metadata["leak_mode"]      = leak_prop;
-    run_metadata["scale"]          = scale;
-    run_metadata["scale_factor"]   = discrete ? scale_factor : 1.0;
+    run_metadata["input_neurons"]    = input_neurons;
+    run_metadata["output_neurons"]   = output_neurons;
+    run_metadata["total_neurons"]    = total_neurons;
+    run_metadata["neuron_count"]     = neuron_count;
+    run_metadata["synapse_count"]    = synapse_count;
+    run_metadata["discrete"]         = discrete;
+    run_metadata["min_potential"]    = min_potential;
+    run_metadata["min_weight"]       = min_weight;
+    run_metadata["max_weight"]       = max_weight;
+    run_metadata["max_threshold"]    = max_threshold;
+    run_metadata["leak_mode"]        = leak_prop;
+    run_metadata["scale"]            = scale;
+    run_metadata["scale_factor"]     = discrete ? scale_factor : 1.0;
 
     // Train data min/max arrays
     {
@@ -226,21 +214,16 @@ void build_run_metadata(neuro::Network* n, int argc, char* argv[],
     n->set_data("other", existing_other);
 }
 
-std::pair<size_t, size_t> generate_network(neuro::Network* n,
-                                           size_t input_neurons,
-                                           size_t hidden_neurons,
-                                           size_t output_neurons,
-                                           size_t total_neurons,
-                                           double connectivity,
-                                           bool discrete,
-                                           int scale,
-                                           double scale_factor,
-                                           double min_weight,
-                                           double max_weight,
-                                           double max_threshold) {
-    const size_t layer_sizes[3] = {input_neurons, hidden_neurons, output_neurons};
-    size_t neuron_count  = 0;
-    size_t synapse_count = 0;
+std::pair<size_t, size_t>
+generate_network(neuro::Network* n, size_t input_neurons, size_t hidden_neurons,
+                 size_t output_neurons, size_t total_neurons,
+                 double connectivity, bool discrete, int scale,
+                 double scale_factor, double min_weight, double max_weight,
+                 double max_threshold) {
+    const size_t layer_sizes[3] = {input_neurons, hidden_neurons,
+                                   output_neurons};
+    size_t neuron_count         = 0;
+    size_t synapse_count        = 0;
 
     for (size_t i = 0; i < 3; i++) {
         for (size_t j = 0; j < layer_sizes[i]; j++) {
@@ -280,10 +263,8 @@ std::pair<size_t, size_t> generate_network(neuro::Network* n,
     return {neuron_count, synapse_count};
 }
 
-void init_network_weights(neuro::Network* n,
-                          size_t total_neurons,
-                          bool discrete,
-                          double scale_factor,
+void init_network_weights(neuro::Network* n, size_t total_neurons,
+                          bool discrete, double scale_factor,
                           std::vector<std::vector<double>>& weights,
                           std::vector<std::vector<int>>& delays,
                           std::vector<double>& thresholds) {

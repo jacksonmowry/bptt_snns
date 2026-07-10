@@ -31,7 +31,8 @@ void softmax(const double* logits, double* out, size_t n) {
     }
 }
 
-double cross_entropy(const double* logits, const double* targets, double* grads, size_t n) {
+double cross_entropy(const double* logits, const double* targets, double* grads,
+                     size_t n) {
     softmax(logits, grads, n);
 
     double loss = 0.0;
@@ -45,7 +46,8 @@ double cross_entropy(const double* logits, const double* targets, double* grads,
 
 double alpha(bool leak) { return (double)!leak; }
 
-double spike_surrogate(double v_pre_t, double v_thresh, double scale_rho, double tau_rho_scaled) {
+double spike_surrogate(double v_pre_t, double v_thresh, double scale_rho,
+                       double tau_rho_scaled) {
     return (scale_rho / (2.0 * tau_rho_scaled)) *
            expf(-fabs(v_pre_t - v_thresh) / tau_rho_scaled);
 }

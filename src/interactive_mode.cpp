@@ -14,8 +14,10 @@ static void print_help(const char* prog) {
     fprintf(stderr, "Usage: %s [options]\n", prog);
     fprintf(stderr, "\n");
     fprintf(stderr, "Options:\n");
-    fprintf(stderr, "  --network_json <file>   Path to network JSON config file (required)\n");
-    fprintf(stderr, "  --test                  Enable test mode (optional, default: false)\n");
+    fprintf(stderr, "  --network_json <file>   Path to network JSON config "
+                    "file (required)\n");
+    fprintf(stderr, "  --test                  Enable test mode (optional, "
+                    "default: false)\n");
     fprintf(stderr, "  -h, --help              Show this help message\n");
     fprintf(stderr, "\n");
 }
@@ -83,7 +85,8 @@ int main(int argc, char* argv[]) {
     // Open and parse the network JSON file
     ifstream fstream(args.network_json);
     if (!fstream.is_open()) {
-        fprintf(stderr, "Error: failed to open '%s'\n", args.network_json.c_str());
+        fprintf(stderr, "Error: failed to open '%s'\n",
+                args.network_json.c_str());
         return 1;
     }
 
@@ -98,15 +101,21 @@ int main(int argc, char* argv[]) {
         size_t timesteps = other.value("timesteps", 0);
 
         // Select min/max arrays based on --test flag
-        const json& data_min = args.test ? other.value("test_data_min", json::array())
-                                         : other.value("train_data_min", json::array());
-        const json& data_max = args.test ? other.value("test_data_max", json::array())
-                                         : other.value("train_data_max", json::array());
+        const json& data_min =
+            args.test ? other.value("test_data_min", json::array())
+                      : other.value("train_data_min", json::array());
+        const json& data_max =
+            args.test ? other.value("test_data_max", json::array())
+                      : other.value("train_data_max", json::array());
 
         // Convert JSON arrays to vectors for use
         vector<double> min_vals, max_vals;
-        for (auto& v : data_min) min_vals.push_back(v.get<double>());
-        for (auto& v : data_max) max_vals.push_back(v.get<double>());
+        for (auto& v : data_min) {
+            min_vals.push_back(v.get<double>());
+        }
+        for (auto& v : data_max) {
+            max_vals.push_back(v.get<double>());
+        }
 
         // Validate extracted data
         if (min_vals.size() != max_vals.size()) {
@@ -129,7 +138,8 @@ int main(int argc, char* argv[]) {
         size_t input_neurons = n * 2;
 
         // spikes[input_neuron][timestep] = true if spike fires
-        vector<vector<bool>> spikes(input_neurons, vector<bool>(timesteps, false));
+        vector<vector<bool>> spikes(input_neurons,
+                                    vector<bool>(timesteps, false));
 
         printf("ML %s\n", args.network_json.c_str());
 
@@ -143,7 +153,9 @@ int main(int argc, char* argv[]) {
                     break;
                 }
             }
-            if (!got_all) break;
+            if (!got_all) {
+                break;
+            }
 
             // Reset spikes
             for (size_t i = 0; i < input_neurons; i++) {
@@ -154,12 +166,17 @@ int main(int argc, char* argv[]) {
             for (size_t input = 0; input < n; input++) {
                 double range = max_vals[input] - min_vals[input];
                 if (range <= 0.0) {
-                    fprintf(stderr, "Warning: range <= 0 for input %zu, skipping\n", input);
+                    fprintf(stderr,
+                            "Warning: range <= 0 for input %zu, skipping\n",
+                            input);
                     continue;
                 }
                 double x = (values[input] - min_vals[input]) / range;
                 if (!std::isfinite(x)) {
-                    fprintf(stderr, "Warning: non-finite normalized value for input %zu, skipping\n", input);
+                    fprintf(stderr,
+                            "Warning: non-finite normalized value for input "
+                            "%zu, skipping\n",
+                            input);
                     continue;
                 }
                 double inv_x = 1.0 - x;

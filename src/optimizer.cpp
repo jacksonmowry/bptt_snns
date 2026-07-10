@@ -1,7 +1,7 @@
 #include "optimizer.h"
-#include "shared.h"
-#include "math_utils.h"
 #include "framework.hpp"
+#include "math_utils.h"
+#include "shared.h"
 
 #ifndef BETA1
 #define BETA1 (0.9)
@@ -19,8 +19,9 @@ void weight_updates(const NetworkConfiguration* nc, const Dataset* d,
                     size_t current_batch_size, size_t batch_size,
                     size_t batch_start, size_t epoch, double& b1_t,
                     double& b2_t, std::vector<std::vector<double>>& m_weights,
-                    std::vector<std::vector<double>>& v_weights, double learning_rate,
-                    double decay_rate, std::vector<std::vector<double>>& weights,
+                    std::vector<std::vector<double>>& v_weights,
+                    double learning_rate, double decay_rate,
+                    std::vector<std::vector<double>>& weights,
                     std::vector<std::vector<double>>& delta_W) {
     double inv_batch = 1.0 / ((double)current_batch_size * nc->timesteps);
 
