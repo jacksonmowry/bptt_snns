@@ -3,6 +3,7 @@
 #include <fstream>
 #include <iostream>
 #include <string>
+#include <vector>
 
 using json = nlohmann::json;
 using namespace std;
@@ -72,7 +73,7 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
-    if (rc == 0 && args.network_json.empty()) {
+    if (args.network_json.empty()) {
         // help was printed, exit cleanly
         return 0;
     }
@@ -85,11 +86,37 @@ int main(int argc, char* argv[]) {
     }
 
     json network_json;
-    fstream >> network_json;
-    fstream.close()
+    try {
+        fstream >> network_json;
+    } catch (const json::exception& e) {
+        fprintf(stderr, "Error: failed to parse JSON: %s\n", e.what());
+        fstream.close();
+        return 1;
+    }
+    fstream.close();
+
+    // Fields live under Associated_Data.other
+    const json& other = network_json.at("Associated_Data").at("other");
+
+    // Extract metadata from loaded network JSON
+    size_t timesteps = other.value("timesteps", 0);
+
+    // Select min/max arrays based on --test flag
+    const json& data_min = args.test ? other.value("test_data_min", json::array())
+                                     : other.value("train_data_min", json::array());
+    const json& data_max = args.test ? other.value("test_data_max", json::array())
+                                     : other.value("train_data_max", json::array());
+
+    // Convert JSON arrays to vectors for use
+    vector<double> min_vals, max_vals;
+    for (auto& v : data_min) min_vals.push_back(v.get<double>());
+    for (auto& v : data_max) max_vals.push_back(v.get<double>());
 
     // Skeleton: print parsed data for now
     cout << "network_json loaded, " << network_json.size() << " top-level keys" << endl;
+    cout << "timesteps: " << timesteps << endl;
+    cout << "min_vals size: " << min_vals.size() << endl;
+    cout << "max_vals size: " << max_vals.size() << endl;
     if (args.test) {
         cout << "test mode enabled" << endl;
     }
