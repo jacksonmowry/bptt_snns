@@ -5,6 +5,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <ctime>
+#include <fstream>
 #include <string>
 #include <unistd.h>
 
@@ -257,10 +258,14 @@ int parse_cli(int argc, char* argv[], CliConfig* cfg) {
             }
             cfg->network_json_out = argv[i];
 
-            if (access(cfg->network_json_out.c_str(), W_OK)) {
-                return cli_error(
-                    "Failed to open --network_json_out \"%s\" for writing",
-                    cfg->network_json_out.c_str());
+            {
+                std::string path = cfg->network_json_out;
+                std::ofstream test(path, std::ios::out | std::ios::trunc);
+                if (!test) {
+                    return cli_error(
+                        "Failed to open --network_json_out \"%s\" for writing",
+                        path.c_str());
+                }
             }
         } else if (arg == "--threads" || arg == "-T") {
             unsigned long v;
