@@ -1,11 +1,11 @@
-Epoch:    1/10, Loss:    1.10139 /    1.10139, Acc:       0.15 /       0.15, Test Loss:     1.0429 /     1.0429, Test Acc:        0.6 /        0.6
-Epoch:    2/10, Loss:    1.01967 /    1.01967, Acc:      0.825 /      0.825, Test Loss:   0.972549 /   0.972549, Test Acc:        0.7 /        0.7
-Epoch:    3/10, Loss:   0.962706 /   0.962706, Acc:   0.891667 /   0.891667, Test Loss:   0.927752 /   0.927752, Test Acc:   0.733333 /   0.733333
-Epoch:    4/10, Loss:   0.925514 /   0.925514, Acc:   0.933333 /   0.933333, Test Loss:   0.892536 /   0.892536, Test Acc:   0.733333 /   0.733333
-Epoch:    5/10, Loss:   0.898394 /   0.898394, Acc:   0.891667 /   0.933333, Test Loss:   0.870328 /   0.870328, Test Acc:        0.9 /        0.9
-Epoch:    6/10, Loss:   0.882679 /   0.882679, Acc:   0.908333 /   0.933333, Test Loss:    0.86812 /    0.86812, Test Acc:        0.9 /        0.9
-Epoch:    7/10, Loss:   0.874565 /   0.874565, Acc:   0.941667 /   0.941667, Test Loss:   0.910507 /    0.86812, Test Acc:        0.8 /        0.9
-Epoch:    8/10, Loss:   0.857747 /   0.857747, Acc:   0.933333 /   0.941667, Test Loss:   0.857643 /   0.857643, Test Acc:   0.766667 /        0.9
-Epoch:    9/10, Loss:   0.937291 /   0.857747, Acc:       0.65 /   0.941667, Test Loss:   0.869579 /   0.857643, Test Acc:   0.666667 /        0.9
-Epoch:   10/10, Loss:   0.869605 /   0.857747, Acc:        0.8 /   0.941667, Test Loss:   0.845254 /   0.845254, Test Acc:   0.733333 /        0.9
+E   1/10  TrL:  1.10139 TrA:   0.150  TeL:   1.0429 TeA:   0.600  BestTeA:   0.600
+E   2/10  TrL:  1.01967 TrA:   0.825  TeL: 0.972549 TeA:   0.700  BestTeA:   0.700
+E   3/10  TrL: 0.962706 TrA:   0.892  TeL: 0.927752 TeA:   0.733  BestTeA:   0.733
+E   4/10  TrL: 0.925514 TrA:   0.933  TeL: 0.892536 TeA:   0.733  BestTeA:   0.733
+E   5/10  TrL: 0.898394 TrA:   0.892  TeL: 0.870328 TeA:   0.900  BestTeA:   0.900
+E   6/10  TrL: 0.882679 TrA:   0.908  TeL:  0.86812 TeA:   0.900  BestTeA:   0.900
+E   7/10  TrL: 0.874565 TrA:   0.942  TeL: 0.910507 TeA:   0.800  BestTeA:   0.900
+E   8/10  TrL: 0.857747 TrA:   0.933  TeL: 0.857643 TeA:   0.767  BestTeA:   0.900
+E   9/10  TrL: 0.937291 TrA:   0.650  TeL: 0.869579 TeA:   0.667  BestTeA:   0.900
+E  10/10  TrL: 0.869605 TrA:   0.800  TeL: 0.845254 TeA:   0.733  BestTeA:   0.900
 Final CPU Test Loss:   0.845254, Final CPU Test Acc:   0.733333

@@ -14,15 +14,15 @@ public:
                   const Dataset& test, TrainingState* state,
                   size_t max_incoming, size_t max_outgoing,
                   size_t batch_size, double learning_rate,
-                  double decay_rate, double rho, double tau,
-                  bool export_json);
+                  double decay_rate, double rho, double tau);
     ~OpenclBackend() override;
 
     void do_one_epoch(size_t epoch) override;
     TrainingStats get_stats() const override;
     void update_weights(neuro::Network* network) override;
-    std::pair<double, double> run_final_cpu_eval() const override;
-    void finalize() override;
+
+    // Run CPU test eval using GPU weights
+    std::pair<double, double> run_final_cpu_eval();
 
 private:
     const CliConfig& m_cfg;
@@ -38,7 +38,7 @@ private:
     double m_decay_rate;
     double m_rho;
     double m_tau;
-    bool m_export_json;
+
 
     // GPU buffers
     std::unique_ptr<Memory<short>> m_x;
@@ -82,12 +82,7 @@ private:
     double m_b1_t;
     double m_b2_t;
 
-    // Metrics
-    double m_best_loss;
-    double m_best_acc;
-    double m_best_test_loss;
-    double m_best_test_acc;
-    TrainingStats m_stats = {0.0, 0.0, 0.0, 0.0};
+    TrainingStats m_stats = {0.0, 0.0, 0.0, 0.0, 0.0, 1e18, 0.0, 1e18};
 
     // Timing
     std::chrono::high_resolution_clock::time_point m_t_start;

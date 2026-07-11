@@ -79,6 +79,10 @@ struct TrainingStats {
     double train_loss;  ///< Training loss (mean cross-entropy)
     double test_acc;    ///< Test accuracy (fraction correct, 0-1); 0.0 if no test data
     double test_loss;   ///< Test loss (mean cross-entropy); 0.0 if no test data
+    double best_train_acc;  ///< Best training accuracy so far
+    double best_train_loss; ///< Best training loss so far
+    double best_test_acc;   ///< Best test accuracy so far
+    double best_test_loss;  ///< Best test loss so far
 };
 
 /**
@@ -181,25 +185,6 @@ public:
      */
     virtual void update_weights(neuro::Network* network) = 0;
 
-    /**
-     * @brief Run a final CPU forward pass on the test set (OpenCL only).
-     *
-     * For OpenCL backend: reads GPU weights to host, writes to network edges,
-     * runs CPU forward+loss on test set, prints "Final CPU Test Loss/Acc".
-     * For CPU backend: no-op, returns {0, 0}.
-     *
-     * @return {test_loss, test_accuracy} from final CPU evaluation.
-     */
-    virtual std::pair<double, double> run_final_cpu_eval() const { return {0.0, 0.0}; }
-
-    /**
-     * @brief Finalize training: export JSON, print summary.
-     *
-     * Called once after all epochs complete. For OpenCL backend: reads
-     * GPU weights, syncs to network, runs final CPU eval, exports JSON.
-     * For CPU backend: exports JSON only (weights already synced).
-     */
-    virtual void finalize() { }
 };
 
 /**

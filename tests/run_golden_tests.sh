@@ -19,7 +19,7 @@ BIN="$ROOT_DIR/bin/bptt_learning"
 # kernel timing report, etc.
 filter_stdout() {
 	local input="$1" output="$2"
-	grep -E '^(Epoch:|Final |  \[CPU eval)' "$input" >"$output" || true
+	grep -E '^(E[ 0-9]|Final |  \[CPU eval)' "$input" >"$output" || true
 }
 
 # --- helpers ---

@@ -29,12 +29,11 @@ std::unique_ptr<TrainingBackend> create_backend(
                 cfg, n, nc, train, test, state,
                 nc.max_incoming, nc.max_outgoing,
                 batch_size, learning_rate, decay_rate,
-                rho, tau, true));
+                rho, tau));
     } else {
         return std::unique_ptr<TrainingBackend>(
             new CpuBackend(
                 cfg, n, nc, train, test, state,
-                batch_size, learning_rate, decay_rate,
-                !cfg.network_json_out.empty()));
+                batch_size, learning_rate, decay_rate));
     }
 }

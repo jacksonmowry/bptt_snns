@@ -3,17 +3,53 @@
 #include "data_utils.h"
 #include "network_setup.h"
 #include "network_utils.h"
+#include "opencl_backend.h"
 #include "shared.h"
 #include "training.h"
+#include <cmath>
 #include <cstddef>
 #include <cstdio>
 #include <cstdlib>
 #include <ctime>
+#include <fstream>
+#include <nlohmann/json.hpp>
 #include <string>
+#include <utility>
 #include <vector>
 
 using namespace std;
 using namespace neuro;
+
+static void print_epoch_log(size_t epoch, size_t total_epochs, const TrainingStats& stats) {
+    printf("E%4zu/%zu  TrL: %8g TrA: %7.3f  TeL: %8g TeA: %7.3f  BestTeA: %7.3f\n",
+           epoch + 1, total_epochs,
+           stats.train_loss, stats.train_acc,
+           stats.test_loss, stats.test_acc, stats.best_test_acc);
+}
+
+static void export_network_json(neuro::Network* n, const CliConfig& cfg,
+                                 const TrainingStats& stats) {
+    if (cfg.network_json_out.empty()) return;
+
+    nlohmann::json meta = n->get_data("other");
+    meta["best_train_loss"] = stats.best_train_loss;
+    meta["best_test_loss"] = stats.best_test_loss;
+    meta["best_train_acc"] = stats.best_train_acc;
+    meta["best_test_acc"] = stats.best_test_acc;
+    meta["epoch"] = cfg.epochs;
+    n->set_data("other", meta);
+
+    nlohmann::json j;
+    n->to_json(j);
+    std::ofstream fout(cfg.network_json_out);
+    if (!fout) {
+        fprintf(stderr, "Failed to open %s for writing\n",
+                cfg.network_json_out.c_str());
+        exit(1);
+    }
+    fout << j.dump(2) << std::endl;
+    fout.close();
+}
 
 int main(int argc, char* argv[]) {
     CliConfig cfg;
@@ -190,10 +226,26 @@ int main(int argc, char* argv[]) {
     // Training loop
     for (size_t epoch = 0; epoch < epochs; ++epoch) {
         backend->do_one_epoch(epoch);
+        TrainingStats stats = backend->get_stats();
+        print_epoch_log(epoch, epochs, stats);
     }
 
-    // Finalize: sync weights, run final eval (OpenCL), export JSON
-    backend->finalize();
+    // Finalize: sync weights to network
+    backend->update_weights(n);
+
+    // For OpenCL: final CPU eval on GPU weights
+    if (cfg.opencl) {
+        auto* ocl = dynamic_cast<OpenclBackend*>(backend.get());
+        if (ocl && test.observations > 0) {
+            std::pair<double, double> cpu_result = ocl->run_final_cpu_eval();
+            printf("Final CPU Test Loss: %10g, Final CPU Test Acc: %10g\n",
+                   cpu_result.first, cpu_result.second);
+        }
+    }
+
+    // Export JSON (unified for both backends)
+    TrainingStats final_stats = backend->get_stats();
+    export_network_json(n, cfg, final_stats);
 
     // Cleanup
     backend.reset();

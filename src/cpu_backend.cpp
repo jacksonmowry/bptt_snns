@@ -6,22 +6,18 @@
 #include <cstdlib>
 #include <cfloat>
 #include <algorithm>
-#include <fstream>
-#include <nlohmann/json.hpp>
 
 using namespace std;
-using nlohmann::json;
 
 CpuBackend::CpuBackend(const CliConfig& cfg, neuro::Network* n,
                        NetworkConfiguration& nc, const Dataset& train,
                        const Dataset& test, TrainingState* state,
                        size_t batch_size, double learning_rate,
-                       double decay_rate, bool export_json)
-    : m_cfg(cfg), m_n(n), m_nc(nc), m_train(train), m_test(test),
+                       double decay_rate)
+    : m_cfg(cfg), m_nc(nc), m_train(train), m_test(test),
       m_state(state), m_batch_size(batch_size), m_learning_rate(learning_rate),
-      m_decay_rate(decay_rate), m_export_json(export_json) {
+      m_decay_rate(decay_rate) {
     size_t threads = cfg.threads;
-    size_t total_neurons = nc.total_neurons;
 
     // Patch nc and dataset refs into ThreadArgs
     for (size_t i = 0; i < threads; i++) {
@@ -44,6 +40,7 @@ CpuBackend::~CpuBackend() {
 }
 
 void CpuBackend::do_one_epoch(size_t epoch) {
+    (void)epoch;  // used by weight_updates() for LR scheduling
     size_t threads = m_cfg.threads;
     size_t total_neurons = m_nc.total_neurons;
 
@@ -114,11 +111,11 @@ void CpuBackend::do_one_epoch(size_t epoch) {
     // Training metrics
     double avg_train_loss = epoch_loss / (double)m_train.observations;
     double avg_train_acc = correct / (double)m_train.observations;
-    if (avg_train_loss < m_state->best_train_loss) {
-        m_state->best_train_loss = avg_train_loss;
+    if (avg_train_loss < m_stats.best_train_loss) {
+        m_stats.best_train_loss = avg_train_loss;
     }
-    if (avg_train_acc > m_state->best_train_acc) {
-        m_state->best_train_acc = avg_train_acc;
+    if (avg_train_acc > m_stats.best_train_acc) {
+        m_stats.best_train_acc = avg_train_acc;
     }
 
     // Test
@@ -154,11 +151,11 @@ void CpuBackend::do_one_epoch(size_t epoch) {
         test_correct /= m_test.observations;
         test_loss /= m_test.observations;
 
-        if (test_correct > m_state->best_test_acc) {
-            m_state->best_test_acc = test_correct;
+        if (test_correct > m_stats.best_test_acc) {
+            m_stats.best_test_acc = test_correct;
         }
-        if (test_loss < m_state->best_test_loss) {
-            m_state->best_test_loss = test_loss;
+        if (test_loss < m_stats.best_test_loss) {
+            m_stats.best_test_loss = test_loss;
         }
     }
 
@@ -166,38 +163,6 @@ void CpuBackend::do_one_epoch(size_t epoch) {
     m_stats.train_loss = avg_train_loss;
     m_stats.test_acc = (m_test.observations > 0) ? test_correct : 0.0;
     m_stats.test_loss = (m_test.observations > 0) ? test_loss : 0.0;
-
-    printf(
-        "Epoch: %4zu/%zu, Loss: %10g (Best: %10g), Acc: %10g (Best: %10g), "
-        "TestLoss: %10g (Best: %10g), TestAcc: %10g (Best: %10g)\n",
-        epoch + 1, m_cfg.epochs, avg_train_loss, m_state->best_train_loss,
-        avg_train_acc, m_state->best_train_acc,
-        test_loss, m_state->best_test_loss,
-        test_correct, m_state->best_test_acc);
-}
-
-void CpuBackend::finalize() {
-    if (m_export_json && !m_cfg.network_json_out.empty()) {
-        // Inject final metadata before export
-        json meta = m_n->get_data("other");
-        meta["best_train_loss"] = m_state->best_train_loss;
-        meta["best_test_loss"] = m_state->best_test_loss;
-        meta["best_train_acc"] = m_state->best_train_acc;
-        meta["best_test_acc"] = m_state->best_test_acc;
-        meta["epoch"] = m_cfg.epochs;
-        m_n->set_data("other", meta);
-
-        json j;
-        m_n->to_json(j);
-        std::ofstream fout(m_cfg.network_json_out);
-        if (!fout) {
-            fprintf(stderr, "Failed to open %s for writing\n",
-                    m_cfg.network_json_out.c_str());
-            exit(1);
-        }
-        fout << j.dump(2) << std::endl;
-        fout.close();
-    }
 }
 
 TrainingStats CpuBackend::get_stats() const { return m_stats; }
