@@ -2,6 +2,10 @@
   "Associated_Data": {
     "other": {
       "batch_size": 1,
+      "best_test_acc": 0.9,
+      "best_test_loss": 0.8452537536621094,
+      "best_train_acc": 0.9416666666666667,
+      "best_train_loss": 0.85774720509847,
       "cli_args": [
         "--network_json",
         "networks/risp_127.json",
@@ -32,15 +36,16 @@
         "--opencl",
         "true",
         "--network_json_out",
-        "/tmp/tmp.oPJawgm1fm"
+        "/tmp/tmp.bxkHGyNTWa"
       ],
-      "compile_time": 1783631210,
+      "compile_time": 1783783766,
       "connectivity": 0.75,
       "data_file": "data/iris_data.csv",
       "decay_rate": 0.0001,
       "discrete": true,
+      "epoch": 10,
       "epochs": 10,
-      "git_commit": "7d84f7e2ae4dbc2007e652a3306b790c49fe2f78",
+      "git_commit": "974cce35d25205fad70b24889a3573965555710f",
       "hidden_neurons": 16,
       "input_neurons": 8,
       "label_file": "data/iris_label.csv",
@@ -51,7 +56,7 @@
       "min_potential": -1.0,
       "min_weight": -127.0,
       "network_json": "networks/risp_127.json",
-      "network_json_out": "/tmp/tmp.oPJawgm1fm",
+      "network_json_out": "/tmp/tmp.bxkHGyNTWa",
       "neuron_count": 27,
       "output_neurons": 3,
       "proc_name": "risp",
@@ -59,7 +64,7 @@
       "scale": 256,
       "scale_factor": 0.0078125,
       "seed": 42,
-      "start_time": 1783631210.924355,
+      "start_time": 1783783766.572992,
       "synapse_count": 546,
       "tau": 0.95,
       "test_data_file": "",

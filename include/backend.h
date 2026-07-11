@@ -55,6 +55,7 @@
 #include "training.h"
 #include <cstddef>
 #include <memory>
+#include <utility>
 
 /**
  * @struct TrainingStats
@@ -179,6 +180,26 @@ public:
      * @param network  Pointer to the neuro::Network to update.  Must not be null.
      */
     virtual void update_weights(neuro::Network* network) = 0;
+
+    /**
+     * @brief Run a final CPU forward pass on the test set (OpenCL only).
+     *
+     * For OpenCL backend: reads GPU weights to host, writes to network edges,
+     * runs CPU forward+loss on test set, prints "Final CPU Test Loss/Acc".
+     * For CPU backend: no-op, returns {0, 0}.
+     *
+     * @return {test_loss, test_accuracy} from final CPU evaluation.
+     */
+    virtual std::pair<double, double> run_final_cpu_eval() const { return {0.0, 0.0}; }
+
+    /**
+     * @brief Finalize training: export JSON, print summary.
+     *
+     * Called once after all epochs complete. For OpenCL backend: reads
+     * GPU weights, syncs to network, runs final CPU eval, exports JSON.
+     * For CPU backend: exports JSON only (weights already synced).
+     */
+    virtual void finalize() { }
 };
 
 /**
@@ -210,10 +231,13 @@ public:
 std::unique_ptr<TrainingBackend> create_backend(
     const CliConfig& cfg,
     neuro::Network* n,
-    const NetworkConfiguration& nc,
+    NetworkConfiguration& nc,
     const Dataset& train,
     const Dataset& test,
     TrainingState* state,
     size_t batch_size,
     double learning_rate,
-    double decay_rate);
+    double decay_rate,
+    double rho,
+    double tau);
+

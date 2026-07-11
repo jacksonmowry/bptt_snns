@@ -1,8 +1,8 @@
+#include "backend.h"
 #include "cli.h"
 #include "data_utils.h"
 #include "network_setup.h"
 #include "network_utils.h"
-#include "opencl_training.h"
 #include "shared.h"
 #include "training.h"
 #include <cstddef>
@@ -182,22 +182,25 @@ int main(int argc, char* argv[]) {
     }
     nc.max_outgoing = max_outgoing;
 
-    if (cfg.opencl) {
-        if (!discrete) {
-            fprintf(stderr,
-                "OpenCL support is not enabled for non-discrete networks.\n");
-            exit(1);
-        }
-        opencl_train(cfg, n, nc, train, test, state, max_incoming, max_outgoing,
-                     epochs, batch_size, learning_rate, decay_rate,
-                     rho, tau, true);
-        exit(0);
-    } else {
-        run_training(cfg, n, nc, train, test, state, epochs, batch_size,
-                     learning_rate, decay_rate);
+    // Create backend via factory
+    auto backend = create_backend(cfg, n, nc, train, test, state,
+                                  batch_size, learning_rate, decay_rate,
+                                  rho, tau);
+
+    // Training loop
+    for (size_t epoch = 0; epoch < epochs; ++epoch) {
+        backend->do_one_epoch(epoch);
     }
 
-    cleanup_training(state, threads);
+    // Finalize: sync weights, run final eval (OpenCL), export JSON
+    backend->finalize();
+
+    // Cleanup
+    backend.reset();
+    free(state->batch_order);
+    free(state->tas);
+    free(state->tids);
+    delete state;
     delete n;
     free(train.data);
     free(train.labels);
@@ -207,4 +210,6 @@ int main(int argc, char* argv[]) {
     free(test.labels);
     free(test.min_vals);
     free(test.max_vals);
+
+    return 0;
 }
