@@ -22,8 +22,7 @@ class TrainingBackend {
     virtual void update_weights(neuro::Network* network) = 0;
 };
 
-std::unique_ptr<TrainingBackend>
-create_backend(const CliConfig& cfg, neuro::Network* n,
-               NetworkConfiguration& nc, const Dataset& train,
-               const Dataset& test, TrainingState* state, size_t batch_size,
-               double learning_rate, double decay_rate, double rho, double tau);
+std::unique_ptr<TrainingBackend> create_backend(const CliConfig& cfg,
+                                                NetworkConfiguration& nc,
+                                                const Dataset& train,
+                                                const Dataset& test);

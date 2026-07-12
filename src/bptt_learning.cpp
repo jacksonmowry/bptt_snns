@@ -163,12 +163,6 @@ int main(int argc, char* argv[]) {
         .spike_value_factor = spike_value_factor,
     };
 
-    TrainingState* state =
-        init_training(n, nc, train, cfg.threads, cfg.rho, cfg.tau);
-
-    init_network_weights(n, total_neurons, discrete, scale_factor,
-                         state->weights, state->delays, state->thresholds);
-
     // Compute max_in/outgoing from network topology
     size_t max_incoming = 0;
     size_t max_outgoing = 0;
@@ -188,9 +182,7 @@ int main(int argc, char* argv[]) {
     nc.max_incoming = max_incoming;
 
     // Create backend via factory
-    auto backend =
-        create_backend(cfg, n, nc, train, test, state, cfg.batch_size,
-                       cfg.learning_rate, cfg.decay_rate, cfg.rho, cfg.tau);
+    auto backend = create_backend(cfg, nc, train, test);
 
     // Determine which accuracy metric to track for export
     bool has_test_data = test.observations > 0;
@@ -230,10 +222,6 @@ int main(int argc, char* argv[]) {
 
     // Cleanup (OpenCL destructor runs final CPU eval if applicable)
     backend.reset();
-    free(state->batch_order);
-    free(state->tas);
-    free(state->tids);
-    delete state;
     delete n;
     free(train.data);
     free(train.labels);

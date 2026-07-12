@@ -39,15 +39,6 @@ struct TrainingState {
 };
 
 // Allocate and initialize training state + threads.
-TrainingState* init_training(neuro::Network* n, const NetworkConfiguration& nc,
+TrainingState* init_training(const NetworkConfiguration& nc,
                              const Dataset& train, size_t threads, double rho,
                              double tau);
-
-// Run full training loop (epochs, batches, metrics, save).
-void run_training(const CliConfig& cfg, neuro::Network* n,
-                  NetworkConfiguration& nc, const Dataset& train,
-                  const Dataset& test, TrainingState* state, size_t epochs,
-                  size_t batch_size, double learning_rate, double decay_rate);
-
-// Stop threads and free all training resources.
-void cleanup_training(TrainingState* state, size_t threads);

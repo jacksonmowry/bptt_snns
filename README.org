@@ -92,11 +92,6 @@ This overwrites existing =.out= and =.net.json= files in-place.
 
 See =tests/golden_tests.org= for full documentation and directory structure.
 
-** Test Registry
-
-| Test Config | Description |
-|-------------+-------------|
-| =golden_test_1_iris_10ep= | Iris 80/20 split, 10 epochs, seed 42 — baseline pipeline verification |
 * Network Generation
 Networks are create with the following parameters
 - Input neurons equal to =2 * data_columns=

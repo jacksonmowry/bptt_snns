@@ -13,7 +13,7 @@ TrainingBundle::TrainingBundle(size_t total_neurons, size_t timesteps,
       spike_logits(output_neurons), target(output_neurons),
       dL_ds(output_neurons), softmax_out(output_neurons),
       future_mem_grad_(total_neurons), sgh(total_neurons, timesteps),
-      dL_dV_(total_neurons),
-      v_pre_t_(total_neurons), dV_post_dV_pre_(total_neurons),
-      dV_post_ds_t_(total_neurons), ds_t_dV_pre_(total_neurons),
-      dV_leak_dV_t1_(total_neurons), grad_(total_neurons), rho(rho), tau(tau) {}
+      dL_dV_(total_neurons), v_pre_t_(total_neurons),
+      dV_post_dV_pre_(total_neurons), dV_post_ds_t_(total_neurons),
+      ds_t_dV_pre_(total_neurons), dV_leak_dV_t1_(total_neurons),
+      grad_(total_neurons), rho(rho), tau(tau) {}

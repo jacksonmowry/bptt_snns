@@ -19,16 +19,17 @@ struct CliConfig {
     double rho              = 1.4;
     size_t timesteps        = 32;
     size_t hidden_neurons   = 16;
-    unsigned long seed      = 0; // 0 means time(NULL)
+    unsigned long seed      = 0;
     size_t epochs           = 10;
     size_t batch_size       = 1;
     double training_percent = 0.8;
     std::string network_json_out;
-    size_t threads = 1;
-    bool show_help = false;
-    bool opencl          = false;
-    bool opencl_timings  = false;
-    size_t cpu_eval_interval = 0; // every N epochs, read GPU weights & eval on CPU
+    size_t threads      = 1;
+    bool show_help      = false;
+    bool opencl         = false;
+    bool opencl_timings = false;
+    size_t cpu_eval_interval =
+        0; // every N epochs, read GPU weights & eval on CPU
 };
 
 int parse_cli(int argc, char* argv[], CliConfig* cfg);

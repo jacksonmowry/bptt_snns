@@ -33,7 +33,8 @@ struct KernelTiming {
     double min_us;   // shortest single invocation
     double max_us;   // longest single invocation
     uint64_t calls;  // number of invocations
-    KernelTiming() : name(""), total_us(0.0), min_us(1e18), max_us(0.0), calls(0) {}
+    KernelTiming()
+        : name(""), total_us(0.0), min_us(1e18), max_us(0.0), calls(0) {}
     KernelTiming(const string& n, double u, uint64_t c)
         : name(n), total_us(u), min_us(u), max_us(u), calls(c) {}
 };
@@ -57,8 +58,8 @@ static void timing_add(const char* name, double us) {
     for (auto& kt : g_kernels) {
         if (kt.name == name) {
             kt.total_us += us;
-            kt.min_us    = std::min(kt.min_us, us);
-            kt.max_us    = std::max(kt.max_us, us);
+            kt.min_us = std::min(kt.min_us, us);
+            kt.max_us = std::max(kt.max_us, us);
             kt.calls++;
             return;
         }
@@ -71,16 +72,15 @@ static void timing_print(double total_us) {
         return;
     }
 
-    printf(
-        "\n===== OpenCL Kernel Timing Report (GPU profiling) ===========\n");
+    printf("\n===== OpenCL Kernel Timing Report (GPU profiling) ===========\n");
     printf("%-28s %10s %10s %10s %8s %10s\n", "Kernel", "Avg(us)", "Min(us)",
            "Max(us)", "Calls", "Share");
     printf("%-28s %10s %10s %10s %8s %10s\n", "----------------------------",
            "----------", "----------", "----------", "--------", "----------");
 
     for (auto& kt : g_kernels) {
-        double avg  = (kt.calls > 0) ? (kt.total_us / kt.calls) : 0.0;
-        double pct  = (total_us > 0) ? (kt.total_us / total_us * 100.0) : 0.0;
+        double avg = (kt.calls > 0) ? (kt.total_us / kt.calls) : 0.0;
+        double pct = (total_us > 0) ? (kt.total_us / total_us * 100.0) : 0.0;
         printf("%-28s %10.1f %10.1f %10.1f %8zu %9.2f%%\n", kt.name.c_str(),
                avg, kt.min_us, kt.max_us, kt.calls, pct);
     }

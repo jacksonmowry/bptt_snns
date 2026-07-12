@@ -117,16 +117,16 @@ static void write_weights_to_network(neuro::Network* n, size_t total_neurons,
     }
 }
 
-static std::pair<double, double>
-cpu_eval_test(neuro::Network* n, const NetworkConfiguration& nc,
-              const Dataset& d, const std::vector<std::vector<int>>& delays,
-              const std::vector<double>& thresholds, double rho, double tau) {
+static std::pair<double, double> cpu_eval_test(neuro::Network* n,
+                                               const NetworkConfiguration& nc,
+                                               const Dataset& d, double rho,
+                                               double tau) {
     if (d.observations == 0) {
         return {0.0, 0.0};
     }
 
     TrainingBundle tb(nc.total_neurons, nc.timesteps, nc.output_neurons, rho,
-                      tau, {}, &delays, &thresholds);
+                      tau, {}, {}, {});
     neuro::Processor* p = nullptr;
     load_network(&p, n);
 
@@ -144,20 +144,13 @@ cpu_eval_test(neuro::Network* n, const NetworkConfiguration& nc,
             (double)total_correct / d.observations};
 }
 
-/* ------------------------------------------------------------------ */
-/* OpenclBackend implementation                                         */
-/* ------------------------------------------------------------------ */
-OpenclBackend::OpenclBackend(const CliConfig& cfg, neuro::Network* n,
-                             NetworkConfiguration& nc, const Dataset& train,
-                             const Dataset& test, TrainingState* state,
-                             size_t max_incoming, size_t max_outgoing,
-                             size_t batch_size, double learning_rate,
-                             double decay_rate, double rho, double tau)
-    : m_cfg(cfg), m_n(n), m_nc(nc), m_train(train), m_test(test),
-      m_state(state), m_max_incoming(max_incoming),
-      m_max_outgoing(max_outgoing), m_batch_size(batch_size),
-      m_learning_rate(learning_rate), m_decay_rate(decay_rate), m_rho(rho),
-      m_tau(tau), m_b1_t(1.0), m_b2_t(1.0) {
+OpenclBackend::OpenclBackend(const CliConfig& cfg, NetworkConfiguration& nc,
+                             const Dataset& train, const Dataset& test,
+                             size_t max_incoming, size_t max_outgoing)
+    : cfg(cfg), nc(nc), train(train), test(test), max_incoming(max_incoming),
+      max_outgoing(max_outgoing), batch_size(cfg.batch_size),
+      learning_rate(cfg.learning_rate), decay_rate(cfg.decay_rate),
+      rho(cfg.rho), tau(cfg.tau), b1_t(1.0), b2_t(1.0) {
 
     Device device(select_device_with_most_flops());
     const size_t encode_work_size        = nc.input_neurons;
@@ -168,292 +161,280 @@ OpenclBackend::OpenclBackend(const CliConfig& cfg, neuro::Network* n,
         nc.total_neurons * nc.max_incoming;
     const size_t weight_updates_work_size = nc.total_neurons * nc.max_incoming;
 
-    m_x.reset(new Memory<short>(device, nc.input_neurons * nc.timesteps));
-    m_data.reset(
-        new Memory<double>(device, train.observations * train.cols * 2));
+    x.reset(new Memory<short>(device, nc.input_neurons * nc.timesteps));
+    data.reset(new Memory<double>(device, train.observations * train.cols * 2));
 
     if (test.observations > 0) {
-        m_test_data.reset(
+        test_data.reset(
             new Memory<double>(device, test.observations * test.cols * 2));
     }
 
-    m_v_thresh.reset(new Memory<short>(device, nc.total_neurons));
-    m_weights.reset(
+    v_thresh.reset(new Memory<short>(device, nc.total_neurons));
+    weights.reset(
         new Memory<short>(device, nc.total_neurons * nc.max_incoming));
-    m_delays.reset(
+    delays.reset(new Memory<uint>(device, nc.total_neurons * nc.max_incoming));
+    incoming.reset(new Memory<uint>(device, nc.total_neurons));
+    incoming_ids.reset(
         new Memory<uint>(device, nc.total_neurons * nc.max_incoming));
-    m_incoming.reset(new Memory<uint>(device, nc.total_neurons));
-    m_incoming_ids.reset(
-        new Memory<uint>(device, nc.total_neurons * nc.max_incoming));
-    m_is_input_neuron.reset(new Memory<uchar>(device, nc.total_neurons));
-    m_is_output_neuron.reset(new Memory<uchar>(device, nc.total_neurons));
-    m_v.reset(new Memory<short>(device, nc.total_neurons));
-    m_s.reset(new Memory<char>(device, nc.total_neurons * nc.timesteps));
-    m_v_pre.reset(new Memory<short>(device, nc.total_neurons * nc.timesteps));
-    m_dL_ds.reset(new Memory<float>(device, nc.output_neurons));
-    m_correct.reset(new Memory<float>(device, 1));
-    m_loss.reset(new Memory<float>(device, 1));
-    m_spike_grad_history.reset(
+    is_input_neuron.reset(new Memory<uchar>(device, nc.total_neurons));
+    is_output_neuron.reset(new Memory<uchar>(device, nc.total_neurons));
+    v.reset(new Memory<short>(device, nc.total_neurons));
+    s.reset(new Memory<char>(device, nc.total_neurons * nc.timesteps));
+    v_pre.reset(new Memory<short>(device, nc.total_neurons * nc.timesteps));
+    dL_ds.reset(new Memory<float>(device, nc.output_neurons));
+    correct.reset(new Memory<float>(device, 1));
+    loss.reset(new Memory<float>(device, 1));
+    spike_grad_history.reset(
         new Memory<float>(device, nc.total_neurons * nc.timesteps));
-    m_future_mem_grad.reset(new Memory<float>(device, nc.total_neurons));
-    m_delta_W.reset(
+    future_mem_grad.reset(new Memory<float>(device, nc.total_neurons));
+    delta_W.reset(
         new Memory<float>(device, nc.total_neurons * nc.max_incoming));
-    m_neuron_grad.reset(new Memory<float>(device, nc.total_neurons));
-    m_m_weights.reset(
+    neuron_grad.reset(new Memory<float>(device, nc.total_neurons));
+    m_weights.reset(
         new Memory<float>(device, nc.total_neurons * nc.max_incoming));
-    m_v_weights.reset(
+    v_weights.reset(
         new Memory<float>(device, nc.total_neurons * nc.max_incoming));
-    m_outgoing.reset(new Memory<uint>(device, nc.total_neurons));
-    m_gradient_slot.reset(
+    outgoing.reset(new Memory<uint>(device, nc.total_neurons));
+    gradient_slot.reset(
         new Memory<uint>(device, nc.total_neurons * nc.max_incoming));
-    m_gradient_accumulators.reset(new Memory<float>(
+    gradient_accumulators.reset(new Memory<float>(
         device, nc.timesteps * nc.total_neurons * nc.max_outgoing));
 
-    m_encode_kernel.reset(
-        new Kernel(device, encode_work_size, "risp_encode_inputs_kernel", *m_x,
-                   *m_data, (int)train.cols, (int)nc.input_neurons,
+    encode_kernel.reset(
+        new Kernel(device, encode_work_size, "risp_encode_inputs_kernel", *x,
+                   *data, (int)train.cols, (int)nc.input_neurons,
                    (int)nc.timesteps, (uint)0, (short)nc.spike_value_factor));
 
-    m_forward_kernel.reset(new Kernel(
-        device, forward_work_size, "risp_forward_kernel", *m_x, *m_v_thresh,
-        *m_weights, *m_delays, *m_incoming, *m_incoming_ids, *m_is_input_neuron,
-        *m_v, *m_s, *m_v_pre, (short)nc.leak,
-        (short)(nc.min_potential / nc.scale_factor), (uint)nc.total_neurons,
-        (uint)nc.timesteps, (uint)0, (uint)nc.max_incoming));
+    forward_kernel.reset(new Kernel(
+        device, forward_work_size, "risp_forward_kernel", *x, *v_thresh,
+        *weights, *delays, *incoming, *incoming_ids, *is_input_neuron, *v, *s,
+        *v_pre, (short)nc.leak, (short)(nc.min_potential / nc.scale_factor),
+        (uint)nc.total_neurons, (uint)nc.timesteps, (uint)0,
+        (uint)nc.max_incoming));
 
-    m_loss_kernel.reset(
-        new Kernel(device, loss_work_size, "risp_loss_kernel", *m_s, *m_dL_ds,
-                   *m_correct, *m_loss, (uint)nc.total_neurons,
+    loss_kernel.reset(
+        new Kernel(device, loss_work_size, "risp_loss_kernel", *s, *dL_ds,
+                   *correct, *loss, (uint)nc.total_neurons,
                    (uint)nc.output_neurons, (uint)nc.timesteps, (uint)0));
 
-    m_backward_grad_kernel.reset(new Kernel(
-        device, backward_grad_work_size, "risp_backward_grad_kernel", *m_dL_ds,
-        *m_s, *m_v_pre, *m_v_thresh, *m_gradient_accumulators, *m_outgoing,
-        *m_is_output_neuron, *m_spike_grad_history, *m_future_mem_grad,
-        *m_neuron_grad, (short)nc.leak, (float)nc.min_potential, (float)tau,
-        (float)rho, (uint)nc.total_neurons, (uint)nc.output_neurons,
-        (short)nc.timesteps, (float)nc.scale_factor, (uint)nc.max_outgoing,
-        (short)0));
+    backward_grad_kernel.reset(new Kernel(
+        device, backward_grad_work_size, "risp_backward_grad_kernel", *dL_ds,
+        *s, *v_pre, *v_thresh, *gradient_accumulators, *outgoing,
+        *is_output_neuron, *spike_grad_history, *future_mem_grad, *neuron_grad,
+        (short)nc.leak, (float)nc.min_potential, (float)cfg.tau, (float)cfg.rho,
+        (uint)nc.total_neurons, (uint)nc.output_neurons, (short)nc.timesteps,
+        (float)nc.scale_factor, (uint)nc.max_outgoing, (short)0));
 
-    m_backward_delta_w_kernel.reset(new Kernel(
+    backward_delta_w_kernel.reset(new Kernel(
         device, backward_delta_w_work_size, "risp_backward_delta_w_kernel",
-        *m_neuron_grad, *m_s, *m_weights, *m_delays, *m_incoming,
-        *m_incoming_ids, *m_gradient_slot, *m_spike_grad_history, *m_delta_W,
-        *m_gradient_accumulators, (uint)nc.total_neurons, (uint)nc.max_incoming,
-        (uint)nc.max_outgoing, (short)nc.timesteps, (float)nc.scale_factor,
-        (short)0));
+        *neuron_grad, *s, *weights, *delays, *incoming, *incoming_ids,
+        *gradient_slot, *spike_grad_history, *delta_W, *gradient_accumulators,
+        (uint)nc.total_neurons, (uint)nc.max_incoming, (uint)nc.max_outgoing,
+        (short)nc.timesteps, (float)nc.scale_factor, (short)0));
 
-    m_weight_updates_kernel.reset(new Kernel(
-        device, weight_updates_work_size, "weight_updates_kernel", *m_incoming,
-        *m_m_weights, *m_v_weights, *m_delta_W, *m_weights,
-        (uint)nc.total_neurons, (uint)nc.max_incoming, (float)learning_rate,
-        (float)decay_rate, (uint)1, (uint)batch_size, (uint)0, (uint)0,
-        (float)0.9f, (float)0.999f, (float)0.0f, (float)0.0f,
-        (uint)nc.timesteps, (uint)train.observations, (float)nc.scale_factor,
-        (short)nc.min_weight, (short)nc.max_weight, (int)nc.steps));
+    weight_updates_kernel.reset(new Kernel(
+        device, weight_updates_work_size, "weight_updates_kernel", *incoming,
+        *m_weights, *v_weights, *delta_W, *weights, (uint)nc.total_neurons,
+        (uint)nc.max_incoming, (float)cfg.learning_rate, (float)cfg.decay_rate,
+        (uint)1, (uint)cfg.batch_size, (uint)0, (uint)0, (float)0.9f,
+        (float)0.999f, (float)0.0f, (float)0.0f, (uint)nc.timesteps,
+        (uint)train.observations, (float)nc.scale_factor, (short)nc.min_weight,
+        (short)nc.max_weight, (int)nc.steps));
 
     // Encode data
-    encode(*m_data, train);
+    encode(*data, train);
     if (test.observations > 0) {
-        encode(*m_test_data, test);
+        encode(*test_data, test);
     }
 
-    // Initialize GPU buffers from host state
+    // Initialize GPU buffers from network
     for (size_t i = 0; i < nc.total_neurons; i++) {
-        neuro::Node* node = n->get_node(i);
+        neuro::Node* node = nc.n->get_node(i);
 
-        m_v_thresh->operator[](i) = state->thresholds[i] / nc.scale_factor;
-        m_incoming->operator[](i) = state->weights[i].size();
-        m_is_input_neuron->operator[](i) = i < nc.input_neurons;
-        m_is_output_neuron->operator[](i) =
-            i >= nc.input_neurons + nc.hidden_neurons;
-
-        for (size_t j = 0; j < state->weights[i].size(); j++) {
-            (*m_weights)[(i * max_incoming) + j] =
-                state->weights[i][j] / nc.scale_factor;
-            (*m_delays)[(i * max_incoming) + j] = state->delays[i][j];
-            (*m_incoming_ids)[(i * max_incoming) + j] =
-                n->get_node(i)->incoming[j]->from->id;
-        }
+        (*v_thresh)[i]         = (short)node->get("Threshold");
+        (*incoming)[i]         = node->incoming.size();
+        (*is_input_neuron)[i]  = i < nc.input_neurons;
+        (*is_output_neuron)[i] = i >= nc.input_neurons + nc.hidden_neurons;
 
         for (size_t j = 0; j < node->incoming.size(); j++) {
             neuro::Edge* edge  = node->incoming[j];
             size_t incoming_id = edge->from->id;
 
-            (*m_gradient_slot)[i * nc.max_incoming + j] =
-                (*m_outgoing)[incoming_id];
-            (*m_outgoing)[incoming_id]++;
+            (*weights)[(i * max_incoming) + j]      = edge->get("Weight");
+            (*delays)[(i * max_incoming) + j]       = edge->get("Delay");
+            (*incoming_ids)[(i * max_incoming) + j] = edge->from->id;
+
+            (*gradient_slot)[i * nc.max_incoming + j] =
+                (*outgoing)[incoming_id];
+            (*outgoing)[incoming_id]++;
         }
     }
 
-    m_m_weights->reset();
-    m_v_weights->reset();
+    m_weights->reset();
+    v_weights->reset();
 
-    m_data->write_to_device();
+    data->write_to_device();
     if (test.observations > 0) {
-        m_test_data->write_to_device();
+        test_data->write_to_device();
     }
-    m_v_thresh->write_to_device();
+    v_thresh->write_to_device();
+    weights->write_to_device();
+    delays->write_to_device();
+    incoming->write_to_device();
+    incoming_ids->write_to_device();
+    is_input_neuron->write_to_device();
+    is_output_neuron->write_to_device();
     m_weights->write_to_device();
-    m_delays->write_to_device();
-    m_incoming->write_to_device();
-    m_incoming_ids->write_to_device();
-    m_is_input_neuron->write_to_device();
-    m_is_output_neuron->write_to_device();
-    m_m_weights->write_to_device();
-    m_v_weights->write_to_device();
-    m_outgoing->write_to_device();
-    m_gradient_slot->write_to_device();
+    v_weights->write_to_device();
+    outgoing->write_to_device();
+    gradient_slot->write_to_device();
 
     // Init batch order
-    m_batch_order.resize(train.observations);
+    batch_order.resize(train.observations);
     for (int i = 0; i < train.observations; i++) {
-        m_batch_order[i] = (size_t)i;
+        batch_order[i] = (size_t)i;
     }
 
     timing_start(cfg.opencl_timings);
-    m_t_start = chrono::high_resolution_clock::now();
+    t_start = chrono::high_resolution_clock::now();
 }
 
 void OpenclBackend::do_one_epoch(size_t epoch) {
     double epoch_loss    = 0.0;
     size_t epoch_correct = 0;
-    m_correct->reset();
-    m_loss->reset();
+    correct->reset();
+    loss->reset();
 
     // Shuffle batch order each epoch
-    for (int i = 0; i < m_train.observations; i++) {
-        int j            = rand() % m_train.observations;
-        size_t tmp       = m_batch_order[i];
-        m_batch_order[i] = m_batch_order[j];
-        m_batch_order[j] = tmp;
+    for (int i = 0; i < train.observations; i++) {
+        int j          = rand() % train.observations;
+        size_t tmp     = batch_order[i];
+        batch_order[i] = batch_order[j];
+        batch_order[j] = tmp;
     }
 
     // Mini-batch SGD loop
-    for (int batch_start = 0; batch_start < m_train.observations;
-         batch_start += (int)m_batch_size) {
+    for (int batch_start = 0; batch_start < train.observations;
+         batch_start += (int)batch_size) {
         size_t current_batch_size =
-            min(m_batch_size, (size_t)(m_train.observations - batch_start));
+            min(batch_size, (size_t)(train.observations - batch_start));
 
         // Reset accumulators for this batch
-        m_delta_W->reset();
+        delta_W->reset();
 
         for (size_t b = 0; b < current_batch_size; b++) {
-            size_t obs = m_batch_order[(size_t)batch_start + b];
+            size_t obs = batch_order[(size_t)batch_start + b];
 
-            m_x->reset();
-            m_v->reset();
-            m_s->reset();
-            m_v_pre->reset();
-            m_dL_ds->reset();
-            m_spike_grad_history->reset();
-            m_future_mem_grad->reset();
-            m_gradient_accumulators->reset();
+            x->reset();
+            v->reset();
+            s->reset();
+            v_pre->reset();
+            dL_ds->reset();
+            spike_grad_history->reset();
+            future_mem_grad->reset();
+            gradient_accumulators->reset();
 
             // Encode data
-            m_encode_kernel->set_parameters(5, (uint)obs);
-            timed_run(*m_encode_kernel, "encode");
+            encode_kernel->set_parameters(5, (uint)obs);
+            timed_run(*encode_kernel, "encode");
 
             // Forward pass
-            for (size_t t = 0; t < m_nc.timesteps; t++) {
-                m_forward_kernel->set_parameters(14, (uint)t);
-                timed_run(*m_forward_kernel, "forward");
+            for (size_t t = 0; t < nc.timesteps; t++) {
+                forward_kernel->set_parameters(14, (uint)t);
+                timed_run(*forward_kernel, "forward");
             }
 
             // Loss
-            m_loss_kernel->set_parameters(7, (uint)(m_train.labels[obs]));
-            timed_run(*m_loss_kernel, "loss");
+            loss_kernel->set_parameters(7, (uint)(train.labels[obs]));
+            timed_run(*loss_kernel, "loss");
 
             // Backwards
-            for (short t = m_nc.timesteps - 1; t >= 0; t--) {
-                m_backward_grad_kernel->set_parameters(19, (short)t);
-                timed_run(*m_backward_grad_kernel, "backward_grad");
-                m_backward_delta_w_kernel->set_parameters(15, (short)t);
-                timed_run(*m_backward_delta_w_kernel, "backward_delta_w");
+            for (short t = nc.timesteps - 1; t >= 0; t--) {
+                backward_grad_kernel->set_parameters(19, (short)t);
+                timed_run(*backward_grad_kernel, "backward_grad");
+                backward_delta_w_kernel->set_parameters(15, (short)t);
+                timed_run(*backward_delta_w_kernel, "backward_delta_w");
             }
         }
 
         // Weight updates
-        m_b1_t *= 0.9;
-        m_b2_t *= 0.999;
-        m_weight_updates_kernel->set_parameters(9, (uint)current_batch_size,
-                                                (uint)m_batch_size);
-        m_weight_updates_kernel->set_parameters(11, (uint)batch_start);
-        m_weight_updates_kernel->set_parameters(12, (uint)epoch);
-        m_weight_updates_kernel->set_parameters(15, (float)m_b1_t,
-                                                (float)m_b2_t);
-        timed_run(*m_weight_updates_kernel, "weight_updates");
+        b1_t *= 0.9;
+        b2_t *= 0.999;
+        weight_updates_kernel->set_parameters(9, (uint)current_batch_size,
+                                              (uint)batch_size);
+        weight_updates_kernel->set_parameters(11, (uint)batch_start);
+        weight_updates_kernel->set_parameters(12, (uint)epoch);
+        weight_updates_kernel->set_parameters(15, (float)b1_t, (float)b2_t);
+        timed_run(*weight_updates_kernel, "weight_updates");
     }
 
-    m_correct->read_from_device();
-    m_loss->read_from_device();
-    epoch_loss += (*m_loss)[0];
-    epoch_correct += (size_t)(*m_correct)[0];
+    correct->read_from_device();
+    loss->read_from_device();
+    epoch_loss += (*loss)[0];
+    epoch_correct += (size_t)(*correct)[0];
 
-    double avg_train_loss = epoch_loss / (double)m_train.observations;
-    double avg_train_acc  = epoch_correct / (double)m_train.observations;
+    double avg_train_loss = epoch_loss / (double)train.observations;
+    double avg_train_acc  = epoch_correct / (double)train.observations;
 
     // Test evaluation
     double epoch_test_loss    = 0.0;
     size_t epoch_test_correct = 0;
 
-    if (m_test.observations > 0) {
-        m_correct->reset();
-        m_loss->reset();
+    if (test.observations > 0) {
+        correct->reset();
+        loss->reset();
 
-        m_encode_kernel->set_parameters(1, *m_test_data);
+        encode_kernel->set_parameters(1, *test_data);
 
-        for (int obs = 0; obs < (int)m_test.observations; obs++) {
-            m_x->reset();
-            m_v->reset();
-            m_s->reset();
-            m_v_pre->reset();
-            m_dL_ds->reset();
+        for (int obs = 0; obs < (int)test.observations; obs++) {
+            x->reset();
+            v->reset();
+            s->reset();
+            v_pre->reset();
+            dL_ds->reset();
 
-            m_encode_kernel->set_parameters(2, (int)m_test.cols);
-            m_encode_kernel->set_parameters(5, (uint)obs);
-            timed_run(*m_encode_kernel, "encode");
+            encode_kernel->set_parameters(2, (int)test.cols);
+            encode_kernel->set_parameters(5, (uint)obs);
+            timed_run(*encode_kernel, "encode");
 
-            for (size_t t = 0; t < m_nc.timesteps; t++) {
-                m_forward_kernel->set_parameters(14, (uint)t);
-                timed_run(*m_forward_kernel, "forward");
+            for (size_t t = 0; t < nc.timesteps; t++) {
+                forward_kernel->set_parameters(14, (uint)t);
+                timed_run(*forward_kernel, "forward");
             }
 
-            m_loss_kernel->set_parameters(7, (uint)(m_test.labels[obs]));
-            timed_run(*m_loss_kernel, "loss");
+            loss_kernel->set_parameters(7, (uint)(test.labels[obs]));
+            timed_run(*loss_kernel, "loss");
         }
 
-        m_correct->read_from_device();
-        m_loss->read_from_device();
-        epoch_test_correct += (size_t)(*m_correct)[0];
-        epoch_test_loss += (*m_loss)[0];
+        correct->read_from_device();
+        loss->read_from_device();
+        epoch_test_correct += (size_t)(*correct)[0];
+        epoch_test_loss += (*loss)[0];
 
-        m_encode_kernel->set_parameters(1, *m_data);
+        encode_kernel->set_parameters(1, *data);
     }
 
-    double avg_test_loss = m_test.observations > 0
-                               ? epoch_test_loss / (double)m_test.observations
+    double avg_test_loss = test.observations > 0
+                               ? epoch_test_loss / (double)test.observations
                                : 0.0;
-    double avg_test_acc = m_test.observations > 0
-                              ? epoch_test_correct / (double)m_test.observations
-                              : 0.0;
+    double avg_test_acc  = test.observations > 0
+                               ? epoch_test_correct / (double)test.observations
+                               : 0.0;
 
-    m_stats.train_acc  = avg_train_acc;
-    m_stats.train_loss = avg_train_loss;
-    m_stats.test_acc   = avg_test_acc;
-    m_stats.test_loss  = avg_test_loss;
+    stats.train_acc  = avg_train_acc;
+    stats.train_loss = avg_train_loss;
+    stats.test_acc   = avg_test_acc;
+    stats.test_loss  = avg_test_loss;
 
     // Periodic CPU eval
-    if (m_cfg.cpu_eval_interval > 0 &&
-        (epoch + 1) % m_cfg.cpu_eval_interval == 0) {
-        m_weights->read_from_device();
-        write_weights_to_network(m_n, m_nc.total_neurons, *m_weights,
-                                 m_nc.max_incoming);
-        std::pair<double, double> cpu_result =
-            cpu_eval_test(m_n, m_nc, m_test.observations > 0 ? m_test : m_train,
-                          m_state->delays, m_state->thresholds, m_rho, m_tau);
+    if (cfg.cpu_eval_interval > 0 && (epoch + 1) % cfg.cpu_eval_interval == 0) {
+        weights->read_from_device();
+        write_weights_to_network(nc.n, nc.total_neurons, *weights,
+                                 nc.max_incoming);
+        std::pair<double, double> cpu_result = cpu_eval_test(
+            nc.n, nc, test.observations > 0 ? test : train, rho, tau);
 
-        if (m_test.observations > 0) {
+        if (test.observations > 0) {
             printf(
                 "  [CPU eval @ epoch %4zu] Test Loss: %10g, Test Acc: %10g\n",
                 epoch + 1, cpu_result.first, cpu_result.second);
@@ -468,19 +449,17 @@ void OpenclBackend::do_one_epoch(size_t epoch) {
 OpenclBackend::~OpenclBackend() {
     auto t_end = chrono::high_resolution_clock::now();
     double total_us =
-        chrono::duration<double, std::micro>(t_end - m_t_start).count();
+        chrono::duration<double, std::micro>(t_end - t_start).count();
     timing_print(total_us);
 
     // Read GPU weights back to host for state
-    m_weights->read_from_device();
-    write_weights_to_network(m_n, m_nc.total_neurons, *m_weights,
-                             m_nc.max_incoming);
+    weights->read_from_device();
+    write_weights_to_network(nc.n, nc.total_neurons, *weights, nc.max_incoming);
 
     // Final CPU eval on GPU weights
     std::pair<double, double> cpu_result =
-        cpu_eval_test(m_n, m_nc, m_test.observations > 0 ? m_test : m_train,
-                      m_state->delays, m_state->thresholds, m_rho, m_tau);
-    if (m_test.observations > 0) {
+        cpu_eval_test(nc.n, nc, test.observations > 0 ? test : train, rho, tau);
+    if (test.observations > 0) {
         printf("Final CPU Test Loss: %10g, Final CPU Test Acc: %10g\n",
                cpu_result.first, cpu_result.second);
     } else {
@@ -489,11 +468,11 @@ OpenclBackend::~OpenclBackend() {
     }
 }
 
-TrainingStats OpenclBackend::get_stats() const { return m_stats; }
+TrainingStats OpenclBackend::get_stats() const { return stats; }
 
 void OpenclBackend::update_weights(neuro::Network* network) {
     // Read GPU weights back to host — all weight mutation happens on GPU
     m_weights->read_from_device();
-    write_weights_to_network(network, m_nc.total_neurons, *m_weights,
-                             m_nc.max_incoming);
+    write_weights_to_network(network, nc.total_neurons, *weights,
+                             nc.max_incoming);
 }
