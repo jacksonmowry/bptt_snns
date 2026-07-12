@@ -3,7 +3,6 @@
 #include "data_utils.h"
 #include "network_setup.h"
 #include "network_utils.h"
-#include "opencl_backend.h"
 #include "shared.h"
 #include "training.h"
 #include <cmath>
@@ -223,31 +222,29 @@ int main(int argc, char* argv[]) {
                                   batch_size, learning_rate, decay_rate,
                                   rho, tau);
 
+    // Determine which accuracy metric to track for export
+    bool has_test_data = test.observations > 0;
+
     // Training loop
     for (size_t epoch = 0; epoch < epochs; ++epoch) {
-        backend->do_one_epoch(epoch);
         TrainingStats stats = backend->get_stats();
+        double prev_best_acc = has_test_data ? stats.best_test_acc : stats.best_train_acc;
+
+        backend->do_one_epoch(epoch);
+        stats = backend->get_stats();
         print_epoch_log(epoch, epochs, stats);
+
+        // Export only on new high accuracy
+        double cur_best_acc = has_test_data ? stats.best_test_acc : stats.best_train_acc;
+        if (cur_best_acc > prev_best_acc) {
+            export_network_json(n, cfg, stats);
+        }
     }
 
     // Finalize: sync weights to network
     backend->update_weights(n);
 
-    // For OpenCL: final CPU eval on GPU weights
-    if (cfg.opencl) {
-        auto* ocl = dynamic_cast<OpenclBackend*>(backend.get());
-        if (ocl && test.observations > 0) {
-            std::pair<double, double> cpu_result = ocl->run_final_cpu_eval();
-            printf("Final CPU Test Loss: %10g, Final CPU Test Acc: %10g\n",
-                   cpu_result.first, cpu_result.second);
-        }
-    }
-
-    // Export JSON (unified for both backends)
-    TrainingStats final_stats = backend->get_stats();
-    export_network_json(n, cfg, final_stats);
-
-    // Cleanup
+    // Cleanup (OpenCL destructor runs final CPU eval if applicable)
     backend.reset();
     free(state->batch_order);
     free(state->tas);

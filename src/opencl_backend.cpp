@@ -456,16 +456,6 @@ void OpenclBackend::do_one_epoch(size_t epoch) {
     }
 }
 
-std::pair<double, double> OpenclBackend::run_final_cpu_eval() {
-    // Read fresh GPU weights — m_state->weights is not updated during GPU training
-    m_weights->read_from_device();
-    std::vector<std::vector<double>> cpu_weights;
-    read_gpu_weights(*m_weights, m_nc.total_neurons, m_max_incoming,
-                     m_state->weights, m_nc.scale_factor, cpu_weights);
-    return cpu_eval_test(m_n, m_nc, m_test, cpu_weights, m_state->delays,
-                         m_state->thresholds, m_rho, m_tau);
-}
-
 OpenclBackend::~OpenclBackend() {
     auto t_end = chrono::high_resolution_clock::now();
     double total_us =
@@ -474,8 +464,18 @@ OpenclBackend::~OpenclBackend() {
 
     // Read GPU weights back to host for state
     m_weights->read_from_device();
+    std::vector<std::vector<double>> cpu_weights;
     read_gpu_weights(*m_weights, m_nc.total_neurons, m_max_incoming,
-                     m_state->weights, m_nc.scale_factor, m_state->weights);
+                     m_state->weights, m_nc.scale_factor, cpu_weights);
+
+    // Final CPU eval on GPU weights
+    if (m_test.observations > 0) {
+        std::pair<double, double> cpu_result =
+            cpu_eval_test(m_n, m_nc, m_test, cpu_weights, m_state->delays,
+                          m_state->thresholds, m_rho, m_tau);
+        printf("Final CPU Test Loss: %10g, Final CPU Test Acc: %10g\n",
+               cpu_result.first, cpu_result.second);
+    }
 }
 
 TrainingStats OpenclBackend::get_stats() const { return m_stats; }

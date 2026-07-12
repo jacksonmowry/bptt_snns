@@ -21,8 +21,7 @@ public:
     TrainingStats get_stats() const override;
     void update_weights(neuro::Network* network) override;
 
-    // Run CPU test eval using GPU weights
-    std::pair<double, double> run_final_cpu_eval();
+
 
 private:
     const CliConfig& m_cfg;
