@@ -93,16 +93,14 @@ load_and_init_network(const std::string& json_file, double& connectivity,
     return n;
 }
 
-void build_run_metadata(
-    neuro::Network* n, int argc, char* argv[], const CliConfig& cfg,
-    size_t input_neurons, size_t output_neurons, size_t total_neurons,
-    size_t neuron_count, size_t synapse_count, bool discrete,
-    double min_potential, double min_weight, double max_weight,
-    double max_threshold, const std::string& leak_prop, int scale,
-    double scale_factor, double connectivity, double learning_rate,
-    double decay_rate, double tau, double rho, size_t timesteps,
-    size_t hidden_neurons, unsigned long seed, size_t epochs, size_t batch_size,
-    double training_percent, size_t threads, bool timeseries) {
+void build_run_metadata(neuro::Network* n, int argc, char* argv[],
+                        const CliConfig& cfg, size_t input_neurons,
+                        size_t output_neurons, size_t total_neurons,
+                        size_t neuron_count, size_t synapse_count,
+                        bool discrete, double min_potential, double min_weight,
+                        double max_weight, double max_threshold,
+                        const std::string& leak_prop, int scale,
+                        double scale_factor) {
     // CLI arguments
     json cli_args = json::array();
     for (int i = 1; i < argc; i++) {
@@ -134,19 +132,19 @@ void build_run_metadata(
     run_metadata["git_commit"]    = git_commit.empty() ? "unknown" : git_commit;
     run_metadata["compile_time"]  = compile_time;
     run_metadata["start_time"]    = (double)tv.tv_sec + tv.tv_usec / 1000000.0;
-    run_metadata["seed"]          = seed;
-    run_metadata["connectivity"]  = connectivity;
-    run_metadata["learning_rate"] = learning_rate;
-    run_metadata["decay_rate"]    = decay_rate;
-    run_metadata["tau"]           = tau;
-    run_metadata["rho"]           = rho;
-    run_metadata["timesteps"]     = timesteps;
-    run_metadata["hidden_neurons"]   = hidden_neurons;
-    run_metadata["epochs"]           = epochs;
-    run_metadata["batch_size"]       = batch_size;
-    run_metadata["training_percent"] = training_percent;
-    run_metadata["threads"]          = threads;
-    run_metadata["timeseries"]       = timeseries;
+    run_metadata["seed"]          = cfg.seed;
+    run_metadata["connectivity"]  = cfg.connectivity;
+    run_metadata["learning_rate"] = cfg.learning_rate;
+    run_metadata["decay_rate"]    = cfg.decay_rate;
+    run_metadata["tau"]           = cfg.tau;
+    run_metadata["rho"]           = cfg.rho;
+    run_metadata["timesteps"]     = cfg.timesteps;
+    run_metadata["hidden_neurons"]   = cfg.hidden_neurons;
+    run_metadata["epochs"]           = cfg.epochs;
+    run_metadata["batch_size"]       = cfg.batch_size;
+    run_metadata["training_percent"] = cfg.training_percent;
+    run_metadata["threads"]          = cfg.threads;
+    run_metadata["timeseries"]       = cfg.timeseries;
     run_metadata["network_json"]     = cfg.network_json_file;
     run_metadata["data_file"]        = cfg.data_file;
     run_metadata["label_file"]       = cfg.label_file;

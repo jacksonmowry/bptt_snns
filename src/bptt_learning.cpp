@@ -5,6 +5,7 @@
 #include "network_utils.h"
 #include "shared.h"
 #include "training.h"
+#include <cfloat>
 #include <cmath>
 #include <cstddef>
 #include <cstdio>
@@ -19,35 +20,18 @@
 using namespace std;
 using namespace neuro;
 
-static void print_epoch_log(size_t epoch, size_t total_epochs, const TrainingStats& stats) {
-    printf("E%4zu/%zu  TrL: %8g TrA: %7.3f  TeL: %8g TeA: %7.3f  BestTeA: %7.3f\n",
-           epoch + 1, total_epochs,
-           stats.train_loss, stats.train_acc,
-           stats.test_loss, stats.test_acc, stats.best_test_acc);
-}
-
-static void export_network_json(neuro::Network* n, const CliConfig& cfg,
-                                 const TrainingStats& stats) {
-    if (cfg.network_json_out.empty()) return;
-
-    nlohmann::json meta = n->get_data("other");
-    meta["best_train_loss"] = stats.best_train_loss;
-    meta["best_test_loss"] = stats.best_test_loss;
-    meta["best_train_acc"] = stats.best_train_acc;
-    meta["best_test_acc"] = stats.best_test_acc;
-    meta["epoch"] = cfg.epochs;
-    n->set_data("other", meta);
-
-    nlohmann::json j;
-    n->to_json(j);
-    std::ofstream fout(cfg.network_json_out);
-    if (!fout) {
-        fprintf(stderr, "Failed to open %s for writing\n",
-                cfg.network_json_out.c_str());
-        exit(1);
+static void print_epoch_log(size_t epoch, size_t total_epochs,
+                            const TrainingStats& stats, double best_train_acc,
+                            double best_test_acc, bool has_test_data) {
+    if (has_test_data) {
+        printf("E%4zu/%zu  TrL: %8g TrA: %7.3f  TeL: %8g TeA: %7.3f  BestTeA: "
+               "%7.3f\n",
+               epoch + 1, total_epochs, stats.train_loss, stats.train_acc,
+               stats.test_loss, stats.test_acc, best_test_acc);
+    } else {
+        printf("E%4zu/%zu  TrL: %8g TrA: %7.3f  BestTrA: %7.3f\n", epoch + 1,
+               total_epochs, stats.train_loss, stats.train_acc, best_train_acc);
     }
-    fout << j.dump(2) << std::endl;
-    fout.close();
 }
 
 int main(int argc, char* argv[]) {
@@ -113,23 +97,11 @@ int main(int argc, char* argv[]) {
     size_t hidden_neurons = cfg.hidden_neurons;
     size_t total_neurons  = input_neurons + hidden_neurons + output_neurons;
 
-    double connectivity  = cfg.connectivity;
-    double learning_rate = cfg.learning_rate;
-    double decay_rate    = cfg.decay_rate;
-    double tau           = cfg.tau;
-    double rho           = cfg.rho;
-    size_t timesteps     = cfg.timesteps;
-    unsigned long seed   = cfg.seed;
-    size_t epochs        = cfg.epochs;
-    size_t batch_size    = cfg.batch_size;
-    double training_pct  = cfg.training_percent;
-    size_t threads       = cfg.threads;
-    bool timeseries      = cfg.timeseries;
-
     Network* n = load_and_init_network(
-        cfg.network_json_file, connectivity, learning_rate, decay_rate, tau,
-        rho, timesteps, hidden_neurons, seed, epochs, batch_size, training_pct,
-        threads, timeseries);
+        cfg.network_json_file, cfg.connectivity, cfg.learning_rate,
+        cfg.decay_rate, cfg.tau, cfg.rho, cfg.timesteps, hidden_neurons,
+        cfg.seed, cfg.epochs, cfg.batch_size, cfg.training_percent, cfg.threads,
+        cfg.timeseries);
 
     bool discrete         = n->get_data("proc_params")["discrete"];
     std::string leak_prop = n->get_data("proc_params")["leak_mode"];
@@ -154,8 +126,8 @@ int main(int argc, char* argv[]) {
     if (n->num_nodes() == 0) {
         std::tie(neuron_count, synapse_count) = generate_network(
             n, input_neurons, hidden_neurons, output_neurons, total_neurons,
-            connectivity, discrete, scale, scale_factor, min_weight, max_weight,
-            max_threshold);
+            cfg.connectivity, discrete, scale, scale_factor, min_weight,
+            max_weight, max_threshold);
         printf("Neurons: %zu, Synapses: %zu\n", neuron_count, synapse_count);
     } else {
         neuron_count  = n->num_nodes();
@@ -165,12 +137,10 @@ int main(int argc, char* argv[]) {
     }
     n->make_sorted_node_vector();
 
-    build_run_metadata(
-        n, argc, argv, cfg, input_neurons, output_neurons, total_neurons,
-        neuron_count, synapse_count, discrete, min_potential, min_weight,
-        max_weight, max_threshold, leak_prop, scale, scale_factor, connectivity,
-        learning_rate, decay_rate, tau, rho, timesteps, hidden_neurons, seed,
-        epochs, batch_size, training_pct, threads, timeseries);
+    build_run_metadata(n, argc, argv, cfg, input_neurons, output_neurons,
+                       total_neurons, neuron_count, synapse_count, discrete,
+                       min_potential, min_weight, max_weight, max_threshold,
+                       leak_prop, scale, scale_factor);
 
     NetworkConfiguration nc = {
         .n              = n,
@@ -181,8 +151,8 @@ int main(int argc, char* argv[]) {
         .total_neurons  = total_neurons,
         .max_incoming   = 0,
         .max_outgoing   = 0,
-        .timesteps      = timesteps,
-        .timeseries     = timeseries,
+        .timesteps      = cfg.timesteps,
+        .timeseries     = cfg.timeseries,
         .min_potential  = min_potential,
         .leak           = leak,
         .scale_factor   = scale_factor,
@@ -193,52 +163,66 @@ int main(int argc, char* argv[]) {
         .spike_value_factor = spike_value_factor,
     };
 
-    TrainingState* state = init_training(n, nc, train, threads, rho, tau);
+    TrainingState* state =
+        init_training(n, nc, train, cfg.threads, cfg.rho, cfg.tau);
 
     init_network_weights(n, total_neurons, discrete, scale_factor,
                          state->weights, state->delays, state->thresholds);
 
+    // Compute max_in/outgoing from network topology
     size_t max_incoming = 0;
-    for (size_t i = 0; i < state->weights.size(); i++) {
-        if (state->weights[i].size() > max_incoming) {
-            max_incoming = state->weights[i].size();
-        }
-    }
-    nc.max_incoming = max_incoming;
-
-    // Compute max_outgoing from network topology
     size_t max_outgoing = 0;
     for (size_t i = 0; i < total_neurons; i++) {
-        auto* node = n->get_node(i);
+        auto* node       = n->get_node(i);
         size_t out_count = node->outgoing.size();
         if (out_count > max_outgoing) {
             max_outgoing = out_count;
         }
+
+        size_t in_count = node->incoming.size();
+        if (in_count > max_incoming) {
+            max_incoming = in_count;
+        }
     }
     nc.max_outgoing = max_outgoing;
+    nc.max_incoming = max_incoming;
 
     // Create backend via factory
-    auto backend = create_backend(cfg, n, nc, train, test, state,
-                                  batch_size, learning_rate, decay_rate,
-                                  rho, tau);
+    auto backend =
+        create_backend(cfg, n, nc, train, test, state, cfg.batch_size,
+                       cfg.learning_rate, cfg.decay_rate, cfg.rho, cfg.tau);
 
     // Determine which accuracy metric to track for export
     bool has_test_data = test.observations > 0;
 
     // Training loop
-    for (size_t epoch = 0; epoch < epochs; ++epoch) {
+    // "Best" stats are updated when a new best network is found, not
+    // indivdually per stat
+    double best_train_acc  = 0.0;
+    double best_train_loss = DBL_MAX;
+    double best_test_acc   = 0.0;
+    double best_test_loss  = DBL_MAX;
+    for (size_t epoch = 0; epoch < cfg.epochs; ++epoch) {
         TrainingStats stats = backend->get_stats();
-        double prev_best_acc = has_test_data ? stats.best_test_acc : stats.best_train_acc;
 
         backend->do_one_epoch(epoch);
         stats = backend->get_stats();
-        print_epoch_log(epoch, epochs, stats);
 
         // Export only on new high accuracy
-        double cur_best_acc = has_test_data ? stats.best_test_acc : stats.best_train_acc;
+        double cur_best_acc  = has_test_data ? stats.test_acc : stats.train_acc;
+        double prev_best_acc = has_test_data ? best_test_acc : best_train_acc;
         if (cur_best_acc > prev_best_acc) {
-            export_network_json(n, cfg, stats);
+            best_train_acc  = stats.train_acc;
+            best_train_loss = stats.train_loss;
+            best_test_acc   = stats.test_acc;
+            best_test_loss  = stats.test_loss;
+
+            export_network(n, cfg, best_train_acc, best_train_loss,
+                           best_test_acc, best_test_loss);
         }
+
+        print_epoch_log(epoch, cfg.epochs, stats, best_train_acc, best_test_acc,
+                        has_test_data);
     }
 
     // Finalize: sync weights to network

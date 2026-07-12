@@ -2,6 +2,7 @@
 #include "framework.hpp"
 #include <cstdio>
 #include <cstdlib>
+#include <fstream>
 #include <nlohmann/json.hpp>
 
 using namespace std;
@@ -34,4 +35,31 @@ void load_network(neuro::Processor** pp, neuro::Network* net) {
                 __FILE__);
         exit(1);
     }
+}
+
+void export_network(neuro::Network* n, const CliConfig& cfg,
+                    double best_train_acc, double best_train_loss,
+                    double best_test_acc, double best_test_loss) {
+    if (cfg.network_json_out.empty()) {
+        return;
+    }
+
+    nlohmann::json meta     = n->get_data("other");
+    meta["best_train_loss"] = best_train_loss;
+    meta["best_test_loss"]  = best_test_loss;
+    meta["best_train_acc"]  = best_train_acc;
+    meta["best_test_acc"]   = best_test_acc;
+    meta["epoch"]           = cfg.epochs;
+    n->set_data("other", meta);
+
+    nlohmann::json j;
+    n->to_json(j);
+    std::ofstream fout(cfg.network_json_out);
+    if (!fout) {
+        fprintf(stderr, "Failed to open %s for writing\n",
+                cfg.network_json_out.c_str());
+        exit(1);
+    }
+    fout << j.dump(2) << std::endl;
+    fout.close();
 }

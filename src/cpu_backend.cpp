@@ -1,11 +1,11 @@
 #include "cpu_backend.h"
 #include "forward_backward.h"
-#include "optimizer.h"
 #include "network_utils.h"
+#include "optimizer.h"
+#include <algorithm>
+#include <cfloat>
 #include <cstdio>
 #include <cstdlib>
-#include <cfloat>
-#include <algorithm>
 
 using namespace std;
 
@@ -14,16 +14,16 @@ CpuBackend::CpuBackend(const CliConfig& cfg, neuro::Network* n,
                        const Dataset& test, TrainingState* state,
                        size_t batch_size, double learning_rate,
                        double decay_rate)
-    : m_cfg(cfg), m_nc(nc), m_train(train), m_test(test),
-      m_state(state), m_batch_size(batch_size), m_learning_rate(learning_rate),
+    : m_cfg(cfg), m_nc(nc), m_train(train), m_test(test), m_state(state),
+      m_batch_size(batch_size), m_learning_rate(learning_rate),
       m_decay_rate(decay_rate) {
     size_t threads = cfg.threads;
 
     // Patch nc and dataset refs into ThreadArgs
     for (size_t i = 0; i < threads; i++) {
-        state->tas[i].nc = &nc;
+        state->tas[i].nc    = &nc;
         state->tas[i].train = &train;
-        state->tas[i].test = &test;
+        state->tas[i].test  = &test;
         pthread_create(state->tids + i, NULL, worker, (void*)(state->tas + i));
     }
 }
@@ -40,25 +40,25 @@ CpuBackend::~CpuBackend() {
 }
 
 void CpuBackend::do_one_epoch(size_t epoch) {
-    (void)epoch;  // used by weight_updates() for LR scheduling
-    size_t threads = m_cfg.threads;
+    (void)epoch; // used by weight_updates() for LR scheduling
+    size_t threads       = m_cfg.threads;
     size_t total_neurons = m_nc.total_neurons;
 
     double epoch_loss = 0.0;
-    size_t correct = 0;
+    size_t correct    = 0;
 
     // Reset work index before each epoch
     pthread_mutex_lock(&m_state->mut);
     m_state->work_idx = 0;
-    m_state->train_p = true;
+    m_state->train_p  = true;
 
     // Shuffle the batch order for randomness
     for (int i = 0; i < m_train.observations; i++) {
         m_state->batch_order[i] = i;
     }
     for (int i = 0; i < m_train.observations; i++) {
-        size_t j = rand() % m_train.observations;
-        size_t tmp = m_state->batch_order[i];
+        size_t j                = rand() % m_train.observations;
+        size_t tmp              = m_state->batch_order[i];
         m_state->batch_order[i] = m_state->batch_order[j];
         m_state->batch_order[j] = tmp;
     }
@@ -67,13 +67,13 @@ void CpuBackend::do_one_epoch(size_t epoch) {
     // Batch processing loop
     for (int batch_start = 0; batch_start < m_train.observations;
          batch_start += m_batch_size) {
-        size_t current_batch_size = min(
-            m_batch_size, m_train.observations - (size_t)batch_start);
+        size_t current_batch_size =
+            min(m_batch_size, m_train.observations - (size_t)batch_start);
 
         pthread_mutex_lock(&m_state->mut);
-        m_state->work_idx = batch_start;
+        m_state->work_idx   = batch_start;
         m_state->done_count = 0;
-        m_state->max_idx = batch_start + current_batch_size;
+        m_state->max_idx    = batch_start + current_batch_size;
         pthread_cond_broadcast(&m_state->have_work);
         pthread_mutex_unlock(&m_state->mut);
 
@@ -86,8 +86,8 @@ void CpuBackend::do_one_epoch(size_t epoch) {
         for (size_t i = 0; i < threads; i++) {
             epoch_loss += m_state->tas[i].loss;
             correct += m_state->tas[i].correct;
-            m_state->tas[i].loss = 0;
-            m_state->tas[i].correct = 0;
+            m_state->tas[i].loss      = 0;
+            m_state->tas[i].correct   = 0;
             m_state->tas[i].processed = 0;
 
             for (size_t row = 0; row < total_neurons; row++) {
@@ -103,30 +103,23 @@ void CpuBackend::do_one_epoch(size_t epoch) {
 
         weight_updates(&m_nc, &m_train, current_batch_size, m_batch_size,
                        batch_start, epoch, m_state->b1_t, m_state->b2_t,
-                       m_state->m_weights, m_state->v_weights,
-                       m_learning_rate, m_decay_rate,
-                       m_state->weights, m_state->delta_W);
+                       m_state->m_weights, m_state->v_weights, m_learning_rate,
+                       m_decay_rate, m_state->weights, m_state->delta_W);
     }
 
     // Training metrics
     double avg_train_loss = epoch_loss / (double)m_train.observations;
-    double avg_train_acc = correct / (double)m_train.observations;
-    if (avg_train_loss < m_stats.best_train_loss) {
-        m_stats.best_train_loss = avg_train_loss;
-    }
-    if (avg_train_acc > m_stats.best_train_acc) {
-        m_stats.best_train_acc = avg_train_acc;
-    }
+    double avg_train_acc  = correct / (double)m_train.observations;
 
     // Test
     double test_correct = 0.0;
-    double test_loss = 0.0;
+    double test_loss    = 0.0;
 
     pthread_mutex_lock(&m_state->mut);
-    m_state->work_idx = 0;
+    m_state->work_idx   = 0;
     m_state->done_count = 0;
-    m_state->max_idx = m_test.observations;
-    m_state->train_p = false;
+    m_state->max_idx    = m_test.observations;
+    m_state->train_p    = false;
     pthread_cond_broadcast(&m_state->have_work);
     pthread_mutex_unlock(&m_state->mut);
 
@@ -140,8 +133,8 @@ void CpuBackend::do_one_epoch(size_t epoch) {
     for (size_t i = 0; i < threads; i++) {
         test_loss += m_state->tas[i].loss;
         test_correct += m_state->tas[i].correct;
-        m_state->tas[i].loss = 0;
-        m_state->tas[i].correct = 0;
+        m_state->tas[i].loss      = 0;
+        m_state->tas[i].correct   = 0;
         m_state->tas[i].processed = 0;
     }
     m_state->max_idx = -1;
@@ -150,19 +143,12 @@ void CpuBackend::do_one_epoch(size_t epoch) {
     if (m_test.observations > 0) {
         test_correct /= m_test.observations;
         test_loss /= m_test.observations;
-
-        if (test_correct > m_stats.best_test_acc) {
-            m_stats.best_test_acc = test_correct;
-        }
-        if (test_loss < m_stats.best_test_loss) {
-            m_stats.best_test_loss = test_loss;
-        }
     }
 
-    m_stats.train_acc = avg_train_acc;
+    m_stats.train_acc  = avg_train_acc;
     m_stats.train_loss = avg_train_loss;
-    m_stats.test_acc = (m_test.observations > 0) ? test_correct : 0.0;
-    m_stats.test_loss = (m_test.observations > 0) ? test_loss : 0.0;
+    m_stats.test_acc   = (m_test.observations > 0) ? test_correct : 0.0;
+    m_stats.test_loss  = (m_test.observations > 0) ? test_loss : 0.0;
 }
 
 TrainingStats CpuBackend::get_stats() const { return m_stats; }

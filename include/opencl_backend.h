@@ -8,22 +8,20 @@
 #include <vector>
 
 class OpenclBackend : public TrainingBackend {
-public:
+  public:
     OpenclBackend(const CliConfig& cfg, neuro::Network* n,
                   NetworkConfiguration& nc, const Dataset& train,
                   const Dataset& test, TrainingState* state,
-                  size_t max_incoming, size_t max_outgoing,
-                  size_t batch_size, double learning_rate,
-                  double decay_rate, double rho, double tau);
+                  size_t max_incoming, size_t max_outgoing, size_t batch_size,
+                  double learning_rate, double decay_rate, double rho,
+                  double tau);
     ~OpenclBackend() override;
 
     void do_one_epoch(size_t epoch) override;
     TrainingStats get_stats() const override;
     void update_weights(neuro::Network* network) override;
 
-
-
-private:
+  private:
     const CliConfig& m_cfg;
     neuro::Network* m_n;
     NetworkConfiguration& m_nc;
@@ -37,7 +35,6 @@ private:
     double m_decay_rate;
     double m_rho;
     double m_tau;
-
 
     // GPU buffers
     std::unique_ptr<Memory<short>> m_x;
@@ -81,7 +78,7 @@ private:
     double m_b1_t;
     double m_b2_t;
 
-    TrainingStats m_stats = {0.0, 0.0, 0.0, 0.0, 0.0, 1e18, 0.0, 1e18};
+    TrainingStats m_stats = {0.0, 0.0, 0.0, 0.0};
 
     // Timing
     std::chrono::high_resolution_clock::time_point m_t_start;

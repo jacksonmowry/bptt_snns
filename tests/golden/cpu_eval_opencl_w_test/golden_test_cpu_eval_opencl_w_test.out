@@ -1,0 +1,21 @@
+  [CPU eval @ epoch    1] Test Loss:     1.0429, Test Acc:        0.6
+E   1/10  TrL:  1.10139 TrA:   0.150  TeL:   1.0429 TeA:   0.600  BestTeA:   0.600
+  [CPU eval @ epoch    2] Test Loss:   0.972549, Test Acc:        0.7
+E   2/10  TrL:  1.01967 TrA:   0.825  TeL: 0.972549 TeA:   0.700  BestTeA:   0.700
+  [CPU eval @ epoch    3] Test Loss:   0.927752, Test Acc:   0.733333
+E   3/10  TrL: 0.962706 TrA:   0.892  TeL: 0.927752 TeA:   0.733  BestTeA:   0.733
+  [CPU eval @ epoch    4] Test Loss:   0.892536, Test Acc:   0.733333
+E   4/10  TrL: 0.925514 TrA:   0.933  TeL: 0.892536 TeA:   0.733  BestTeA:   0.733
+  [CPU eval @ epoch    5] Test Loss:   0.870328, Test Acc:        0.9
+E   5/10  TrL: 0.898394 TrA:   0.892  TeL: 0.870328 TeA:   0.900  BestTeA:   0.900
+  [CPU eval @ epoch    6] Test Loss:    0.86812, Test Acc:        0.9
+E   6/10  TrL: 0.882679 TrA:   0.908  TeL:  0.86812 TeA:   0.900  BestTeA:   0.900
+  [CPU eval @ epoch    7] Test Loss:   0.910507, Test Acc:        0.8
+E   7/10  TrL: 0.874565 TrA:   0.942  TeL: 0.910507 TeA:   0.800  BestTeA:   0.900
+  [CPU eval @ epoch    8] Test Loss:   0.857643, Test Acc:   0.766667
+E   8/10  TrL: 0.857747 TrA:   0.933  TeL: 0.857643 TeA:   0.767  BestTeA:   0.900
+  [CPU eval @ epoch    9] Test Loss:   0.869579, Test Acc:   0.666667
+E   9/10  TrL: 0.937291 TrA:   0.650  TeL: 0.869579 TeA:   0.667  BestTeA:   0.900
+  [CPU eval @ epoch   10] Test Loss:   0.845254, Test Acc:   0.733333
+E  10/10  TrL: 0.869605 TrA:   0.800  TeL: 0.845254 TeA:   0.733  BestTeA:   0.900
+Final CPU Test Loss:   0.845254, Final CPU Test Acc:   0.733333
