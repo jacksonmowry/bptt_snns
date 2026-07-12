@@ -1,3 +1,0 @@
-E   1/2  TrL:  1.06411 TrA:   0.475  TeL:  0.91226 TeA:   0.733  BestTeA:   0.733
-E   2/2  TrL: 0.864908 TrA:   0.808  TeL: 0.821646 TeA:   0.667  BestTeA:   0.733
-Final CPU Test Loss:   0.821646, Final CPU Test Acc:   0.666667

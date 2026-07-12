@@ -29,7 +29,7 @@ fi
 # kernel timing report, etc.
 filter_stdout() {
     local input="$1" output="$2"
-    grep -E '^(Epoch:|Final |  \[CPU eval)' "$input" > "$output" || true
+    grep -E '^(E[ 0-9]|Final |  \[CPU eval)' "$input" > "$output" || true
 }
 
 # Parse a .cfg file into space-separated CLI args
@@ -105,6 +105,7 @@ run_and_save() {
     echo -n "Generating golden for ${test_name}... "
 
     if ! "$BIN" ${cli_args} --network_json_out "$tmp_net" > "$tmp_stdout" 2>&1; then
+        "$BIN" ${cli_args} --network_json_out "$tmp_net"
         echo "FAIL (command failed)"
         rm -f "$tmp_stdout" "$tmp_net"
         return 1
