@@ -144,7 +144,10 @@ int parse_cli(int argc, char* argv[], CliConfig* cfg) {
                                  cfg->test_label_file.c_str());
             }
         } else if (arg == "--timeseries" || arg == "-b") {
-            cfg->timeseries = true;
+            if (++i >= argc) {
+                return cli_error("--timeseries requires a value (true/false)");
+            }
+            cfg->timeseries = (std::string(argv[i]) == "true");
         } else if (arg == "--connectivity" || arg == "-c" || arg == "-S") {
             double v;
             int rc = parse_double_arg(i, argc, argv, &v, "connectivity");

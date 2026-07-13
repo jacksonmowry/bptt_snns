@@ -460,10 +460,10 @@ void load_dataset_2d(const char* data_path, const char* labels_path,
         return;
     }
 
-    int N = non_empty / num_obs;
+    int input_features = non_empty / num_obs;
     rewind(f_data);
 
-    int D = 0;
+    int timesteps = 0;
     while (fgets(line, sizeof(line), f_data) != NULL) {
         int is_blank = 1;
         for (int k = 0; line[k]; k++) {
@@ -475,25 +475,25 @@ void load_dataset_2d(const char* data_path, const char* labels_path,
         if (!is_blank) {
             for (int i = 0; line[i]; i++) {
                 if (line[i] == ',') {
-                    D++;
+                    timesteps++;
                 }
             }
-            D++;
+            timesteps++;
             break;
         }
     }
 
     ds.shape    = (int*)malloc(3 * sizeof(int));
     ds.shape[0] = num_obs;
-    ds.shape[1] = N;
-    ds.shape[2] = D;
+    ds.shape[1] = input_features;
+    ds.shape[2] = timesteps;
 
-    int block_size = N * D;
+    int block_size = input_features * timesteps;
     int total_data = num_obs * block_size;
     ds.data        = (double*)malloc(total_data * sizeof(double));
     ds.labels      = (double*)malloc(num_obs * sizeof(double));
-    ds.min_vals    = (double*)malloc(N * sizeof(double));
-    ds.max_vals    = (double*)malloc(N * sizeof(double));
+    ds.min_vals    = (double*)malloc(input_features * sizeof(double));
+    ds.max_vals    = (double*)malloc(input_features * sizeof(double));
 
     if (ds.data == NULL || ds.labels == NULL || ds.min_vals == NULL ||
         ds.max_vals == NULL) {
@@ -528,8 +528,9 @@ void load_dataset_2d(const char* data_path, const char* labels_path,
             continue;
         }
         char* token = strtok(line, ",");
-        for (int c = 0; c < D && token != NULL; c++) {
-            ds.data[(obs_idx * block_size) + (line_cnt * D) + c] = atof(token);
+        for (int c = 0; c < timesteps && token != NULL; c++) {
+            ds.data[(obs_idx * block_size) + (line_cnt * timesteps) + c] =
+                atof(token);
             token = strtok(NULL, ",");
         }
         line_cnt++;
@@ -547,15 +548,15 @@ void load_dataset_2d(const char* data_path, const char* labels_path,
                         &ds.label_strings_count);
 
     // Min/max
-    for (int feature = 0; feature < N; feature++) {
+    for (int feature = 0; feature < input_features; feature++) {
         ds.min_vals[feature] = DBL_MAX;
         ds.max_vals[feature] = -DBL_MAX;
     }
     for (int obs = 0; obs < num_obs; obs++) {
-        for (int feature = 0; feature < N; feature++) {
-            for (int column = 0; column < D; column++) {
-                double val =
-                    ds.data[(obs * block_size) + (feature * D) + column];
+        for (int feature = 0; feature < input_features; feature++) {
+            for (int column = 0; column < timesteps; column++) {
+                double val = ds.data[(obs * block_size) +
+                                     (feature * timesteps) + column];
                 if (val < ds.min_vals[feature]) {
                     ds.min_vals[feature] = val;
                 }
@@ -587,8 +588,8 @@ void load_dataset_2d(const char* data_path, const char* labels_path,
 
     train->data     = (double*)malloc(train_len * block_size * sizeof(double));
     train->labels   = (double*)malloc(train_len * sizeof(double));
-    train->min_vals = (double*)malloc(N * sizeof(double));
-    train->max_vals = (double*)malloc(N * sizeof(double));
+    train->min_vals = (double*)malloc(input_features * sizeof(double));
+    train->max_vals = (double*)malloc(input_features * sizeof(double));
     if (!train->data || !train->labels || !train->min_vals ||
         !train->max_vals) {
         free(train->data);
@@ -612,18 +613,18 @@ void load_dataset_2d(const char* data_path, const char* labels_path,
     train->dims                = 3;
     train->shape               = (int*)malloc(3 * sizeof(int));
     train->shape[0]            = train_len;
-    train->shape[1]            = N;
-    train->shape[2]            = D;
+    train->shape[1]            = input_features;
+    train->shape[2]            = timesteps;
     train->timeseries          = true;
     memcpy(train->data, ds.data, train_len * block_size * sizeof(double));
     memcpy(train->labels, ds.labels, train_len * sizeof(double));
-    memcpy(train->min_vals, ds.min_vals, N * sizeof(double));
-    memcpy(train->max_vals, ds.max_vals, N * sizeof(double));
+    memcpy(train->min_vals, ds.min_vals, input_features * sizeof(double));
+    memcpy(train->max_vals, ds.max_vals, input_features * sizeof(double));
 
     test->data     = (double*)malloc(test_len * block_size * sizeof(double));
     test->labels   = (double*)malloc(test_len * sizeof(double));
-    test->min_vals = (double*)malloc(N * sizeof(double));
-    test->max_vals = (double*)malloc(N * sizeof(double));
+    test->min_vals = (double*)malloc(input_features * sizeof(double));
+    test->max_vals = (double*)malloc(input_features * sizeof(double));
     if (!test->data || !test->labels || !test->min_vals || !test->max_vals) {
         free(test->data);
         free(test->labels);
@@ -650,14 +651,14 @@ void load_dataset_2d(const char* data_path, const char* labels_path,
     test->dims                = 3;
     test->shape               = (int*)malloc(3 * sizeof(int));
     test->shape[0]            = test_len;
-    test->shape[1]            = N;
-    test->shape[2]            = D;
+    test->shape[1]            = input_features;
+    test->shape[2]            = timesteps;
     test->timeseries          = true;
     memcpy(test->data, ds.data + train_len * block_size,
            test_len * block_size * sizeof(double));
     memcpy(test->labels, ds.labels + train_len, test_len * sizeof(double));
-    memcpy(test->min_vals, ds.min_vals, N * sizeof(double));
-    memcpy(test->max_vals, ds.max_vals, N * sizeof(double));
+    memcpy(test->min_vals, ds.min_vals, input_features * sizeof(double));
+    memcpy(test->max_vals, ds.max_vals, input_features * sizeof(double));
 
     free(ds.data);
     free(ds.labels);

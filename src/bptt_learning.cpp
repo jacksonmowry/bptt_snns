@@ -75,7 +75,6 @@ int main(int argc, char* argv[]) {
     Dataset train;
     Dataset test;
     if (cfg.timeseries) {
-        assert(false);
         load_dataset_2d(cfg.data_file.c_str(), cfg.label_file.c_str(),
                         cfg.training_percent, &train, &test);
     } else if (have_simple) {
@@ -96,8 +95,7 @@ int main(int argc, char* argv[]) {
     if (test.shape[0] > 0) {
         for (int i = 0; i < (int)train_labels; i++) {
             if (strcmp(train.label_strings[i], test.label_strings[i])) {
-                fprintf(stderr,
-                        "Mismatch between train & test labels:\n");
+                fprintf(stderr, "Mismatch between train & test labels:\n");
 
                 fprintf(stderr, "Train: [");
                 for (size_t i = 0; i < train_labels; i++) {
@@ -124,7 +122,7 @@ int main(int argc, char* argv[]) {
     }
 
     size_t input_neurons =
-        (cfg.timeseries) ? train.shape[2] * 2 : train.shape[1] * 2;
+        (cfg.timeseries) ? train.shape[1] * 2 : train.shape[1] * 2;
     size_t output_neurons = train_labels;
     size_t hidden_neurons = cfg.hidden_neurons;
     size_t total_neurons  = input_neurons + hidden_neurons + output_neurons;
@@ -243,7 +241,8 @@ int main(int argc, char* argv[]) {
 
             export_network(n, cfg, best_train_acc, best_train_loss,
                            best_test_acc, best_test_loss,
-                           (const char**)train.label_strings, (int)train_labels);
+                           (const char**)train.label_strings,
+                           (int)train_labels);
         }
 
         print_epoch_log(epoch, cfg.epochs, stats, best_train_acc, best_test_acc,
