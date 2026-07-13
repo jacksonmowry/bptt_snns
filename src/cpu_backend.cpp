@@ -1,11 +1,8 @@
 #include "cpu_backend.h"
-#include "forward_backward.h"
 #include "network_setup.h"
-#include "network_utils.h"
 #include "optimizer.h"
 #include "training.h"
 #include <algorithm>
-#include <cfloat>
 #include <cstdio>
 #include <cstdlib>
 
@@ -21,12 +18,14 @@ CpuBackend::CpuBackend(const CliConfig& cfg, NetworkConfiguration& nc,
                          state->weights, state->delays, state->thresholds);
 
     // Patch nc and dataset refs into ThreadArgs
+    pthread_mutex_lock(&state->mut);
     for (size_t i = 0; i < threads; i++) {
         state->tas[i].nc    = &nc;
         state->tas[i].train = &train;
         state->tas[i].test  = &test;
         pthread_create(state->tids + i, NULL, worker, (void*)(state->tas + i));
     }
+    pthread_mutex_unlock(&state->mut);
 }
 
 CpuBackend::~CpuBackend() {
@@ -39,6 +38,9 @@ CpuBackend::~CpuBackend() {
         pthread_join(state->tids[i], NULL);
     }
 
+    pthread_mutex_destroy(&state->mut);
+    pthread_cond_destroy(&state->have_work);
+    pthread_cond_destroy(&state->done_work);
     free(state->batch_order);
     free(state->tas);
     free(state->tids);
@@ -84,10 +86,9 @@ void CpuBackend::do_one_epoch(size_t epoch) {
         pthread_mutex_unlock(&state->mut);
 
         pthread_mutex_lock(&state->mut);
-        while (state->done_count < (int)current_batch_size) {
+        while ((size_t)state->done_count < current_batch_size) {
             pthread_cond_wait(&state->done_work, &state->mut);
         }
-        pthread_mutex_unlock(&state->mut);
 
         for (size_t i = 0; i < threads; i++) {
             epoch_loss += state->tas[i].loss;
@@ -106,6 +107,7 @@ void CpuBackend::do_one_epoch(size_t epoch) {
                 }
             }
         }
+        pthread_mutex_unlock(&state->mut);
 
         weight_updates(&nc, &train, current_batch_size, batch_size, batch_start,
                        epoch, state->b1_t, state->b2_t, state->m_weights,

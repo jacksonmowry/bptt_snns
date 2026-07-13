@@ -70,6 +70,7 @@ static char** read_label_strings(FILE* f, int rows) {
     char** labels = (char**)malloc(rows * sizeof(char*));
     for (int i = 0; i < rows; i++) {
         if (fgets(line, sizeof(line), f) != NULL) {
+            assert(strlen(line) < sizeof(line) - 2);
             // strip newline
             char* nl = strchr(line, '\n');
             if (nl) {
@@ -126,7 +127,7 @@ void load_dataset(const char* data_path, const char* labels_path,
     }
     ds.shape[1] = cols;
 
-    ds.data     = (double*)malloc(rows * cols * sizeof(double));
+    ds.data     = (double*)malloc((size_t)rows * (size_t)cols * sizeof(double));
     ds.labels   = (double*)malloc(rows * sizeof(double));
     ds.min_vals = (double*)malloc(cols * sizeof(double));
     ds.max_vals = (double*)malloc(cols * sizeof(double));
@@ -154,8 +155,8 @@ void load_dataset(const char* data_path, const char* labels_path,
             char* token = strtok(line, ",");
             for (int j = 0; j < cols; j++) {
                 if (token != NULL) {
-                    ds.data[i * cols + j] = atof(token);
-                    token                 = strtok(NULL, ",");
+                    ds.data[(size_t)i * (size_t)cols + (size_t)j] = atof(token);
+                    token = strtok(NULL, ",");
                 }
             }
         }
@@ -174,7 +175,7 @@ void load_dataset(const char* data_path, const char* labels_path,
     }
     for (int i = 1; i < rows; i++) {
         for (int j = 0; j < cols; j++) {
-            double val = ds.data[i * cols + j];
+            double val = ds.data[(size_t)i * (size_t)cols + (size_t)j];
             if (val < ds.min_vals[j]) {
                 ds.min_vals[j] = val;
             }
@@ -204,7 +205,8 @@ void load_dataset(const char* data_path, const char* labels_path,
     int test_len  = rows - train_len;
 
     // Train DS
-    train->data     = (double*)malloc(train_len * cols * sizeof(*train->data));
+    train->data     = (double*)malloc((size_t)train_len * (size_t)cols *
+                                      sizeof(*train->data));
     train->labels   = (double*)malloc(train_len * sizeof(*train->labels));
     train->min_vals = (double*)malloc(cols * sizeof(*train->min_vals));
     train->max_vals = (double*)malloc(cols * sizeof(*train->max_vals));
@@ -256,7 +258,8 @@ void load_dataset(const char* data_path, const char* labels_path,
     }
 
     // Test DS
-    test->data     = (double*)malloc(test_len * cols * sizeof(*test->data));
+    test->data =
+        (double*)malloc((size_t)test_len * (size_t)cols * sizeof(*test->data));
     test->labels   = (double*)malloc(test_len * sizeof(*test->labels));
     test->min_vals = (double*)malloc(cols * sizeof(*test->min_vals));
     test->max_vals = (double*)malloc(cols * sizeof(*test->max_vals));
@@ -353,8 +356,8 @@ void load_dataset_single(const char* data_path, const char* labels_path,
     }
     out->shape[1] = cols;
 
-    out->data     = (double*)malloc(rows * cols * sizeof(double));
-    out->labels   = (double*)malloc(rows * sizeof(double));
+    out->data   = (double*)malloc((size_t)rows * (size_t)cols * sizeof(double));
+    out->labels = (double*)malloc(rows * sizeof(double));
     out->min_vals = (double*)malloc(cols * sizeof(double));
     out->max_vals = (double*)malloc(cols * sizeof(double));
     if (out->data == NULL || out->labels == NULL || out->min_vals == NULL ||
@@ -380,8 +383,9 @@ void load_dataset_single(const char* data_path, const char* labels_path,
             char* token = strtok(line, ",");
             for (int j = 0; j < cols; j++) {
                 if (token != NULL) {
-                    out->data[i * cols + j] = atof(token);
-                    token                   = strtok(NULL, ",");
+                    out->data[(size_t)i * (size_t)cols + (size_t)j] =
+                        atof(token);
+                    token = strtok(NULL, ",");
                 }
             }
         }
@@ -430,7 +434,7 @@ void load_dataset_2d(const char* data_path, const char* labels_path,
         return;
     }
 
-    char line[4096];
+    char line[4096 * 16];
     int num_obs   = 0;
     int non_empty = 0;
     rewind(f_data);

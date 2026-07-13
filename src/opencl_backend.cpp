@@ -1,16 +1,12 @@
 #include "opencl_backend.h"
 #include "forward_backward.h"
-#include "network_setup.h"
 #include "network_utils.h"
 #include <algorithm>
-#include <cfloat>
 #include <chrono>
 #include <cstddef>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
-#include <iostream>
-#include <string>
 #include <vector>
 
 using namespace std;
@@ -100,6 +96,9 @@ static void encode(Memory<double>& data, const Dataset& d, bool timeseries) {
                  input_feature++) {
                 double range =
                     d.max_vals[input_feature] - d.min_vals[input_feature];
+                if (range == 0.0) {
+                    continue;
+                }
 
                 for (int dataset_timestep = 0; dataset_timestep < d.shape[2];
                      dataset_timestep++) {
@@ -140,8 +139,13 @@ static void encode(Memory<double>& data, const Dataset& d, bool timeseries) {
 
         for (int row = 0; row < d.shape[0]; row++) {
             for (int col = 0; col < d.shape[1]; col++) {
-                double x = (d.data[row * d.shape[1] + col] - d.min_vals[col]) /
-                           (d.max_vals[col] - d.min_vals[col]);
+                double range = d.max_vals[col] - d.min_vals[col];
+                if (range == 0.0) {
+                    continue;
+                }
+
+                double x =
+                    (d.data[row * d.shape[1] + col] - d.min_vals[col]) / range;
                 double inv_x = 1.0 - x;
 
                 if (x > 0.0) {

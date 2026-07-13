@@ -209,8 +209,8 @@ string opencl_c_container() {
 
             // Sum spike_grad_history for this neuron at this timestep.
             // float spike_grad_sum = spike_grad_history[idx];
-            float spike_grad_sum = 0.0f;
-            uint num_outgoing    = outgoing[neuron_id];
+            float spike_grad_sum    = 0.0f;
+            const uint num_outgoing = outgoing[neuron_id];
             for (int i = 0; i < num_outgoing; i++) {
                 spike_grad_sum +=
                     gradient_accumulators[(timestep * num_neurons *
@@ -327,15 +327,15 @@ string opencl_c_container() {
             const float vW_hat = sqrt(new_v / one_minus_b2_t + 1.0e-8f);
 
             // Effective learning rate (warmup on epoch 0)
-            const float lr =
-                (epoch == 0)
-                    ? ((batch_start + batch_size) / (float)num_observations) *
-                          learning_rate
-                    : learning_rate;
+            const float lr = (epoch == 0)
+                                 ? ((batch_start + current_batch_size) /
+                                    (float)num_observations) *
+                                       learning_rate
+                                 : learning_rate;
 
             float weight = weights[global_id] * scale_factor;
             weight -= lr * mW_hat / vW_hat;
-            weight *= (1.0f - lr * decay_rate); // fused weight decay
+            weight -= lr * decay_rate * weight;
             weight = clamp(weight, -1.0f, 1.0f);
             weight = round(weight / scale_factor);
 

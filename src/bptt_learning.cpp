@@ -268,6 +268,7 @@ int main(int argc, char* argv[]) {
         train.label_strings[i] = NULL;
     }
     free(train.label_strings);
+    train.label_strings = NULL;
 
     if (free_train) {
         for (int i = 0; i < test.label_strings_count; i++) {

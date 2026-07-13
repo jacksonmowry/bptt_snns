@@ -49,7 +49,7 @@ double alpha(bool leak) { return (double)!leak; }
 double spike_surrogate(double v_pre_t, double v_thresh, double scale_rho,
                        double tau_rho_scaled) {
     return (scale_rho / (2.0 * tau_rho_scaled)) *
-           expf(-fabs(v_pre_t - v_thresh) / tau_rho_scaled);
+           exp(-fabs(v_pre_t - v_thresh) / tau_rho_scaled);
 }
 
 double quantize(double weight, int steps, int min, int max) {

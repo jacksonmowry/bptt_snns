@@ -101,7 +101,8 @@ void backward(TrainingBundle* tb, const NetworkConfiguration* nc) {
 
         tb->dV_post_ds_t_ = -tb->v_pre_t_;
         if (nc->min_potential > 0) {
-            (tb->dV_post_ds_t_.array() + nc->min_potential).matrix();
+            tb->dV_post_ds_t_ =
+                (tb->dV_post_ds_t_.array() + nc->min_potential).matrix();
         }
 
         tb->ds_t_dV_pre_ =
