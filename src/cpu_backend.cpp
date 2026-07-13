@@ -59,11 +59,11 @@ void CpuBackend::do_one_epoch(size_t epoch) {
     state->train_p  = true;
 
     // Shuffle the batch order for randomness
-    for (int i = 0; i < train.observations; i++) {
+    for (int i = 0; i < train.shape[0]; i++) {
         state->batch_order[i] = i;
     }
-    for (int i = 0; i < train.observations; i++) {
-        size_t j              = rand() % train.observations;
+    for (int i = 0; i < train.shape[0]; i++) {
+        size_t j              = rand() % train.shape[0];
         size_t tmp            = state->batch_order[i];
         state->batch_order[i] = state->batch_order[j];
         state->batch_order[j] = tmp;
@@ -71,10 +71,10 @@ void CpuBackend::do_one_epoch(size_t epoch) {
     pthread_mutex_unlock(&state->mut);
 
     // Batch processing loop
-    for (int batch_start = 0; batch_start < train.observations;
+    for (int batch_start = 0; batch_start < train.shape[0];
          batch_start += batch_size) {
         size_t current_batch_size =
-            min(batch_size, train.observations - (size_t)batch_start);
+            min(batch_size, train.shape[0] - (size_t)batch_start);
 
         pthread_mutex_lock(&state->mut);
         state->work_idx   = batch_start;
@@ -114,8 +114,8 @@ void CpuBackend::do_one_epoch(size_t epoch) {
     }
 
     // Training metrics
-    double avg_train_loss = epoch_loss / (double)train.observations;
-    double avg_train_acc  = correct / (double)train.observations;
+    double avg_train_loss = epoch_loss / (double)train.shape[0];
+    double avg_train_acc  = correct / (double)train.shape[0];
 
     // Test
     double test_correct = 0.0;
@@ -124,13 +124,13 @@ void CpuBackend::do_one_epoch(size_t epoch) {
     pthread_mutex_lock(&state->mut);
     state->work_idx   = 0;
     state->done_count = 0;
-    state->max_idx    = test.observations;
+    state->max_idx    = test.shape[0];
     state->train_p    = false;
     pthread_cond_broadcast(&state->have_work);
     pthread_mutex_unlock(&state->mut);
 
     pthread_mutex_lock(&state->mut);
-    while (state->done_count < test.observations) {
+    while (state->done_count < test.shape[0]) {
         pthread_cond_wait(&state->done_work, &state->mut);
     }
     pthread_mutex_unlock(&state->mut);
@@ -146,15 +146,15 @@ void CpuBackend::do_one_epoch(size_t epoch) {
     state->max_idx = -1;
     pthread_mutex_unlock(&state->mut);
 
-    if (test.observations > 0) {
-        test_correct /= test.observations;
-        test_loss /= test.observations;
+    if (test.shape[0] > 0) {
+        test_correct /= test.shape[0];
+        test_loss /= test.shape[0];
     }
 
     stats.train_acc  = avg_train_acc;
     stats.train_loss = avg_train_loss;
-    stats.test_acc   = (test.observations > 0) ? test_correct : 0.0;
-    stats.test_loss  = (test.observations > 0) ? test_loss : 0.0;
+    stats.test_acc   = (test.shape[0] > 0) ? test_correct : 0.0;
+    stats.test_loss  = (test.shape[0] > 0) ? test_loss : 0.0;
 }
 
 TrainingStats CpuBackend::get_stats() const { return stats; }

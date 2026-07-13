@@ -1,13 +1,6 @@
 #include "training.h"
-#include "cli.h"
-#include "forward_backward.h"
-#include "network_utils.h"
-#include "optimizer.h"
-#include <algorithm>
-#include <cfloat>
 #include <cstdio>
 #include <cstdlib>
-#include <fstream>
 #include <nlohmann/json.hpp>
 
 using namespace std;
@@ -34,7 +27,7 @@ TrainingState* init_training(const NetworkConfiguration& nc,
     // Threading
     state->tas         = (ThreadArgs*)calloc(threads, sizeof(*state->tas));
     state->tids        = (pthread_t*)calloc(threads, sizeof(*state->tids));
-    state->batch_order = (size_t*)calloc(train.observations, sizeof(size_t));
+    state->batch_order = (size_t*)calloc(train.shape[0], sizeof(size_t));
 
     for (size_t i = 0; i < threads; i++) {
         state->tas[i] = ThreadArgs(

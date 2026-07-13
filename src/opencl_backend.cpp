@@ -90,17 +90,17 @@ static void timed_run(Kernel& kernel, const char* name) {
 }
 
 static void encode(Memory<double>& data, const Dataset& d) {
-    for (int row = 0; row < d.observations; row++) {
-        for (int col = 0; col < d.cols; col++) {
-            double x     = (d.data[row * d.cols + col] - d.min_vals[col]) /
+    for (int row = 0; row < d.shape[0]; row++) {
+        for (int col = 0; col < d.shape[1]; col++) {
+            double x     = (d.data[row * d.shape[1] + col] - d.min_vals[col]) /
                            (d.max_vals[col] - d.min_vals[col]);
             double inv_x = 1.0 - x;
 
             if (x > 0.0) {
-                data[(row * d.cols * 2) + (col * 2)] = double(1.0 / x);
+                data[(row * d.shape[1] * 2) + (col * 2)] = double(1.0 / x);
             }
             if (inv_x > 0.0) {
-                data[(row * d.cols * 2) + (col * 2 + 1)] = double(1.0 / inv_x);
+                data[(row * d.shape[1] * 2) + (col * 2 + 1)] = double(1.0 / inv_x);
             }
         }
     }
@@ -121,7 +121,7 @@ static std::pair<double, double> cpu_eval_test(neuro::Network* n,
                                                const NetworkConfiguration& nc,
                                                const Dataset& d, double rho,
                                                double tau) {
-    if (d.observations == 0) {
+    if (d.shape[0] == 0) {
         return {0.0, 0.0};
     }
 
@@ -133,15 +133,15 @@ static std::pair<double, double> cpu_eval_test(neuro::Network* n,
     double total_loss    = 0.0;
     size_t total_correct = 0;
 
-    for (int obs = 0; obs < d.observations; obs++) {
+    for (int obs = 0; obs < d.shape[0]; obs++) {
         EvaluationResults er = forward(&tb, p, &d, (size_t)obs, &nc);
         total_loss += er.loss;
         total_correct += (size_t)er.correct;
     }
 
     delete p;
-    return {total_loss / d.observations,
-            (double)total_correct / d.observations};
+    return {total_loss / d.shape[0],
+            (double)total_correct / d.shape[0]};
 }
 
 OpenclBackend::OpenclBackend(const CliConfig& cfg, NetworkConfiguration& nc,
@@ -162,11 +162,11 @@ OpenclBackend::OpenclBackend(const CliConfig& cfg, NetworkConfiguration& nc,
     const size_t weight_updates_work_size = nc.total_neurons * nc.max_incoming;
 
     x.reset(new Memory<short>(device, nc.input_neurons * nc.timesteps));
-    data.reset(new Memory<double>(device, train.observations * train.cols * 2));
+    data.reset(new Memory<double>(device, train.shape[0] * train.shape[1] * 2));
 
-    if (test.observations > 0) {
+    if (test.shape[0] > 0) {
         test_data.reset(
-            new Memory<double>(device, test.observations * test.cols * 2));
+            new Memory<double>(device, test.shape[0] * test.shape[1] * 2));
     }
 
     v_thresh.reset(new Memory<short>(device, nc.total_neurons));
@@ -202,7 +202,7 @@ OpenclBackend::OpenclBackend(const CliConfig& cfg, NetworkConfiguration& nc,
 
     encode_kernel.reset(
         new Kernel(device, encode_work_size, "risp_encode_inputs_kernel", *x,
-                   *data, (int)train.cols, (int)nc.input_neurons,
+                   *data, (int)train.shape[1], (int)nc.input_neurons,
                    (int)nc.timesteps, (uint)0, (short)nc.spike_value_factor));
 
     forward_kernel.reset(new Kernel(
@@ -238,12 +238,12 @@ OpenclBackend::OpenclBackend(const CliConfig& cfg, NetworkConfiguration& nc,
         (uint)nc.max_incoming, (float)cfg.learning_rate, (float)cfg.decay_rate,
         (uint)1, (uint)cfg.batch_size, (uint)0, (uint)0, (float)0.9f,
         (float)0.999f, (float)0.0f, (float)0.0f, (uint)nc.timesteps,
-        (uint)train.observations, (float)nc.scale_factor, (short)nc.min_weight,
+        (uint)train.shape[0], (float)nc.scale_factor, (short)nc.min_weight,
         (short)nc.max_weight, (int)nc.steps));
 
     // Encode data
     encode(*data, train);
-    if (test.observations > 0) {
+    if (test.shape[0] > 0) {
         encode(*test_data, test);
     }
 
@@ -274,7 +274,7 @@ OpenclBackend::OpenclBackend(const CliConfig& cfg, NetworkConfiguration& nc,
     v_weights->reset();
 
     data->write_to_device();
-    if (test.observations > 0) {
+    if (test.shape[0] > 0) {
         test_data->write_to_device();
     }
     v_thresh->write_to_device();
@@ -290,8 +290,8 @@ OpenclBackend::OpenclBackend(const CliConfig& cfg, NetworkConfiguration& nc,
     gradient_slot->write_to_device();
 
     // Init batch order
-    batch_order.resize(train.observations);
-    for (int i = 0; i < train.observations; i++) {
+    batch_order.resize(train.shape[0]);
+    for (int i = 0; i < train.shape[0]; i++) {
         batch_order[i] = (size_t)i;
     }
 
@@ -306,18 +306,18 @@ void OpenclBackend::do_one_epoch(size_t epoch) {
     loss->reset();
 
     // Shuffle batch order each epoch
-    for (int i = 0; i < train.observations; i++) {
-        int j          = rand() % train.observations;
+    for (int i = 0; i < train.shape[0]; i++) {
+        int j          = rand() % train.shape[0];
         size_t tmp     = batch_order[i];
         batch_order[i] = batch_order[j];
         batch_order[j] = tmp;
     }
 
     // Mini-batch SGD loop
-    for (int batch_start = 0; batch_start < train.observations;
+    for (int batch_start = 0; batch_start < train.shape[0];
          batch_start += (int)batch_size) {
         size_t current_batch_size =
-            min(batch_size, (size_t)(train.observations - batch_start));
+            min(batch_size, (size_t)(train.shape[0] - batch_start));
 
         // Reset accumulators for this batch
         delta_W->reset();
@@ -373,27 +373,27 @@ void OpenclBackend::do_one_epoch(size_t epoch) {
     epoch_loss += (*loss)[0];
     epoch_correct += (size_t)(*correct)[0];
 
-    double avg_train_loss = epoch_loss / (double)train.observations;
-    double avg_train_acc  = epoch_correct / (double)train.observations;
+    double avg_train_loss = epoch_loss / (double)train.shape[0];
+    double avg_train_acc  = epoch_correct / (double)train.shape[0];
 
     // Test evaluation
     double epoch_test_loss    = 0.0;
     size_t epoch_test_correct = 0;
 
-    if (test.observations > 0) {
+    if (test.shape[0] > 0) {
         correct->reset();
         loss->reset();
 
         encode_kernel->set_parameters(1, *test_data);
 
-        for (int obs = 0; obs < (int)test.observations; obs++) {
+        for (int obs = 0; obs < (int)test.shape[0]; obs++) {
             x->reset();
             v->reset();
             s->reset();
             v_pre->reset();
             dL_ds->reset();
 
-            encode_kernel->set_parameters(2, (int)test.cols);
+            encode_kernel->set_parameters(2, (int)test.shape[1]);
             encode_kernel->set_parameters(5, (uint)obs);
             timed_run(*encode_kernel, "encode");
 
@@ -414,11 +414,11 @@ void OpenclBackend::do_one_epoch(size_t epoch) {
         encode_kernel->set_parameters(1, *data);
     }
 
-    double avg_test_loss = test.observations > 0
-                               ? epoch_test_loss / (double)test.observations
+    double avg_test_loss = test.shape[0] > 0
+                               ? epoch_test_loss / (double)test.shape[0]
                                : 0.0;
-    double avg_test_acc  = test.observations > 0
-                               ? epoch_test_correct / (double)test.observations
+    double avg_test_acc  = test.shape[0] > 0
+                               ? epoch_test_correct / (double)test.shape[0]
                                : 0.0;
 
     stats.train_acc  = avg_train_acc;
@@ -432,9 +432,9 @@ void OpenclBackend::do_one_epoch(size_t epoch) {
         write_weights_to_network(nc.n, nc.total_neurons, *weights,
                                  nc.max_incoming);
         std::pair<double, double> cpu_result = cpu_eval_test(
-            nc.n, nc, test.observations > 0 ? test : train, rho, tau);
+            nc.n, nc, test.shape[0] > 0 ? test : train, rho, tau);
 
-        if (test.observations > 0) {
+        if (test.shape[0] > 0) {
             printf(
                 "  [CPU eval @ epoch %4zu] Test Loss: %10g, Test Acc: %10g\n",
                 epoch + 1, cpu_result.first, cpu_result.second);
@@ -458,8 +458,8 @@ OpenclBackend::~OpenclBackend() {
 
     // Final CPU eval on GPU weights
     std::pair<double, double> cpu_result =
-        cpu_eval_test(nc.n, nc, test.observations > 0 ? test : train, rho, tau);
-    if (test.observations > 0) {
+        cpu_eval_test(nc.n, nc, test.shape[0] > 0 ? test : train, rho, tau);
+    if (test.shape[0] > 0) {
         printf("Final CPU Test Loss: %10g, Final CPU Test Acc: %10g\n",
                cpu_result.first, cpu_result.second);
     } else {
