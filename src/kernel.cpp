@@ -63,8 +63,8 @@ string opencl_c_container() {
             global const short* x, global const short* v_thresh,
             global const short* weights, global const uint* delays,
             global const uint* incoming, global const uint* incoming_ids,
-            global const uchar* is_input_neuron, global short* v,
-            global char* s, global short* v_pre, short v_decay, short v_rest,
+            global const uchar* is_input_neuron, global int* v,
+            global char* s, global int* v_pre, short v_decay, int v_rest,
             uint num_neurons, uint num_steps, uint timestep,
             uint max_incoming) {
             const uint neuron_id = get_global_id(0);
@@ -73,12 +73,12 @@ string opencl_c_container() {
             }
 
             const short V_thresh = v_thresh[neuron_id];
-            const short V        = timestep == 0u ? 0 : v[neuron_id];
+            const int V        = timestep == 0u ? 0 : v[neuron_id];
             const uint idx       = neuron_id * num_steps + timestep;
             const uint inc_count = incoming[neuron_id];
 
             bool has_event    = false;
-            short total_input = 0;
+            int total_input = 0;
 
             if (is_input_neuron[neuron_id]) {
                 const short input_spike = x[idx];
@@ -114,7 +114,7 @@ string opencl_c_container() {
 
             // Match CPU/event-driven behavior: leak/min-potential only apply
             // when an event arrives for this neuron.
-            short V_post = V;
+            int V_post = V;
             if (has_event) {
                 if (v_decay > 0) {
                     V_post = 0;
@@ -132,7 +132,7 @@ string opencl_c_container() {
             const bool has_spiked = has_event && (V_post >= V_thresh);
 
             // Reset charge when we spike
-            const short V_final = has_spiked ? 0 : V_post;
+            const int V_final = has_spiked ? 0 : V_post;
 
             v[neuron_id] = V_final;
             s[idx]       = (char)has_spiked;
@@ -191,7 +191,7 @@ string opencl_c_container() {
         // Computes neuron_grad and updates future_mem_grad.
         kernel void risp_backward_grad_kernel(
             global const float* dL_ds, global const char* s,
-            global const short* v_pre, global const short* v_thresh,
+            global const int* v_pre, global const short* v_thresh,
             global const float* gradient_accumulators,
             global const uint* outgoing, global const uchar* is_output_neuron,
             global float* spike_grad_history, global float* future_mem_grad,

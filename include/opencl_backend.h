@@ -42,9 +42,9 @@ class OpenclBackend : public TrainingBackend {
     std::unique_ptr<Memory<uint>> incoming_ids;
     std::unique_ptr<Memory<uchar>> is_input_neuron;
     std::unique_ptr<Memory<uchar>> is_output_neuron;
-    std::unique_ptr<Memory<short>> v;
+    std::unique_ptr<Memory<int>> v;
     std::unique_ptr<Memory<char>> s;
-    std::unique_ptr<Memory<short>> v_pre;
+    std::unique_ptr<Memory<int>> v_pre;
     std::unique_ptr<Memory<float>> dL_ds;
     std::unique_ptr<Memory<float>> correct;
     std::unique_ptr<Memory<float>> loss;

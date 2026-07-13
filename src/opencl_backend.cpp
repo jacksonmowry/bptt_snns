@@ -237,9 +237,9 @@ OpenclBackend::OpenclBackend(const CliConfig& cfg, NetworkConfiguration& nc,
         new Memory<uint>(device, nc.total_neurons * nc.max_incoming));
     is_input_neuron.reset(new Memory<uchar>(device, nc.total_neurons));
     is_output_neuron.reset(new Memory<uchar>(device, nc.total_neurons));
-    v.reset(new Memory<short>(device, nc.total_neurons));
+    v.reset(new Memory<int>(device, nc.total_neurons));
     s.reset(new Memory<char>(device, nc.total_neurons * nc.timesteps));
-    v_pre.reset(new Memory<short>(device, nc.total_neurons * nc.timesteps));
+    v_pre.reset(new Memory<int>(device, nc.total_neurons * nc.timesteps));
     dL_ds.reset(new Memory<float>(device, nc.output_neurons));
     correct.reset(new Memory<float>(device, 1));
     loss.reset(new Memory<float>(device, 1));
@@ -272,7 +272,7 @@ OpenclBackend::OpenclBackend(const CliConfig& cfg, NetworkConfiguration& nc,
     forward_kernel.reset(new Kernel(
         device, forward_work_size, "risp_forward_kernel", *x, *v_thresh,
         *weights, *delays, *incoming, *incoming_ids, *is_input_neuron, *v, *s,
-        *v_pre, (short)nc.leak, (short)(nc.min_potential / nc.scale_factor),
+        *v_pre, (short)nc.leak, (int)(nc.min_potential / nc.scale_factor),
         (uint)nc.total_neurons, (uint)nc.timesteps, (uint)0,
         (uint)nc.max_incoming));
 
