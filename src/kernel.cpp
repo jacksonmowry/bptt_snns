@@ -28,34 +28,35 @@ string opencl_c_container() {
             global const double* data, int dataset_timesteps,
             int num_input_neurons, int timesteps, uint observation_idx,
             short spike_value_factor) {
-            const uint neuron_id = get_global_id(0);
-            if (neuron_id >= (uint)num_input_neurons) {
+            const uint global_id = get_global_id(0);
+            const uint total_work = (uint)num_input_neurons * (uint)dataset_timesteps;
+            if (global_id >= total_work) {
                 return;
             }
+
+            const uint column_t  = global_id % (uint)dataset_timesteps;
+            const uint neuron_id = global_id / (uint)dataset_timesteps;
 
             const int encoding_window = timesteps / dataset_timesteps;
             if (encoding_window <= 0) {
                 return;
             }
 
+            const double encoding_start = column_t * encoding_window;
+            const double encoding_end   = encoding_start + encoding_window;
+
+            const double val =
+                data[(observation_idx * num_input_neurons *
+                      dataset_timesteps) +
+                     (neuron_id * dataset_timesteps) + (column_t)];
+
+            if (val <= 0.0) {
+                return;
+            }
+
             const uint base_idx = neuron_id * timesteps;
-
-            for (int column_t = 0; column_t < dataset_timesteps; column_t++) {
-                const double encoding_start = column_t * encoding_window;
-                const double encoding_end   = encoding_start + encoding_window;
-
-                const double val =
-                    data[(observation_idx * num_input_neurons *
-                          dataset_timesteps) +
-                         (neuron_id * dataset_timesteps) + (column_t)];
-
-                if (val <= 0.0) {
-                    continue;
-                }
-
-                for (double i = encoding_start; i < encoding_end; i += val) {
-                    x[base_idx + (uint)i] = spike_value_factor;
-                }
+            for (double i = encoding_start; i < encoding_end; i += val) {
+                x[base_idx + (uint)i] = spike_value_factor;
             }
         }
 

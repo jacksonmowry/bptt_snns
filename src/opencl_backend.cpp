@@ -207,6 +207,7 @@ OpenclBackend::OpenclBackend(const CliConfig& cfg, NetworkConfiguration& nc,
 
     Device device(select_device_with_most_flops());
     const size_t encode_work_size        = nc.input_neurons;
+    const size_t encode_timeseries_work_size = nc.input_neurons * train.shape[2];
     const size_t forward_work_size       = nc.total_neurons;
     const size_t loss_work_size          = nc.output_neurons;
     const size_t backward_grad_work_size = nc.total_neurons;
@@ -265,7 +266,7 @@ OpenclBackend::OpenclBackend(const CliConfig& cfg, NetworkConfiguration& nc,
                    (int)nc.timesteps, (uint)0, (short)nc.spike_value_factor));
 
     encode_timeseries_kernel.reset(new Kernel(
-        device, encode_work_size, "risp_encode_timeseries_inputs_kernel", *x,
+        device, encode_timeseries_work_size, "risp_encode_timeseries_inputs_kernel", *x,
         *data, (int)train.shape[2], (int)nc.input_neurons, (int)nc.timesteps,
         (uint)0, (short)nc.spike_value_factor));
 
@@ -455,8 +456,10 @@ void OpenclBackend::do_one_epoch(size_t epoch) {
 
         if (cfg.timeseries) {
             encode_timeseries_kernel->set_parameters(1, *test_data);
+            encode_timeseries_kernel->set_parameters(2, (int)test.shape[2]);
         } else {
             encode_kernel->set_parameters(1, *test_data);
+            encode_kernel->set_parameters(2, (int)test.shape[1]);
         }
 
         for (int obs = 0; obs < (int)test.shape[0]; obs++) {
@@ -467,11 +470,9 @@ void OpenclBackend::do_one_epoch(size_t epoch) {
             dL_ds->reset();
 
             if (cfg.timeseries) {
-                encode_timeseries_kernel->set_parameters(2, (int)test.shape[2]);
                 encode_timeseries_kernel->set_parameters(5, (uint)obs);
                 timed_run(*encode_timeseries_kernel, "encode_timeseries");
             } else {
-                encode_kernel->set_parameters(2, (int)test.shape[1]);
                 encode_kernel->set_parameters(5, (uint)obs);
                 timed_run(*encode_kernel, "encode");
             }
@@ -492,8 +493,10 @@ void OpenclBackend::do_one_epoch(size_t epoch) {
 
         if (cfg.timeseries) {
             encode_timeseries_kernel->set_parameters(1, *data);
+            encode_timeseries_kernel->set_parameters(2, (int)train.shape[2]);
         } else {
             encode_kernel->set_parameters(1, *data);
+            encode_kernel->set_parameters(2, (int)train.shape[1]);
         }
     }
 
