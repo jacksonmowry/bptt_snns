@@ -10,6 +10,7 @@
 #include <cstddef>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <ctime>
 #include <fstream>
 #include <nlohmann/json.hpp>
@@ -90,6 +91,37 @@ int main(int argc, char* argv[]) {
     size_t train_labels = label_count(&train);
     size_t test_labels  = label_count(&test);
     assert(test.observations == 0 || train_labels == test_labels);
+
+    /* Verify train and test label mappings match (same labels, same order) */
+    if (test.observations > 0) {
+        for (int i = 0; i < (int)train_labels; i++) {
+            if (strcmp(train.label_strings[i], test.label_strings[i])) {
+                fprintf(stderr,
+                        "Mismatch between train & test labels:\n");
+
+                fprintf(stderr, "Train: [");
+                for (size_t i = 0; i < train_labels; i++) {
+                    fprintf(stderr, "%s", train.label_strings[i]);
+
+                    if (i != train_labels - 1) {
+                        fprintf(stderr, " ");
+                    }
+                }
+                fprintf(stderr, "]\n");
+
+                fprintf(stderr, "Test: [");
+                for (size_t i = 0; i < test_labels; i++) {
+                    fprintf(stderr, "%s", test.label_strings[i]);
+
+                    if (i != test_labels - 1) {
+                        fprintf(stderr, " ");
+                    }
+                }
+                fprintf(stderr, "]\n");
+                exit(1);
+            }
+        }
+    }
 
     size_t input_neurons =
         (cfg.timeseries) ? train.rows_per_observation * 2 : train.cols * 2;
@@ -210,7 +242,8 @@ int main(int argc, char* argv[]) {
             best_test_loss  = stats.test_loss;
 
             export_network(n, cfg, best_train_acc, best_train_loss,
-                           best_test_acc, best_test_loss);
+                           best_test_acc, best_test_loss,
+                           (const char**)train.label_strings, (int)train_labels);
         }
 
         print_epoch_log(epoch, cfg.epochs, stats, best_train_acc, best_test_acc,
@@ -227,6 +260,23 @@ int main(int argc, char* argv[]) {
     free(train.labels);
     free(train.min_vals);
     free(train.max_vals);
+
+    bool free_train = train.label_strings != test.label_strings;
+
+    for (int i = 0; i < train.label_strings_count; i++) {
+        free(train.label_strings[i]);
+        train.label_strings[i] = NULL;
+    }
+    free(train.label_strings);
+
+    if (free_train) {
+        for (int i = 0; i < test.label_strings_count; i++) {
+            free(test.label_strings[i]);
+            test.label_strings[i] = NULL;
+        }
+        free(test.label_strings);
+    }
+
     free(test.data);
     free(test.labels);
     free(test.min_vals);

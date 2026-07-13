@@ -1,15 +1,9 @@
 #include "data_utils.h"
 #include "framework.hpp"
 #include <cassert>
-#include <unordered_set>
 
 size_t label_count(const Dataset* d) {
-    std::unordered_set<double> us;
-    for (int i = 0; i < d->observations; i++) {
-        us.insert(d->labels[i]);
-    }
-
-    return us.size();
+    return (size_t)d->label_strings_count;
 }
 
 void encode_spikes(neuro::Processor* p, const Dataset* d, size_t index,

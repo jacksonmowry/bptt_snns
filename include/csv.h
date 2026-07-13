@@ -7,6 +7,8 @@ typedef struct {
     double* labels;
     double* min_vals;
     double* max_vals;
+    char** label_strings;       // unique sorted label strings, index = label value
+    int label_strings_count;   // number of unique labels
     int observations;
     int cols;
     int rows_per_observation;
