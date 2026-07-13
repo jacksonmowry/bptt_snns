@@ -89,18 +89,68 @@ static void timed_run(Kernel& kernel, const char* name) {
     }
 }
 
-static void encode(Memory<double>& data, const Dataset& d) {
-    for (int row = 0; row < d.shape[0]; row++) {
-        for (int col = 0; col < d.shape[1]; col++) {
-            double x     = (d.data[row * d.shape[1] + col] - d.min_vals[col]) /
-                           (d.max_vals[col] - d.min_vals[col]);
-            double inv_x = 1.0 - x;
+static void encode(Memory<double>& data, const Dataset& d, bool timeseries) {
+    if (timeseries) {
+        // data = [observations * (input_features * 2) * dataset_timesteps]
+        assert(data.length() ==
+               (unsigned long)(d.shape[0] * (d.shape[1] * 2) * d.shape[2]));
 
-            if (x > 0.0) {
-                data[(row * d.shape[1] * 2) + (col * 2)] = double(1.0 / x);
+        for (int obs = 0; obs < d.shape[0]; obs++) {
+            for (int input_feature = 0; input_feature < d.shape[1];
+                 input_feature++) {
+                double range =
+                    d.max_vals[input_feature] - d.min_vals[input_feature];
+
+                for (int dataset_timestep = 0; dataset_timestep < d.shape[2];
+                     dataset_timestep++) {
+                    double x     = (d.data[(obs * d.shape[1] * d.shape[2]) +
+                                           (input_feature * d.shape[2]) +
+                                           (dataset_timestep)] -
+                                    d.min_vals[input_feature]) /
+                                   range;
+                    double inv_x = 1.0 - x;
+
+                    if (x > 0.0) {
+                        size_t idx = (obs * (d.shape[1] * 2) * d.shape[2]) +
+                                     (input_feature * 2 * d.shape[2]) +
+                                     (dataset_timestep);
+                        assert(idx < (size_t)(d.shape[0] * (d.shape[1] * 2) *
+                                              d.shape[2]));
+                        data[(obs * (d.shape[1] * 2) * d.shape[2]) +
+                             (input_feature * 2 * d.shape[2]) +
+                             (dataset_timestep)] = 1.0 / x;
+                    }
+
+                    if (inv_x > 0.0) {
+                        size_t idx = (obs * (d.shape[1] * 2) * d.shape[2]) +
+                                     ((input_feature * 2 + 1) * d.shape[2]) +
+                                     (dataset_timestep);
+                        assert(idx < (size_t)(d.shape[0] * (d.shape[1] * 2) *
+                                              d.shape[2]));
+                        data[(obs * (d.shape[1] * 2) * d.shape[2]) +
+                             ((input_feature * 2 + 1) * d.shape[2]) +
+                             (dataset_timestep)] = 1.0 / inv_x;
+                    }
+                }
             }
-            if (inv_x > 0.0) {
-                data[(row * d.shape[1] * 2) + (col * 2 + 1)] = double(1.0 / inv_x);
+        }
+    } else {
+        // data = [observations * (input_features * 2)]
+        assert(data.length() == (unsigned long)(d.shape[0] * (d.shape[1] * 2)));
+
+        for (int row = 0; row < d.shape[0]; row++) {
+            for (int col = 0; col < d.shape[1]; col++) {
+                double x = (d.data[row * d.shape[1] + col] - d.min_vals[col]) /
+                           (d.max_vals[col] - d.min_vals[col]);
+                double inv_x = 1.0 - x;
+
+                if (x > 0.0) {
+                    data[(row * d.shape[1] * 2) + (col * 2)] = double(1.0 / x);
+                }
+                if (inv_x > 0.0) {
+                    data[(row * d.shape[1] * 2) + (col * 2 + 1)] =
+                        double(1.0 / inv_x);
+                }
             }
         }
     }
@@ -140,8 +190,7 @@ static std::pair<double, double> cpu_eval_test(neuro::Network* n,
     }
 
     delete p;
-    return {total_loss / d.shape[0],
-            (double)total_correct / d.shape[0]};
+    return {total_loss / d.shape[0], (double)total_correct / d.shape[0]};
 }
 
 OpenclBackend::OpenclBackend(const CliConfig& cfg, NetworkConfiguration& nc,
@@ -162,11 +211,17 @@ OpenclBackend::OpenclBackend(const CliConfig& cfg, NetworkConfiguration& nc,
     const size_t weight_updates_work_size = nc.total_neurons * nc.max_incoming;
 
     x.reset(new Memory<short>(device, nc.input_neurons * nc.timesteps));
-    data.reset(new Memory<double>(device, train.shape[0] * train.shape[1] * 2));
+
+    data.reset(new Memory<double>(
+        device, cfg.timeseries
+                    ? train.shape[0] * (train.shape[1] * 2) * train.shape[2]
+                    : train.shape[0] * train.shape[1] * 2));
 
     if (test.shape[0] > 0) {
-        test_data.reset(
-            new Memory<double>(device, test.shape[0] * test.shape[1] * 2));
+        test_data.reset(new Memory<double>(
+            device, cfg.timeseries
+                        ? test.shape[0] * (test.shape[1] * 2) * test.shape[2]
+                        : test.shape[0] * test.shape[1] * 2));
     }
 
     v_thresh.reset(new Memory<short>(device, nc.total_neurons));
@@ -205,6 +260,11 @@ OpenclBackend::OpenclBackend(const CliConfig& cfg, NetworkConfiguration& nc,
                    *data, (int)train.shape[1], (int)nc.input_neurons,
                    (int)nc.timesteps, (uint)0, (short)nc.spike_value_factor));
 
+    encode_timeseries_kernel.reset(new Kernel(
+        device, encode_work_size, "risp_encode_timeseries_inputs_kernel", *x,
+        *data, (int)train.shape[2], (int)nc.input_neurons, (int)nc.timesteps,
+        (uint)0, (short)nc.spike_value_factor));
+
     forward_kernel.reset(new Kernel(
         device, forward_work_size, "risp_forward_kernel", *x, *v_thresh,
         *weights, *delays, *incoming, *incoming_ids, *is_input_neuron, *v, *s,
@@ -242,9 +302,9 @@ OpenclBackend::OpenclBackend(const CliConfig& cfg, NetworkConfiguration& nc,
         (short)nc.max_weight, (int)nc.steps));
 
     // Encode data
-    encode(*data, train);
+    encode(*data, train, cfg.timeseries);
     if (test.shape[0] > 0) {
-        encode(*test_data, test);
+        encode(*test_data, test, cfg.timeseries);
     }
 
     // Initialize GPU buffers from network
@@ -335,8 +395,13 @@ void OpenclBackend::do_one_epoch(size_t epoch) {
             gradient_accumulators->reset();
 
             // Encode data
-            encode_kernel->set_parameters(5, (uint)obs);
-            timed_run(*encode_kernel, "encode");
+            if (cfg.timeseries) {
+                encode_timeseries_kernel->set_parameters(5, (uint)obs);
+                timed_run(*encode_timeseries_kernel, "encode_timeseries");
+            } else {
+                encode_kernel->set_parameters(5, (uint)obs);
+                timed_run(*encode_kernel, "encode");
+            }
 
             // Forward pass
             for (size_t t = 0; t < nc.timesteps; t++) {
@@ -384,7 +449,11 @@ void OpenclBackend::do_one_epoch(size_t epoch) {
         correct->reset();
         loss->reset();
 
-        encode_kernel->set_parameters(1, *test_data);
+        if (cfg.timeseries) {
+            encode_timeseries_kernel->set_parameters(1, *test_data);
+        } else {
+            encode_kernel->set_parameters(1, *test_data);
+        }
 
         for (int obs = 0; obs < (int)test.shape[0]; obs++) {
             x->reset();
@@ -393,9 +462,15 @@ void OpenclBackend::do_one_epoch(size_t epoch) {
             v_pre->reset();
             dL_ds->reset();
 
-            encode_kernel->set_parameters(2, (int)test.shape[1]);
-            encode_kernel->set_parameters(5, (uint)obs);
-            timed_run(*encode_kernel, "encode");
+            if (cfg.timeseries) {
+                encode_timeseries_kernel->set_parameters(2, (int)test.shape[2]);
+                encode_timeseries_kernel->set_parameters(5, (uint)obs);
+                timed_run(*encode_timeseries_kernel, "encode_timeseries");
+            } else {
+                encode_kernel->set_parameters(2, (int)test.shape[1]);
+                encode_kernel->set_parameters(5, (uint)obs);
+                timed_run(*encode_kernel, "encode");
+            }
 
             for (size_t t = 0; t < nc.timesteps; t++) {
                 forward_kernel->set_parameters(14, (uint)t);
@@ -411,15 +486,17 @@ void OpenclBackend::do_one_epoch(size_t epoch) {
         epoch_test_correct += (size_t)(*correct)[0];
         epoch_test_loss += (*loss)[0];
 
-        encode_kernel->set_parameters(1, *data);
+        if (cfg.timeseries) {
+            encode_timeseries_kernel->set_parameters(1, *data);
+        } else {
+            encode_kernel->set_parameters(1, *data);
+        }
     }
 
-    double avg_test_loss = test.shape[0] > 0
-                               ? epoch_test_loss / (double)test.shape[0]
-                               : 0.0;
-    double avg_test_acc  = test.shape[0] > 0
-                               ? epoch_test_correct / (double)test.shape[0]
-                               : 0.0;
+    double avg_test_loss =
+        test.shape[0] > 0 ? epoch_test_loss / (double)test.shape[0] : 0.0;
+    double avg_test_acc =
+        test.shape[0] > 0 ? epoch_test_correct / (double)test.shape[0] : 0.0;
 
     stats.train_acc  = avg_train_acc;
     stats.train_loss = avg_train_loss;
@@ -431,8 +508,8 @@ void OpenclBackend::do_one_epoch(size_t epoch) {
         weights->read_from_device();
         write_weights_to_network(nc.n, nc.total_neurons, *weights,
                                  nc.max_incoming);
-        std::pair<double, double> cpu_result = cpu_eval_test(
-            nc.n, nc, test.shape[0] > 0 ? test : train, rho, tau);
+        std::pair<double, double> cpu_result =
+            cpu_eval_test(nc.n, nc, test.shape[0] > 0 ? test : train, rho, tau);
 
         if (test.shape[0] > 0) {
             printf(

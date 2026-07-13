@@ -60,6 +60,7 @@ class OpenclBackend : public TrainingBackend {
 
     // Kernels
     std::unique_ptr<Kernel> encode_kernel;
+    std::unique_ptr<Kernel> encode_timeseries_kernel;
     std::unique_ptr<Kernel> forward_kernel;
     std::unique_ptr<Kernel> loss_kernel;
     std::unique_ptr<Kernel> backward_grad_kernel;
