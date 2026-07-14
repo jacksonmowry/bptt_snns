@@ -20,31 +20,18 @@ def my_target_program(params):
         "/home/jackson/framework/cpp-apps/applications/classify/datasets/regular/digits_data.csv",
         "--label_file",
         "/home/jackson/framework/cpp-apps/applications/classify/datasets/regular/digits_label.csv",
-        "--timesteps",
-        "24",
-        "--hidden_neurons",
-        "64",
         "--epochs",
-        "25",
+        "10",
         "--threads",
-        "2",
+        "10",
         "--batch_size",
-        "24",
-        "--connectivity",
-        "0.35",
+        "30",
     ]
-    command.append("--learning_rate")
-    command.append(f"{params["learning_rate"]}")
-    command.append("--decay_rate")
-    command.append(f"{params["decay_rate"]}")
-    command.append("--tau")
-    command.append(f"{params["tau"]}")
-    command.append("--rho")
-    command.append(f"{params["rho"]}")
-    command.append("--max_delay")
-    command.append(f"{params["max_delay"]}")
-    command.append("--weight_init_stddev")
-    command.append(f"{params["weight_init_stddev"]}")
+
+    for k, v in params.items():
+        command.append(f"--{k}")
+        command.append(str(v))
+
     avg_score = 0.0
 
     trials = 5
@@ -126,7 +113,7 @@ def objective(trial, param_triplets):
     # 1. Suggest values for each parameter defined via CLI
     suggested_params = {}
     for name, vmin, vmax in param_triplets:
-        if name == "max_delay":
+        if name in ["max_delay", "timesteps", "hidden_neurons"]:
             suggested_params[name] = trial.suggest_int(name, int(vmin), int(vmax))
         else:
             suggested_params[name] = trial.suggest_float(name, vmin, vmax)
