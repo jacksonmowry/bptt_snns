@@ -16,7 +16,8 @@ load_and_init_network(const std::string& json_file, double& connectivity,
                       double& rho, size_t& timesteps, size_t& hidden_neurons,
                       unsigned long& seed, size_t& epochs, size_t& batch_size,
                       double& training_percent, size_t& threads,
-                      bool& timeseries) {
+                      bool& timeseries, size_t& max_delay,
+                      double& weight_init_stddev) {
     json emptynet;
     std::ifstream fin(json_file);
     fin >> emptynet;
@@ -82,6 +83,9 @@ load_and_init_network(const std::string& json_file, double& connectivity,
                             "--training_percent");
             override_size("threads", threads, "--threads");
             override_bool("timeseries", timeseries, "--timeseries");
+            override_size("max_delay", max_delay, "--max_delay");
+            override_double("weight_init_stddev", weight_init_stddev,
+                            "--weight_init_stddev");
             printf("Loaded metadata from %s\n", json_file.c_str());
         } else {
             fprintf(stderr,
@@ -100,7 +104,7 @@ void build_run_metadata(neuro::Network* n, int argc, char* argv[],
                         bool discrete, double min_potential, double min_weight,
                         double max_weight, double max_threshold,
                         const std::string& leak_prop, int scale,
-                        double scale_factor) {
+                        double scale_factor, size_t effective_max_delay) {
     // CLI arguments
     json cli_args = json::array();
     for (int i = 1; i < argc; i++) {
@@ -166,6 +170,8 @@ void build_run_metadata(neuro::Network* n, int argc, char* argv[],
     run_metadata["leak_mode"]        = leak_prop;
     run_metadata["scale"]            = scale;
     run_metadata["scale_factor"]     = discrete ? scale_factor : 1.0;
+    run_metadata["max_delay"]        = effective_max_delay;
+    run_metadata["weight_init_stddev"] = cfg.weight_init_stddev;
 
     // Merge with existing Associated_Data -> other if any
     json existing_other = json::object();
@@ -192,7 +198,7 @@ generate_network(neuro::Network* n, size_t input_neurons, size_t hidden_neurons,
                  size_t output_neurons, size_t total_neurons,
                  double connectivity, bool discrete, int scale,
                  double scale_factor, double min_weight, double max_weight,
-                 double max_threshold) {
+                 double max_threshold, size_t max_delay, double weight_init_stddev) {
     const size_t layer_sizes[3] = {input_neurons, hidden_neurons,
                                    output_neurons};
     size_t neuron_count         = 0;
@@ -221,12 +227,12 @@ generate_network(neuro::Network* n, size_t input_neurons, size_t hidden_neurons,
             neuro::Edge* e = n->add_edge(i, j);
             synapse_count++;
 
-            double weight = normal(0.0, 0.1);
+            double weight = normal(0.0, weight_init_stddev);
             if (discrete) {
                 weight = quantize(weight, scale, min_weight, max_weight) /
                          scale_factor;
             }
-            int delay = rand() % 7 + 1;
+            int delay = rand() % (int)max_delay + 1;
 
             e->set(n->get_edge_property("Weight")->index, weight);
             e->set(n->get_edge_property("Delay")->index, delay);

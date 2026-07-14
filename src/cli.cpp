@@ -291,6 +291,27 @@ int parse_cli(int argc, char* argv[], CliConfig* cfg) {
                     "--opencl_timings requires a value (true/false)");
             }
             cfg->opencl_timings = (std::string(argv[i]) == "true");
+        } else if (arg == "--max_delay" || arg == "-D") {
+            unsigned long v;
+            int rc = parse_ulong_arg(i, argc, argv, &v, "max_delay");
+            if (rc) {
+                return rc;
+            }
+            if (v == 0) {
+                return cli_error("--max_delay must be > 0");
+            }
+            cfg->max_delay = v;
+        } else if (arg == "--weight_init_stddev") {
+            double v;
+            int rc = parse_double_arg(i, argc, argv, &v, "weight_init_stddev");
+            if (rc) {
+                return rc;
+            }
+            rc = check_pos(v, "weight_init_stddev");
+            if (rc) {
+                return rc;
+            }
+            cfg->weight_init_stddev = v;
         } else if (arg == "--cpu_eval_interval") {
             unsigned long v;
             int rc = parse_ulong_arg(i, argc, argv, &v, "cpu_eval_interval");
@@ -350,5 +371,7 @@ void print_usage(const char* prog) {
     fprintf(
         stderr,
         " N/A, --opencl_timings          Enable OpenCL kernel timing report\n");
+    fprintf(stderr, "  -D, --max_delay          UINT         Max synapse delay\n");
+    fprintf(stderr, " N/A, --weight_init_stddev FLOAT        Weight init std dev (>0)\n");
     fprintf(stderr, "  -h, --help                          Show this help\n");
 }

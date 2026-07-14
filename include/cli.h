@@ -28,6 +28,8 @@ struct CliConfig {
     bool show_help      = false;
     bool opencl         = false;
     bool opencl_timings = false;
+    size_t max_delay          = 7;
+    double weight_init_stddev = 0.1;
     size_t cpu_eval_interval =
         0; // every N epochs, read GPU weights & eval on CPU
 };

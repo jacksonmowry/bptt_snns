@@ -131,7 +131,7 @@ int main(int argc, char* argv[]) {
         cfg.network_json_file, cfg.connectivity, cfg.learning_rate,
         cfg.decay_rate, cfg.tau, cfg.rho, cfg.timesteps, hidden_neurons,
         cfg.seed, cfg.epochs, cfg.batch_size, cfg.training_percent, cfg.threads,
-        cfg.timeseries);
+        cfg.timeseries, cfg.max_delay, cfg.weight_init_stddev);
 
     bool discrete         = n->get_data("proc_params")["discrete"];
     std::string leak_prop = n->get_data("proc_params")["leak_mode"];
@@ -153,11 +153,14 @@ int main(int argc, char* argv[]) {
     }
 
     size_t neuron_count, synapse_count;
+    size_t effective_max_delay = cfg.max_delay;
     if (n->num_nodes() == 0) {
+        size_t net_max_delay = (size_t)n->get_data("proc_params")["max_delay"];
+        effective_max_delay = cfg.max_delay < net_max_delay ? cfg.max_delay : net_max_delay;
         std::tie(neuron_count, synapse_count) = generate_network(
             n, input_neurons, hidden_neurons, output_neurons, total_neurons,
             cfg.connectivity, discrete, scale, scale_factor, min_weight,
-            max_weight, max_threshold);
+            max_weight, max_threshold, effective_max_delay, cfg.weight_init_stddev);
         printf("Neurons: %zu, Synapses: %zu\n", neuron_count, synapse_count);
     } else {
         neuron_count  = n->num_nodes();
@@ -170,7 +173,7 @@ int main(int argc, char* argv[]) {
     build_run_metadata(n, argc, argv, cfg, input_neurons, output_neurons,
                        total_neurons, neuron_count, synapse_count, discrete,
                        min_potential, min_weight, max_weight, max_threshold,
-                       leak_prop, scale, scale_factor);
+                       leak_prop, scale, scale_factor, effective_max_delay);
 
     NetworkConfiguration nc = {
         .n              = n,

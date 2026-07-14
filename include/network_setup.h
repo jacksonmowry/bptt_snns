@@ -16,7 +16,8 @@ load_and_init_network(const std::string& json_file, double& connectivity,
                       double& rho, size_t& timesteps, size_t& hidden_neurons,
                       unsigned long& seed, size_t& epochs, size_t& batch_size,
                       double& training_percent, size_t& threads,
-                      bool& timeseries);
+                      bool& timeseries, size_t& max_delay,
+                      double& weight_init_stddev);
 
 // Build and attach full reproducibility metadata to the network.
 void build_run_metadata(neuro::Network* n, int argc, char* argv[],
@@ -26,7 +27,7 @@ void build_run_metadata(neuro::Network* n, int argc, char* argv[],
                         bool discrete, double min_potential, double min_weight,
                         double max_weight, double max_threshold,
                         const std::string& leak_prop, int scale,
-                        double scale_factor);
+                        double scale_factor, size_t effective_max_delay);
 
 // Generate nodes/edges for an empty network. Returns (neuron_count,
 // synapse_count).
@@ -35,7 +36,7 @@ generate_network(neuro::Network* n, size_t input_neurons, size_t hidden_neurons,
                  size_t output_neurons, size_t total_neurons,
                  double connectivity, bool discrete, int scale,
                  double scale_factor, double min_weight, double max_weight,
-                 double max_threshold);
+                 double max_threshold, size_t max_delay, double weight_init_stddev);
 
 // Extract weights, delays, thresholds from Network into flat-accessible arrays.
 void init_network_weights(neuro::Network* n, size_t total_neurons,

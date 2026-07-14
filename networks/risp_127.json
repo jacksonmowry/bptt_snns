@@ -5,7 +5,7 @@
             "discrete": true,
             "fire_like_ravens": false,
             "leak_mode": "none",
-            "max_delay": 7,
+            "max_delay": 127,
             "max_threshold": 127,
             "max_weight": 127,
             "min_potential": -128,
@@ -25,7 +25,7 @@
         "edge_properties": [
             {
                 "index": 1,
-                "max_value": 7.0,
+                "max_value": 127.0,
                 "min_value": 1.0,
                 "name": "Delay",
                 "size": 1,
