@@ -6,23 +6,36 @@
 CXX ?= g++
 CC ?= gcc
 
+BUILDFLAGS ?=
+OPENCL_INCLUDE ?=
+LDLIBS ?=
+
 FR_LIB = framework-open/lib/libframework.a
 FR_INCLUDES = framework-open/include/
-FR_CFLAGS = -std=c++11 -Wall -Wextra -O3 -march=native -flto -Iinclude -Ivendor -Iframework-open/include -Iframework-open/include/utils -Ivendor/OpenCL-Wrapper/include $(CFLAGS)
+FR_CFLAGS = -std=c++11 -Wall -Wextra -O3 -march=native -flto -Iinclude -Ivendor -Iframework-open/include -Iframework-open/include/utils $(CFLAGS) $(BUILDFLAGS) $(OPENCL_INCLUDE)
+
 FR_OBJ = framework-open/obj/framework.o framework-open/obj/processor_help.o framework-open/obj/properties.o
 
 RISP_OBJ = framework-open/obj/risp.o framework-open/obj/risp_static.o
-BPTT_OBJ = obj/shared.o obj/math_utils.o obj/data_utils.o obj/network_utils.o obj/forward_backward.o obj/optimizer.o obj/threading.o obj/csv.o obj/kernel.o obj/cli.o obj/network_setup.o obj/training.o obj/cpu_backend.o obj/opencl_backend.o obj/backend_factory.o
+
+ALL_OBJ = obj/shared.o obj/math_utils.o obj/data_utils.o obj/network_utils.o \
+          obj/forward_backward.o obj/optimizer.o obj/threading.o obj/csv.o \
+          obj/cli.o obj/network_setup.o obj/training.o obj/cpu_backend.o \
+          obj/backend_factory.o obj/opencl_backend.o obj/kernel.o
 
 FRAMEWORK_DIR = framework-open/
 
-all: framework-open/bin/network_tool \
+all: clean_objs framework-open/bin/network_tool \
 	bin/bptt_learning \
 	bin/interactive_mode
 
-# Applications ################################################################
-bin/bptt_learning: src/bptt_learning.cpp $(BPTT_OBJ) $(RISP_OBJ) $(FR_LIB)
-	$(CXX) $(FR_CFLAGS) -o $@ $^ -Lvendor/lib -lOpenCL
+bin/bptt_learning: src/bptt_learning.cpp $(ALL_OBJ) $(RISP_OBJ) $(FR_LIB)
+	$(CXX) $(FR_CFLAGS) -o $@ $^ $(LDLIBS)
+
+# OpenCL build (same source, -DOPENCL + linker flags)
+#   make opencl
+opencl: clean_objs
+	$(MAKE) BUILDFLAGS="-DOPENCL" OPENCL_INCLUDE="-Ivendor/OpenCL-Wrapper/include" LDLIBS="-Lvendor/lib -lOpenCL"
 
 bin/interactive_mode: src/interactive_mode.cpp
 	$(CXX) $(FR_CFLAGS) -o $@ $^
@@ -48,31 +61,28 @@ framework-open/obj/risp.o: framework-open/src/risp.cpp $(FR_INC) $(RISP_INC)
 framework-open/obj/risp_static.o: framework-open/src/risp_static.cpp $(FR_INC) $(RISP_INC)
 	$(CXX) -c $(FR_CFLAGS) -o framework-open/obj/risp_static.o framework-open/src/risp_static.cpp
 
-obj/shared.o: src/shared.cpp 
+obj/shared.o: src/shared.cpp
 	$(CXX) $(FR_CFLAGS) -o $@ -c $^
 
-obj/math_utils.o: src/math_utils.cpp 
+obj/math_utils.o: src/math_utils.cpp
 	$(CXX) $(FR_CFLAGS) -o $@ -c $^
 
-obj/data_utils.o: src/data_utils.cpp 
+obj/data_utils.o: src/data_utils.cpp
 	$(CXX) $(FR_CFLAGS) -o $@ -c $^
 
-obj/network_utils.o: src/network_utils.cpp 
+obj/network_utils.o: src/network_utils.cpp
 	$(CXX) $(FR_CFLAGS) -o $@ -c $^
 
-obj/forward_backward.o: src/forward_backward.cpp 
+obj/forward_backward.o: src/forward_backward.cpp
 	$(CXX) $(FR_CFLAGS) -o $@ -c $^
 
-obj/optimizer.o: src/optimizer.cpp 
+obj/optimizer.o: src/optimizer.cpp
 	$(CXX) $(FR_CFLAGS) -o $@ -c $^
 
-obj/threading.o: src/threading.cpp 
+obj/threading.o: src/threading.cpp
 	$(CXX) $(FR_CFLAGS) -o $@ -c $^
 
-obj/csv.o: src/csv.cpp 
-	$(CXX) $(FR_CFLAGS) -o $@ -c $^
-
-obj/kernel.o: src/kernel.cpp
+obj/csv.o: src/csv.cpp
 	$(CXX) $(FR_CFLAGS) -o $@ -c $^
 
 obj/cli.o: src/cli.cpp
@@ -87,10 +97,13 @@ obj/training.o: src/training.cpp
 obj/cpu_backend.o: src/cpu_backend.cpp
 	$(CXX) $(FR_CFLAGS) -o $@ -c $^
 
+obj/backend_factory.o: src/backend_factory.cpp
+	$(CXX) $(FR_CFLAGS) -o $@ -c $^
+
 obj/opencl_backend.o: src/opencl_backend.cpp
 	$(CXX) $(FR_CFLAGS) -o $@ -c $^
 
-obj/backend_factory.o: src/backend_factory.cpp
+obj/kernel.o: src/kernel.cpp
 	$(CXX) $(FR_CFLAGS) -o $@ -c $^
 
 # Utility ######################################################################
@@ -99,9 +112,13 @@ framework-open/bin/network_tool:
 
 # Clean up #####################################################################
 clean: clean_framework
-	 rm -f bin/* obj/*
+	rm -f bin/* obj/*
+	rm -f framework-open/obj/*
 
 clean_framework:
 	( cd framework-open/ ; make clean )
+
+clean_objs:
+	rm -f obj/*
 
 # end

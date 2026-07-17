@@ -1,3 +1,5 @@
+#ifdef OPENCL
+
 #include "kernel.hpp"
 
 string opencl_c_container() {
@@ -346,3 +348,5 @@ string opencl_c_container() {
 
     );
 } // ####### End of OpenCL C coe
+
+#endif // OPENCL

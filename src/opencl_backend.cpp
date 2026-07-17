@@ -1,3 +1,5 @@
+#ifdef OPENCL
+
 #include "opencl_backend.h"
 #include "forward_backward.h"
 #include "network_utils.h"
@@ -77,7 +79,6 @@ static void timed_run(Kernel& kernel, const char* name) {
     if (g_timing_enabled) {
         Event evt;
         kernel.enqueue_run_profiled(&evt);
-        evt.wait();
         double us = get_kernel_duration_us(evt);
         timing_add(name, us);
     } else {
@@ -560,3 +561,5 @@ void OpenclBackend::update_weights(neuro::Network* network) {
     write_weights_to_network(network, nc.total_neurons, *weights,
                              nc.max_incoming);
 }
+
+#endif // OPENCL

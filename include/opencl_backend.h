@@ -1,5 +1,7 @@
 #pragma once
 
+#ifdef OPENCL
+
 #include "backend.h"
 #include "opencl.hpp"
 #include <chrono>
@@ -79,3 +81,5 @@ class OpenclBackend : public TrainingBackend {
     // Timing
     std::chrono::high_resolution_clock::time_point t_start;
 };
+
+#endif // OPENCL

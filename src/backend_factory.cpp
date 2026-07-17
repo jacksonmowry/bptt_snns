@@ -1,6 +1,8 @@
 #include "backend.h"
 #include "cpu_backend.h"
+#ifdef OPENCL
 #include "opencl_backend.h"
+#endif
 #include <cstdio>
 #include <cstdlib>
 #include <memory>
@@ -9,6 +11,7 @@ std::unique_ptr<TrainingBackend> create_backend(const CliConfig& cfg,
                                                 NetworkConfiguration& nc,
                                                 const Dataset& train,
                                                 const Dataset& test) {
+#ifdef OPENCL
     if (cfg.opencl) {
         if (!nc.discrete) {
             fprintf(
@@ -18,8 +21,8 @@ std::unique_ptr<TrainingBackend> create_backend(const CliConfig& cfg,
         }
         return std::unique_ptr<TrainingBackend>(new OpenclBackend(
             cfg, nc, train, test, nc.max_incoming, nc.max_outgoing));
-    } else {
-        return std::unique_ptr<TrainingBackend>(
-            new CpuBackend(cfg, nc, train, test));
     }
+#endif
+    return std::unique_ptr<TrainingBackend>(
+        new CpuBackend(cfg, nc, train, test));
 }

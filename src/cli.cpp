@@ -280,6 +280,7 @@ int parse_cli(int argc, char* argv[], CliConfig* cfg) {
                 return cli_error("--threads must be > 0");
             }
             cfg->threads = v;
+#ifdef OPENCL
         } else if (arg == "--opencl") {
             if (++i >= argc) {
                 return cli_error("--opencl requires a value (true/false)");
@@ -291,6 +292,7 @@ int parse_cli(int argc, char* argv[], CliConfig* cfg) {
                     "--opencl_timings requires a value (true/false)");
             }
             cfg->opencl_timings = (std::string(argv[i]) == "true");
+#endif
         } else if (arg == "--max_delay" || arg == "-D") {
             unsigned long v;
             int rc = parse_ulong_arg(i, argc, argv, &v, "max_delay");
@@ -312,6 +314,7 @@ int parse_cli(int argc, char* argv[], CliConfig* cfg) {
                 return rc;
             }
             cfg->weight_init_stddev = v;
+#ifdef OPENCL
         } else if (arg == "--cpu_eval_interval") {
             unsigned long v;
             int rc = parse_ulong_arg(i, argc, argv, &v, "cpu_eval_interval");
@@ -319,6 +322,7 @@ int parse_cli(int argc, char* argv[], CliConfig* cfg) {
                 return rc;
             }
             cfg->cpu_eval_interval = v;
+#endif
         } else {
             return cli_error("Unknown argument: %s", arg.c_str());
         }
@@ -363,14 +367,16 @@ void print_usage(const char* prog) {
     fprintf(stderr,
             "  -N, --network_json_out FILE         Output network JSON\n");
     fprintf(stderr, "  -T, --threads          UINT         Thread count\n");
-    fprintf(
-        stderr,
-        " N/A, --opencl                        Enable OpenCL Acceleration\n");
+#ifdef OPENCL
     fprintf(stderr, " N/A, --cpu_eval_interval UINT      CPU test every N "
                     "epochs (0=off)\n");
     fprintf(
         stderr,
+        " N/A, --opencl                        Enable OpenCL Acceleration\n");
+    fprintf(
+        stderr,
         " N/A, --opencl_timings          Enable OpenCL kernel timing report\n");
+#endif
     fprintf(stderr, "  -D, --max_delay          UINT         Max synapse delay\n");
     fprintf(stderr, " N/A, --weight_init_stddev FLOAT        Weight init std dev (>0)\n");
     fprintf(stderr, "  -h, --help                          Show this help\n");

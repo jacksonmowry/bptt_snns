@@ -255,7 +255,7 @@ int main(int argc, char* argv[]) {
     // Finalize: sync weights to network
     backend->update_weights(n);
 
-    // Cleanup (OpenCL destructor runs final CPU eval if applicable)
+    // Cleanup
     backend.reset();
     delete n;
     free(train.data);
