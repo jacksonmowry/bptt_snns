@@ -75,23 +75,33 @@ int main(int argc, char* argv[]) {
     Dataset train;
     Dataset test;
     if (cfg.timeseries) {
-        load_dataset_2d(cfg.data_file.c_str(), cfg.label_file.c_str(),
-                        cfg.training_percent, &train, &test);
-    } else if (have_simple) {
-        load_dataset(cfg.data_file.c_str(), cfg.label_file.c_str(),
-                     cfg.training_percent, &train, &test);
+        if (have_simple) {
+            load_dataset_2d(cfg.data_file.c_str(), cfg.label_file.c_str(),
+                            cfg.training_percent, &train, &test);
+        } else {
+            load_dataset_2d_single(cfg.train_data_file.c_str(),
+                                   cfg.train_label_file.c_str(), &train);
+            load_dataset_2d_single(cfg.test_data_file.c_str(),
+                                   cfg.test_label_file.c_str(), &test);
+        }
     } else {
-        load_dataset_single(cfg.train_data_file.c_str(),
-                            cfg.train_label_file.c_str(), &train);
-        load_dataset_single(cfg.test_data_file.c_str(),
-                            cfg.test_label_file.c_str(), &test);
+        if (have_simple) {
+            load_dataset(cfg.data_file.c_str(), cfg.label_file.c_str(),
+                         cfg.training_percent, &train, &test);
+        } else {
+            load_dataset_single(cfg.train_data_file.c_str(),
+                                cfg.train_label_file.c_str(), &train);
+            load_dataset_single(cfg.test_data_file.c_str(),
+                                cfg.test_label_file.c_str(), &test);
+        }
     }
 
     size_t train_labels = label_count(&train);
     size_t test_labels  = label_count(&test);
     assert(test.shape[0] == 0 || train_labels == test_labels);
 
-    /* Verify train and test label mappings match (same labels, same order) */
+    /* Verify train and test label mappings match (same labels, same order)
+     */
     if (test.shape[0] > 0) {
         for (int i = 0; i < (int)train_labels; i++) {
             if (strcmp(train.label_strings[i], test.label_strings[i])) {
@@ -156,11 +166,13 @@ int main(int argc, char* argv[]) {
     size_t effective_max_delay = cfg.max_delay;
     if (n->num_nodes() == 0) {
         size_t net_max_delay = (size_t)n->get_data("proc_params")["max_delay"];
-        effective_max_delay = cfg.max_delay < net_max_delay ? cfg.max_delay : net_max_delay;
+        effective_max_delay =
+            cfg.max_delay < net_max_delay ? cfg.max_delay : net_max_delay;
         std::tie(neuron_count, synapse_count) = generate_network(
             n, input_neurons, hidden_neurons, output_neurons, total_neurons,
             cfg.connectivity, discrete, scale, scale_factor, min_weight,
-            max_weight, max_threshold, effective_max_delay, cfg.weight_init_stddev);
+            max_weight, max_threshold, effective_max_delay,
+            cfg.weight_init_stddev);
         printf("Neurons: %zu, Synapses: %zu\n", neuron_count, synapse_count);
     } else {
         neuron_count  = n->num_nodes();

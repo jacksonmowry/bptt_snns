@@ -670,3 +670,153 @@ void load_dataset_2d(const char* data_path, const char* labels_path,
     free(ds.max_vals);
     free(ds.shape);
 }
+
+void load_dataset_2d_single(const char* data_path, const char* labels_path,
+                            Dataset* out) {
+    *out           = {NULL, NULL, NULL, NULL, NULL, 0, 3, NULL, false};
+    FILE* f_data   = fopen(data_path, "r");
+    FILE* f_labels = fopen(labels_path, "r");
+
+    if (f_data == NULL || f_labels == NULL) {
+        if (f_data != NULL) {
+            fclose(f_data);
+        }
+        if (f_labels != NULL) {
+            fclose(f_labels);
+        }
+        return;
+    }
+
+    char line[4096 * 16];
+    int num_obs   = 0;
+    int non_empty = 0;
+    rewind(f_data);
+    while (fgets(line, sizeof(line), f_data) != NULL) {
+        int is_blank = 1;
+        for (int k = 0; line[k]; k++) {
+            if (line[k] != '\n' && line[k] != '\r' && line[k] != ' ') {
+                is_blank = 0;
+                break;
+            }
+        }
+        if (!is_blank) {
+            non_empty++;
+        } else {
+            num_obs++;
+        }
+    }
+    if (non_empty > 0) {
+        num_obs++;
+    }
+
+    if (num_obs == 0) {
+        fclose(f_data);
+        fclose(f_labels);
+        return;
+    }
+
+    int input_features = non_empty / num_obs;
+    rewind(f_data);
+
+    int timesteps = 0;
+    while (fgets(line, sizeof(line), f_data) != NULL) {
+        int is_blank = 1;
+        for (int k = 0; line[k]; k++) {
+            if (line[k] != '\n' && line[k] != '\r' && line[k] != ' ') {
+                is_blank = 0;
+                break;
+            }
+        }
+        if (!is_blank) {
+            for (int i = 0; line[i]; i++) {
+                if (line[i] == ',') {
+                    timesteps++;
+                }
+            }
+            timesteps++;
+            break;
+        }
+    }
+
+    out->shape    = (int*)malloc(3 * sizeof(int));
+    out->shape[0] = num_obs;
+    out->shape[1] = input_features;
+    out->shape[2] = timesteps;
+
+    int block_size = input_features * timesteps;
+    int total_data = num_obs * block_size;
+    out->data      = (double*)malloc(total_data * sizeof(double));
+    out->labels    = (double*)malloc(num_obs * sizeof(double));
+    out->min_vals  = (double*)malloc(input_features * sizeof(double));
+    out->max_vals  = (double*)malloc(input_features * sizeof(double));
+
+    if (out->data == NULL || out->labels == NULL || out->min_vals == NULL ||
+        out->max_vals == NULL) {
+        free(out->data);
+        free(out->labels);
+        free(out->min_vals);
+        free(out->max_vals);
+        fclose(f_data);
+        fclose(f_labels);
+        return;
+    }
+
+    rewind(f_data);
+    rewind(f_labels);
+
+    // Read data
+    int obs_idx  = 0;
+    int line_cnt = 0;
+    while (fgets(line, sizeof(line), f_data) != NULL) {
+        int is_blank = 1;
+        for (int k = 0; line[k]; k++) {
+            if (line[k] != '\n' && line[k] != '\r' && line[k] != ' ') {
+                is_blank = 0;
+                break;
+            }
+        }
+        if (is_blank) {
+            obs_idx++;
+            line_cnt = 0;
+            continue;
+        }
+        char* token = strtok(line, ",");
+        for (int c = 0; c < timesteps && token != NULL; c++) {
+            out->data[(obs_idx * block_size) + (line_cnt * timesteps) + c] =
+                atof(token);
+            token = strtok(NULL, ",");
+        }
+        line_cnt++;
+    }
+
+    // Read labels as strings
+    rewind(f_labels);
+    char** raw_labels = read_label_strings(f_labels, num_obs);
+
+    fclose(f_data);
+    fclose(f_labels);
+
+    // Build unique sorted label mapping
+    build_label_mapping(raw_labels, num_obs, out->labels, &out->label_strings,
+                        &out->label_strings_count);
+
+    // Min/max
+    for (int feature = 0; feature < input_features; feature++) {
+        out->min_vals[feature] = DBL_MAX;
+        out->max_vals[feature] = -DBL_MAX;
+    }
+    for (int obs = 0; obs < num_obs; obs++) {
+        for (int feature = 0; feature < input_features; feature++) {
+            for (int column = 0; column < timesteps; column++) {
+                double val = out->data[(obs * block_size) +
+                                       (feature * timesteps) + column];
+                if (val < out->min_vals[feature]) {
+                    out->min_vals[feature] = val;
+                }
+                if (val > out->max_vals[feature]) {
+                    out->max_vals[feature] = val;
+                }
+            }
+        }
+    }
+}
