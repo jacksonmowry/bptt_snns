@@ -1,0 +1,11 @@
+E   1/10  TrL:  1.10192 TrA:   0.180  BestTrA:   0.180
+E   2/10  TrL: 0.988261 TrA:   0.673  BestTrA:   0.673
+E   3/10  TrL: 0.915298 TrA:   0.667  BestTrA:   0.673
+E   4/10  TrL: 0.866273 TrA:   0.667  BestTrA:   0.673
+E   5/10  TrL: 0.830696 TrA:   0.733  BestTrA:   0.733
+E   6/10  TrL: 0.825039 TrA:   0.760  BestTrA:   0.760
+E   7/10  TrL: 0.820032 TrA:   0.733  BestTrA:   0.760
+E   8/10  TrL: 0.817784 TrA:   0.767  BestTrA:   0.767
+E   9/10  TrL: 0.817872 TrA:   0.733  BestTrA:   0.767
+E  10/10  TrL: 0.817125 TrA:   0.720  BestTrA:   0.767
+Final CPU Train Loss:   0.813881, Final CPU Train Acc:   0.673333

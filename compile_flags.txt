@@ -4,6 +4,8 @@ include
 framework-open/include
 -I
 vendor/OpenCL-Wrapper/include
+-I
+vendor
 -Wall
 -Wextra
 -std=c++11

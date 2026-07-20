@@ -1,0 +1,21 @@
+  [CPU eval @ epoch    1] Train Loss:      1.089, Train Acc:   0.713333
+E   1/10  TrL:  1.10192 TrA:   0.180  BestTrA:   0.180
+  [CPU eval @ epoch    2] Train Loss:   0.932588, Train Acc:   0.666667
+E   2/10  TrL: 0.988261 TrA:   0.673  BestTrA:   0.673
+  [CPU eval @ epoch    3] Train Loss:   0.893233, Train Acc:   0.666667
+E   3/10  TrL: 0.915298 TrA:   0.667  BestTrA:   0.673
+  [CPU eval @ epoch    4] Train Loss:   0.844881, Train Acc:   0.666667
+E   4/10  TrL: 0.866273 TrA:   0.667  BestTrA:   0.673
+  [CPU eval @ epoch    5] Train Loss:   0.824431, Train Acc:   0.733333
+E   5/10  TrL: 0.830696 TrA:   0.733  BestTrA:   0.733
+  [CPU eval @ epoch    6] Train Loss:   0.822088, Train Acc:   0.733333
+E   6/10  TrL: 0.825039 TrA:   0.760  BestTrA:   0.760
+  [CPU eval @ epoch    7] Train Loss:   0.818449, Train Acc:   0.753333
+E   7/10  TrL: 0.820032 TrA:   0.733  BestTrA:   0.760
+  [CPU eval @ epoch    8] Train Loss:   0.817902, Train Acc:   0.753333
+E   8/10  TrL: 0.817784 TrA:   0.767  BestTrA:   0.767
+  [CPU eval @ epoch    9] Train Loss:   0.817845, Train Acc:   0.713333
+E   9/10  TrL: 0.817872 TrA:   0.733  BestTrA:   0.767
+  [CPU eval @ epoch   10] Train Loss:   0.813881, Train Acc:   0.673333
+E  10/10  TrL: 0.817125 TrA:   0.720  BestTrA:   0.767
+Final CPU Train Loss:   0.813881, Final CPU Train Acc:   0.673333

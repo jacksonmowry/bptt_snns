@@ -1,0 +1,11 @@
+E   1/10  TrL:   1.7914 TrA:   0.214  TeL:  1.79989 TeA:   0.173  BestTeA:   0.173
+E   2/10  TrL:  1.79379 TrA:   0.170  TeL:  1.79847 TeA:   0.122  BestTeA:   0.173
+E   3/10  TrL:  1.79101 TrA:   0.173  TeL:  1.79971 TeA:   0.153  BestTeA:   0.173
+E   4/10  TrL:  1.78788 TrA:   0.144  TeL:  1.80408 TeA:   0.143  BestTeA:   0.173
+E   5/10  TrL:   1.7883 TrA:   0.198  TeL:  1.80436 TeA:   0.122  BestTeA:   0.173
+E   6/10  TrL:  1.78715 TrA:   0.168  TeL:  1.79822 TeA:   0.122  BestTeA:   0.173
+E   7/10  TrL:   1.7854 TrA:   0.178  TeL:  1.79801 TeA:   0.122  BestTeA:   0.173
+E   8/10  TrL:  1.78599 TrA:   0.186  TeL:  1.79497 TeA:   0.184  BestTeA:   0.184
+E   9/10  TrL:  1.78408 TrA:   0.191  TeL:  1.79628 TeA:   0.143  BestTeA:   0.184
+E  10/10  TrL:   1.7842 TrA:   0.155  TeL:  1.79745 TeA:   0.163  BestTeA:   0.184
+Final CPU Test Loss:    1.79745, Final CPU Test Acc:   0.163265

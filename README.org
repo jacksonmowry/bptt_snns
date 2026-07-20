@@ -11,7 +11,7 @@ Just run =make=
 ** Datasets
 Either supply your own, or run the =scripts/datasets.py= script to fetch a common dataset.
 ** Running
-You'll need both data/label CSVs, the application will parse everything for you. Labels should be zero indexed integers only.
+You'll need both data/label CSVs, the application will parse everything for you.
 
 #+begin_src shell
 bin/bptt_learning --network_json networks/risp_f_emptynet.json --data_file mnist_data.csv --label_file mnist_label.csv --learning_rate 0.0084 --decay_rate 0.0001 --tau 0.95 --rho 1.4 --timesteps 32 --hidden_neurons 64 --epochs 1000 --batch_size 10 --connectivity 0.1
@@ -92,11 +92,6 @@ This overwrites existing =.out= and =.net.json= files in-place.
 
 See =tests/golden_tests.org= for full documentation and directory structure.
 
-** Test Registry
-
-| Test Config | Description |
-|-------------+-------------|
-| =golden_test_1_iris_10ep= | Iris 80/20 split, 10 epochs, seed 42 — baseline pipeline verification |
 * Network Generation
 Networks are create with the following parameters
 - Input neurons equal to =2 * data_columns=

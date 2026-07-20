@@ -15,41 +15,32 @@ def my_target_program(params):
     command = [
         "bin/bptt_learning",
         "--network_json",
-        "networks/risp_f_emptynet.json",
+        "networks/risp_127.json",
         "--data_file",
-        "./data/1000_mnist_data.csv",
+        "/home/jackson/framework/cpp-apps/applications/classify/datasets/regular/digits_data.csv",
         "--label_file",
-        "./data/1000_mnist_label.csv",
-        "--timesteps",
-        "16",
-        "--hidden_neurons",
-        "96",
+        "/home/jackson/framework/cpp-apps/applications/classify/datasets/regular/digits_label.csv",
         "--epochs",
         "10",
         "--threads",
-        "1",
+        "10",
         "--batch_size",
-        "100",
-        "--connectivity",
-        "0.05",
+        "30",
     ]
-    command.append("--learning_rate")
-    command.append(f"{params["learning_rate"]}")
-    command.append("--decay_rate")
-    command.append(f"{params["decay_rate"]}")
-    command.append("--tau")
-    command.append(f"{params["tau"]}")
-    command.append("--rho")
-    command.append(f"{params["rho"]}")
+
+    for k, v in params.items():
+        command.append(f"--{k}")
+        command.append(str(v))
+
     avg_score = 0.0
 
-    trials = 10
+    trials = 5
     for i in range(trials):
         try:
             result = subprocess.run(command, capture_output=True, text=True, check=True)
 
             output = result.stdout.strip()
-            score = float(output.split("\n")[-1])
+            score = float(output.split("\n")[-1].split(" ")[-1])
 
             avg_score += (
                 score  # Returning negative error so that Maximize = Minimum Error
@@ -122,7 +113,10 @@ def objective(trial, param_triplets):
     # 1. Suggest values for each parameter defined via CLI
     suggested_params = {}
     for name, vmin, vmax in param_triplets:
-        suggested_params[name] = trial.suggest_float(name, vmin, vmax)
+        if name in ["max_delay", "timesteps", "hidden_neurons"]:
+            suggested_params[name] = trial.suggest_int(name, int(vmin), int(vmax))
+        else:
+            suggested_params[name] = trial.suggest_float(name, vmin, vmax)
 
     # 2. Call your actual program
     # Note: We pass the dictionary of parameters to your function
@@ -148,8 +142,6 @@ def main():
         sys.exit(1)
 
     db_file = "optuna_study.db"
-    if os.path.exists(db_file):
-        os.remove(db_file)
 
     storage_url = f"sqlite:///{db_file}"
     study_name = "parallel_optimization"
@@ -160,6 +152,7 @@ def main():
         study_name=study_name,
         storage=storage_url,
         direction=args.direction,
+        load_if_exists=True,
     )
 
     print(f"Starting optimization...")

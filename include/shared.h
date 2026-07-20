@@ -20,7 +20,6 @@ struct TrainingBundle {
 
     Eigen::VectorXd future_mem_grad_;
     Eigen::Matrix<double, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor> sgh;
-    Eigen::Matrix<double, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor> vgh;
     Eigen::VectorXd dL_dV_;
     Eigen::VectorXd v_pre_t_;
     Eigen::VectorXd dV_post_dV_pre_;
@@ -52,6 +51,8 @@ struct NetworkConfiguration {
     size_t output_neurons;
     size_t layer_offsets[3];
     size_t total_neurons;
+    size_t max_incoming;
+    size_t max_outgoing;
 
     size_t timesteps;
     bool timeseries;
@@ -63,4 +64,5 @@ struct NetworkConfiguration {
     bool discrete;
     double min_weight;
     double max_weight;
+    double spike_value_factor;
 };

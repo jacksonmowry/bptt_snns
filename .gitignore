@@ -9,3 +9,4 @@ perf.data
 perf.data.old
 networks/*
 main/
+tests/golden/iris_opencl_large/golden_test_3_iris_opencl.net.json

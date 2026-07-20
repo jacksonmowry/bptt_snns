@@ -16,7 +16,8 @@ load_and_init_network(const std::string& json_file, double& connectivity,
                       double& rho, size_t& timesteps, size_t& hidden_neurons,
                       unsigned long& seed, size_t& epochs, size_t& batch_size,
                       double& training_percent, size_t& threads,
-                      bool& timeseries) {
+                      bool& timeseries, size_t& max_delay,
+                      double& weight_init_stddev) {
     json emptynet;
     std::ifstream fin(json_file);
     fin >> emptynet;
@@ -82,6 +83,9 @@ load_and_init_network(const std::string& json_file, double& connectivity,
                             "--training_percent");
             override_size("threads", threads, "--threads");
             override_bool("timeseries", timeseries, "--timeseries");
+            override_size("max_delay", max_delay, "--max_delay");
+            override_double("weight_init_stddev", weight_init_stddev,
+                            "--weight_init_stddev");
             printf("Loaded metadata from %s\n", json_file.c_str());
         } else {
             fprintf(stderr,
@@ -93,20 +97,17 @@ load_and_init_network(const std::string& json_file, double& connectivity,
     return n;
 }
 
-void build_run_metadata(
-    neuro::Network* n, int argc, char* argv[], const CliConfig& cfg,
-    const Dataset* train, const Dataset* test, size_t input_neurons,
-    size_t output_neurons, size_t total_neurons, size_t neuron_count,
-    size_t synapse_count, bool discrete, double min_potential,
-    double min_weight, double max_weight, double max_threshold,
-    const std::string& leak_prop, int scale, double scale_factor,
-    double connectivity, double learning_rate, double decay_rate, double tau,
-    double rho, size_t timesteps, size_t hidden_neurons, unsigned long seed,
-    size_t epochs, size_t batch_size, double training_percent, size_t threads,
-    bool timeseries) {
+void build_run_metadata(neuro::Network* n, int argc, char* argv[],
+                        const CliConfig& cfg, size_t input_neurons,
+                        size_t output_neurons, size_t total_neurons,
+                        size_t neuron_count, size_t synapse_count,
+                        bool discrete, double min_potential, double min_weight,
+                        double max_weight, double max_threshold,
+                        const std::string& leak_prop, int scale,
+                        double scale_factor, size_t effective_max_delay) {
     // CLI arguments
     json cli_args = json::array();
-    for (int i = 0; i < argc; i++) {
+    for (int i = 1; i < argc; i++) {
         cli_args.push_back(std::string(argv[i]));
     }
 
@@ -135,19 +136,19 @@ void build_run_metadata(
     run_metadata["git_commit"]    = git_commit.empty() ? "unknown" : git_commit;
     run_metadata["compile_time"]  = compile_time;
     run_metadata["start_time"]    = (double)tv.tv_sec + tv.tv_usec / 1000000.0;
-    run_metadata["seed"]          = seed;
-    run_metadata["connectivity"]  = connectivity;
-    run_metadata["learning_rate"] = learning_rate;
-    run_metadata["decay_rate"]    = decay_rate;
-    run_metadata["tau"]           = tau;
-    run_metadata["rho"]           = rho;
-    run_metadata["timesteps"]     = timesteps;
-    run_metadata["hidden_neurons"]   = hidden_neurons;
-    run_metadata["epochs"]           = epochs;
-    run_metadata["batch_size"]       = batch_size;
-    run_metadata["training_percent"] = training_percent;
-    run_metadata["threads"]          = threads;
-    run_metadata["timeseries"]       = timeseries;
+    run_metadata["seed"]          = cfg.seed;
+    run_metadata["connectivity"]  = cfg.connectivity;
+    run_metadata["learning_rate"] = cfg.learning_rate;
+    run_metadata["decay_rate"]    = cfg.decay_rate;
+    run_metadata["tau"]           = cfg.tau;
+    run_metadata["rho"]           = cfg.rho;
+    run_metadata["timesteps"]     = cfg.timesteps;
+    run_metadata["hidden_neurons"]   = cfg.hidden_neurons;
+    run_metadata["epochs"]           = cfg.epochs;
+    run_metadata["batch_size"]       = cfg.batch_size;
+    run_metadata["training_percent"] = cfg.training_percent;
+    run_metadata["threads"]          = cfg.threads;
+    run_metadata["timeseries"]       = cfg.timeseries;
     run_metadata["network_json"]     = cfg.network_json_file;
     run_metadata["data_file"]        = cfg.data_file;
     run_metadata["label_file"]       = cfg.label_file;
@@ -169,30 +170,8 @@ void build_run_metadata(
     run_metadata["leak_mode"]        = leak_prop;
     run_metadata["scale"]            = scale;
     run_metadata["scale_factor"]     = discrete ? scale_factor : 1.0;
-
-    // Train data min/max arrays
-    {
-        json train_min = json::array();
-        json train_max = json::array();
-        for (int i = 0; i < train->cols; i++) {
-            train_min.push_back(train->min_vals[i]);
-            train_max.push_back(train->max_vals[i]);
-        }
-        run_metadata["train_data_min"] = train_min;
-        run_metadata["train_data_max"] = train_max;
-    }
-
-    // Test data min/max arrays (omit if test set empty)
-    if (test->observations > 0) {
-        json test_min = json::array();
-        json test_max = json::array();
-        for (int i = 0; i < test->cols; i++) {
-            test_min.push_back(test->min_vals[i]);
-            test_max.push_back(test->max_vals[i]);
-        }
-        run_metadata["test_data_min"] = test_min;
-        run_metadata["test_data_max"] = test_max;
-    }
+    run_metadata["max_delay"]        = effective_max_delay;
+    run_metadata["weight_init_stddev"] = cfg.weight_init_stddev;
 
     // Merge with existing Associated_Data -> other if any
     json existing_other = json::object();
@@ -219,7 +198,7 @@ generate_network(neuro::Network* n, size_t input_neurons, size_t hidden_neurons,
                  size_t output_neurons, size_t total_neurons,
                  double connectivity, bool discrete, int scale,
                  double scale_factor, double min_weight, double max_weight,
-                 double max_threshold) {
+                 double max_threshold, size_t max_delay, double weight_init_stddev) {
     const size_t layer_sizes[3] = {input_neurons, hidden_neurons,
                                    output_neurons};
     size_t neuron_count         = 0;
@@ -248,12 +227,12 @@ generate_network(neuro::Network* n, size_t input_neurons, size_t hidden_neurons,
             neuro::Edge* e = n->add_edge(i, j);
             synapse_count++;
 
-            double weight = normal(0.0, 0.1);
+            double weight = normal(0.0, weight_init_stddev);
             if (discrete) {
                 weight = quantize(weight, scale, min_weight, max_weight) /
                          scale_factor;
             }
-            int delay = rand() % 7 + 1;
+            int delay = rand() % (int)max_delay + 1;
 
             e->set(n->get_edge_property("Weight")->index, weight);
             e->set(n->get_edge_property("Delay")->index, delay);
