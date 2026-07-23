@@ -14,78 +14,6 @@
 using namespace std;
 using namespace neuro;
 
-struct KernelTiming {
-    string name;
-    double total_us;
-    double min_us;
-    double max_us;
-    uint64_t calls;
-    KernelTiming()
-        : name(""), total_us(0.0), min_us(1e18), max_us(0.0), calls(0) {}
-    KernelTiming(const string& n, double u, uint64_t c)
-        : name(n), total_us(u), min_us(u), max_us(u), calls(c) {}
-};
-
-static vector<KernelTiming> g_kernels;
-static bool g_timing_enabled = false;
-
-static void timing_start(bool enabled) {
-    g_timing_enabled = enabled;
-    if (!enabled) {
-        return;
-    }
-    g_kernels.clear();
-    g_kernels.reserve(8);
-}
-
-static void timing_add(const char* name, double us) {
-    if (!g_timing_enabled) {
-        return;
-    }
-    for (auto& kt : g_kernels) {
-        if (kt.name == name) {
-            kt.total_us += us;
-            kt.min_us = std::min(kt.min_us, us);
-            kt.max_us = std::max(kt.max_us, us);
-            kt.calls++;
-            return;
-        }
-    }
-    g_kernels.push_back(KernelTiming(name, us, 1));
-}
-
-static void timing_print(double total_us) {
-    if (!g_timing_enabled || g_kernels.empty()) {
-        return;
-    }
-
-    printf("\n===== OpenCL Kernel Timing Report (GPU profiling) ===========\n");
-    printf("%-28s %10s %10s %10s %8s %10s\n", "Kernel", "Avg(us)", "Min(us)",
-           "Max(us)", "Calls", "Share");
-    printf("%-28s %10s %10s %10s %8s %10s\n", "----------------------------",
-           "----------", "----------", "----------", "--------", "----------");
-
-    for (auto& kt : g_kernels) {
-        double avg = (kt.calls > 0) ? (kt.total_us / kt.calls) : 0.0;
-        double pct = (total_us > 0) ? (kt.total_us / total_us * 100.0) : 0.0;
-        printf("%-28s %10.1f %10.1f %10.1f %8zu %9.2f%%\n", kt.name.c_str(),
-               avg, kt.min_us, kt.max_us, kt.calls, pct);
-    }
-    printf("%-28s %13.3f ms\n", "TOTAL", total_us / 1000.0);
-    printf("=============================================================\n\n");
-}
-
-static void timed_run(Kernel& kernel, const char* name) {
-    if (g_timing_enabled) {
-        Event evt;
-        kernel.enqueue_run_profiled(&evt);
-        double us = get_kernel_duration_us(evt);
-        timing_add(name, us);
-    } else {
-        kernel.run();
-    }
-}
-
 static void encode(Memory<double>& data, const Dataset& d, bool timeseries) {
     if (timeseries) {
         // data = [observations * (input_features * 2) * dataset_timesteps]
@@ -361,7 +289,6 @@ OpenclBackend::OpenclBackend(const CliConfig& cfg, NetworkConfiguration& nc,
         batch_order[i] = (size_t)i;
     }
 
-    timing_start(cfg.opencl_timings);
     t_start = chrono::high_resolution_clock::now();
 }
 
@@ -403,28 +330,28 @@ void OpenclBackend::do_one_epoch(size_t epoch) {
             // Encode data
             if (cfg.timeseries) {
                 encode_timeseries_kernel->set_parameters(5, (uint)obs);
-                timed_run(*encode_timeseries_kernel, "encode_timeseries");
+                encode_timeseries_kernel->run();
             } else {
                 encode_kernel->set_parameters(5, (uint)obs);
-                timed_run(*encode_kernel, "encode");
+                encode_kernel->run();
             }
 
             // Forward pass
             for (size_t t = 0; t < nc.timesteps; t++) {
                 forward_kernel->set_parameters(14, (uint)t);
-                timed_run(*forward_kernel, "forward");
+                forward_kernel->run();
             }
 
             // Loss
             loss_kernel->set_parameters(7, (uint)(train.labels[obs]));
-            timed_run(*loss_kernel, "loss");
+            loss_kernel->run();
 
             // Backwards
             for (short t = nc.timesteps - 1; t >= 0; t--) {
                 backward_grad_kernel->set_parameters(19, (short)t);
-                timed_run(*backward_grad_kernel, "backward_grad");
+                backward_grad_kernel->run();
                 backward_delta_w_kernel->set_parameters(15, (short)t);
-                timed_run(*backward_delta_w_kernel, "backward_delta_w");
+                backward_delta_w_kernel->run();
             }
         }
 
@@ -436,7 +363,7 @@ void OpenclBackend::do_one_epoch(size_t epoch) {
         weight_updates_kernel->set_parameters(11, (uint)batch_start);
         weight_updates_kernel->set_parameters(12, (uint)epoch);
         weight_updates_kernel->set_parameters(15, (float)b1_t, (float)b2_t);
-        timed_run(*weight_updates_kernel, "weight_updates");
+        weight_updates_kernel->run();
     }
 
     correct->read_from_device();
@@ -472,19 +399,19 @@ void OpenclBackend::do_one_epoch(size_t epoch) {
 
             if (cfg.timeseries) {
                 encode_timeseries_kernel->set_parameters(5, (uint)obs);
-                timed_run(*encode_timeseries_kernel, "encode_timeseries");
+                encode_timeseries_kernel->run();
             } else {
                 encode_kernel->set_parameters(5, (uint)obs);
-                timed_run(*encode_kernel, "encode");
+                encode_kernel->run();
             }
 
             for (size_t t = 0; t < nc.timesteps; t++) {
                 forward_kernel->set_parameters(14, (uint)t);
-                timed_run(*forward_kernel, "forward");
+                forward_kernel->run();
             }
 
             loss_kernel->set_parameters(7, (uint)(test.labels[obs]));
-            timed_run(*loss_kernel, "loss");
+            loss_kernel->run();
         }
 
         correct->read_from_device();
@@ -532,11 +459,6 @@ void OpenclBackend::do_one_epoch(size_t epoch) {
 }
 
 OpenclBackend::~OpenclBackend() {
-    auto t_end = chrono::high_resolution_clock::now();
-    double total_us =
-        chrono::duration<double, std::micro>(t_end - t_start).count();
-    timing_print(total_us);
-
     // Read GPU weights back to host for state
     weights->read_from_device();
     write_weights_to_network(nc.n, nc.total_neurons, *weights, nc.max_incoming);
