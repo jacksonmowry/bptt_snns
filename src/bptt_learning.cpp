@@ -182,10 +182,11 @@ int main(int argc, char* argv[]) {
     }
     n->make_sorted_node_vector();
 
-    build_run_metadata(n, argc, argv, cfg, input_neurons, output_neurons,
-                       total_neurons, neuron_count, synapse_count, discrete,
-                       min_potential, min_weight, max_weight, max_threshold,
-                       leak_prop, scale, scale_factor, effective_max_delay);
+    build_run_metadata(n, argc, argv, cfg, &train, &test, input_neurons,
+                       output_neurons, total_neurons, neuron_count,
+                       synapse_count, discrete, min_potential, min_weight,
+                       max_weight, max_threshold, leak_prop, scale,
+                       scale_factor, effective_max_delay);
 
     NetworkConfiguration nc = {
         .n              = n,
