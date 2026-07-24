@@ -40,16 +40,16 @@
         "--confusion_matrix",
         "true",
         "--network_json_out",
-        "/tmp/tmp.xR7eGB7gJj"
+        "tests/golden/only_train_opencl/golden_test_only_train_opencl.net.json"
       ],
-      "compile_time": 1784923136,
+      "compile_time": 1784925597,
       "connectivity": 0.75,
       "data_file": "data/iris_data.csv",
       "decay_rate": 0.0001,
       "discrete": true,
       "epoch": 10,
       "epochs": 10,
-      "git_commit": "d9d8fda2079fdaf3d51a44a94330540bbf5dc380",
+      "git_commit": "5fc320d496518afb4d45086df65ad567b9292f2c",
       "hidden_neurons": 16,
       "input_neurons": 8,
       "label_file": "data/iris_label.csv",
@@ -66,7 +66,7 @@
       "min_potential": -1.0,
       "min_weight": -127.0,
       "network_json": "networks/risp_127.json",
-      "network_json_out": "/tmp/tmp.xR7eGB7gJj",
+      "network_json_out": "tests/golden/only_train_opencl/golden_test_only_train_opencl.net.json",
       "neuron_count": 27,
       "output_neurons": 3,
       "proc_name": "risp",
@@ -74,7 +74,7 @@
       "scale": 256,
       "scale_factor": 0.0078125,
       "seed": 42,
-      "start_time": 1784923136.280766,
+      "start_time": 1784925597.437144,
       "synapse_count": 546,
       "tau": 0.95,
       "test_data_file": "",
@@ -84,6 +84,18 @@
       "timesteps": 32,
       "total_neurons": 27,
       "train_data_file": "",
+      "train_data_max": [
+        7.9,
+        4.4,
+        6.9,
+        2.5
+      ],
+      "train_data_min": [
+        4.3,
+        2.0,
+        1.0,
+        0.1
+      ],
       "train_label_file": "",
       "training_percent": 1.0,
       "weight_init_stddev": 0.1
