@@ -1,4 +1,8 @@
+#include "data_utils.h"
+#include "evaluation.h"
+#include "network_utils.h"
 #include "nlohmann/json.hpp"
+#include "framework.hpp"
 #include <algorithm>
 #include <cmath>
 #include <cstring>
@@ -9,6 +13,7 @@
 
 using json = nlohmann::json;
 using namespace std;
+using namespace neuro;
 
 static void print_help(const char* prog) {
     fprintf(stderr, "Usage: %s [options]\n", prog);
@@ -18,6 +23,8 @@ static void print_help(const char* prog) {
                     "file (required)\n");
     fprintf(stderr, "  --test                  Enable test mode (optional, "
                     "default: false)\n");
+    fprintf(stderr, "  --evaluate              Use evaluate_sample() for local "
+                    "prediction (optional)\n");
     fprintf(stderr, "  -h, --help              Show this help message\n");
     fprintf(stderr, "\n");
 }
@@ -25,10 +32,12 @@ static void print_help(const char* prog) {
 struct CliArgs {
     string network_json;
     bool test;
+    bool evaluate;  /* Use evaluate_sample() for local evaluation */
 };
 
 static int parse_args(int argc, char* argv[], CliArgs* out) {
     out->test = false;
+    out->evaluate = false;
 
     if (argc < 2) {
         print_help(argv[0]);
@@ -53,6 +62,8 @@ static int parse_args(int argc, char* argv[], CliArgs* out) {
             out->network_json = argv[i];
         } else if (arg == "--test") {
             out->test = true;
+        } else if (arg == "--evaluate") {
+            out->evaluate = true;
         } else {
             fprintf(stderr, "Error: unknown argument '%s'\n", arg.c_str());
             print_help(argv[0]);
@@ -137,80 +148,146 @@ int main(int argc, char* argv[]) {
         }
         size_t input_neurons = n * 2;
 
-        // spikes[input_neuron][timestep] = true if spike fires
-        vector<vector<bool>> spikes(input_neurons,
-                                    vector<bool>(timesteps, false));
+        if (args.evaluate) {
+            /* Evaluate mode: use evaluate_sample() for local prediction */
+            /* Extract timing and topology from JSON metadata */
+            size_t input_neurons = (size_t)other.value("input_neurons", 0);
+            size_t hidden_neurons = (size_t)other.value("hidden_neurons", 0);
+            size_t output_neurons = (size_t)other.value("output_neurons", 0);
+            bool timeseries = other.value("timeseries", false);
 
-        printf("ML %s\n", args.network_json.c_str());
+            /* Validate required fields */
+            if (hidden_neurons == 0 || output_neurons == 0) {
+                fprintf(stderr, "Error: network JSON missing hidden_neurons "
+                                "(%zu) or output_neurons (%zu)\n",
+                        hidden_neurons, output_neurons);
+                return 1;
+            }
 
-        // Read batches of n floats from stdin until EOF
-        while (true) {
-            vector<double> values(n);
-            bool got_all = true;
-            for (size_t i = 0; i < n; i++) {
-                if (!(cin >> values[i])) {
-                    got_all = false;
+            /* Load network and create processor */
+            auto* net = new Network();
+            net->from_json(network_json);
+            Processor* p = nullptr;
+            load_network(&p, net);
+
+            /* Read batches of n floats from stdin until EOF */
+            while (true) {
+                vector<double> values(n);
+                bool got_all = true;
+                for (size_t i = 0; i < n; i++) {
+                    if (!(cin >> values[i])) {
+                        got_all = false;
+                        break;
+                    }
+                }
+                if (!got_all) {
                     break;
                 }
-            }
-            if (!got_all) {
-                break;
+
+                /* Create a temporary Dataset from input values */
+                Dataset tmp_ds;
+                tmp_ds.data = values.data();
+                tmp_ds.shape = (int*)malloc(2 * sizeof(int));
+                tmp_ds.shape[0] = 1;  /* one sample */
+                tmp_ds.shape[1] = n;  /* n features */
+                tmp_ds.min_vals = min_vals.data();
+                tmp_ds.max_vals = max_vals.data();
+                tmp_ds.timeseries = false;
+                tmp_ds.dims = 2;
+                tmp_ds.labels = nullptr;
+                tmp_ds.label_strings = nullptr;
+                tmp_ds.label_strings_count = 0;
+
+                /* Evaluate sample */
+                int pred = evaluate_sample(p, tmp_ds, 0, hidden_neurons,
+                                           output_neurons, timesteps,
+                                           timeseries, input_neurons);
+                printf("PRED %d\n", pred);
+
+                free(tmp_ds.shape);
             }
 
-            // Reset spikes
-            for (size_t i = 0; i < input_neurons; i++) {
-                fill(spikes[i].begin(), spikes[i].end(), false);
-            }
+            /* Cleanup */
+            delete p;
+            delete net;
 
-            // Encode spikes (non-timeseries logic from data_utils.cpp)
-            for (size_t input = 0; input < n; input++) {
-                double range = max_vals[input] - min_vals[input];
-                if (range <= 0.0) {
-                    fprintf(stderr,
-                            "Warning: range <= 0 for input %zu, skipping\n",
-                            input);
-                    continue;
+        } else {
+            /* Client protocol mode: encode spikes and output commands */
+            /* spikes[input_neuron][timestep] = true if spike fires */
+            vector<vector<bool>> spikes(input_neurons,
+                                        vector<bool>(timesteps, false));
+
+            printf("ML %s\n", args.network_json.c_str());
+
+            // Read batches of n floats from stdin until EOF
+            while (true) {
+                vector<double> values(n);
+                bool got_all = true;
+                for (size_t i = 0; i < n; i++) {
+                    if (!(cin >> values[i])) {
+                        got_all = false;
+                        break;
+                    }
                 }
-                double x = (values[input] - min_vals[input]) / range;
-                if (!std::isfinite(x)) {
-                    fprintf(stderr,
-                            "Warning: non-finite normalized value for input "
-                            "%zu, skipping\n",
-                            input);
-                    continue;
+                if (!got_all) {
+                    break;
                 }
-                double inv_x = 1.0 - x;
 
-                if (x > 0.0) {
-                    double step = 1.0 / x;
-                    if (step > 0.0) {
-                        for (double j = 0.0; j < (double)timesteps; j += step) {
-                            spikes[input * 2][(size_t)j] = true;
+                // Reset spikes
+                for (size_t i = 0; i < input_neurons; i++) {
+                    fill(spikes[i].begin(), spikes[i].end(), false);
+                }
+
+                // Encode spikes (non-timeseries logic from data_utils.cpp)
+                for (size_t input = 0; input < n; input++) {
+                    double range = max_vals[input] - min_vals[input];
+                    if (range <= 0.0) {
+                        fprintf(stderr,
+                                "Warning: range <= 0 for input %zu, skipping\n",
+                                input);
+                        continue;
+                    }
+                    double x = (values[input] - min_vals[input]) / range;
+                    if (!std::isfinite(x)) {
+                        fprintf(stderr,
+                                "Warning: non-finite normalized value for input "
+                                "%zu, skipping\n",
+                                input);
+                        continue;
+                    }
+                    double inv_x = 1.0 - x;
+
+                    if (x > 0.0) {
+                        double step = 1.0 / x;
+                        if (step > 0.0) {
+                            for (double j = 0.0; j < (double)timesteps; j += step) {
+                                spikes[input * 2][(size_t)j] = true;
+                            }
+                        }
+                    }
+                    if (inv_x > 0.0) {
+                        double step = 1.0 / inv_x;
+                        if (step > 0.0) {
+                            for (double j = 0.0; j < (double)timesteps; j += step) {
+                                spikes[input * 2 + 1][(size_t)j] = true;
+                            }
                         }
                     }
                 }
-                if (inv_x > 0.0) {
-                    double step = 1.0 / inv_x;
-                    if (step > 0.0) {
-                        for (double j = 0.0; j < (double)timesteps; j += step) {
-                            spikes[input * 2 + 1][(size_t)j] = true;
-                        }
+
+                // Print as 1/0 with no spacing
+                for (size_t i = 0; i < input_neurons; i++) {
+                    printf("ASR %zu ", i);
+                    for (size_t t = 0; t < timesteps; t++) {
+                        cout << (spikes[i][t] ? 1 : 0);
                     }
+                    cout << endl;
                 }
-            }
 
-            // Print as 1/0 with no spacing
-            for (size_t i = 0; i < input_neurons; i++) {
-                printf("ASR %zu ", i);
-                for (size_t t = 0; t < timesteps; t++) {
-                    cout << (spikes[i][t] ? 1 : 0);
-                }
-                cout << endl;
+                printf("RUN %zu\n", timesteps);
+                printf("OC\n");
+                printf("CA\n");
             }
-
-            printf("RUN %zu\n", timesteps);
-            printf("OC\n");
-            printf("CA\n");
         }
 
         fstream.close();

@@ -21,7 +21,7 @@ RISP_OBJ = framework-open/obj/risp.o framework-open/obj/risp_static.o
 ALL_OBJ = obj/shared.o obj/math_utils.o obj/data_utils.o obj/network_utils.o \
           obj/forward_backward.o obj/optimizer.o obj/threading.o obj/csv.o \
           obj/cli.o obj/network_setup.o obj/training.o obj/cpu_backend.o \
-          obj/backend_factory.o obj/opencl_backend.o obj/kernel.o
+          obj/backend_factory.o obj/opencl_backend.o obj/kernel.o obj/evaluation.o
 
 FRAMEWORK_DIR = framework-open/
 
@@ -37,8 +37,8 @@ bin/bptt_learning: src/bptt_learning.cpp $(ALL_OBJ) $(RISP_OBJ) $(FR_LIB)
 opencl: clean_objs
 	$(MAKE) BUILDFLAGS="-DOPENCL" OPENCL_INCLUDE="-Ivendor/OpenCL-Wrapper/include" LDLIBS="-Lvendor/lib -lOpenCL"
 
-bin/interactive_mode: src/interactive_mode.cpp
-	$(CXX) $(FR_CFLAGS) -o $@ $^
+bin/interactive_mode: src/interactive_mode.cpp obj/evaluation.o obj/data_utils.o obj/network_utils.o
+	$(CXX) -std=c++11 -Wall -Wextra -O3 -march=native -Iinclude -Ivendor -Iframework-open/include -Iframework-open/include/utils -o $@ src/interactive_mode.cpp obj/evaluation.o obj/data_utils.o obj/network_utils.o $(RISP_OBJ) framework-open/lib/libframework.a
 
 # Libraries ###################################################################
 framework-open/lib/libframework.a: $(FR_OBJ) framework-open/include/framework.hpp
@@ -104,6 +104,9 @@ obj/opencl_backend.o: src/opencl_backend.cpp
 	$(CXX) $(FR_CFLAGS) -o $@ -c $^
 
 obj/kernel.o: src/kernel.cpp
+	$(CXX) $(FR_CFLAGS) -o $@ -c $^
+
+obj/evaluation.o: src/evaluation.cpp
 	$(CXX) $(FR_CFLAGS) -o $@ -c $^
 
 # Utility ######################################################################
