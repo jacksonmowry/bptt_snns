@@ -1,0 +1,18 @@
+E   1/10  TrL:  1.09571 TrA:   0.420  BestTrA:   0.420
+E   2/10  TrL:  1.07245 TrA:   0.607  BestTrA:   0.607
+E   3/10  TrL:  1.03357 TrA:   0.727  BestTrA:   0.727
+E   4/10  TrL:  1.01889 TrA:   0.880  BestTrA:   0.880
+E   5/10  TrL:  1.01234 TrA:   0.860  BestTrA:   0.880
+E   6/10  TrL:  1.00248 TrA:   0.860  BestTrA:   0.880
+E   7/10  TrL:  1.00281 TrA:   0.840  BestTrA:   0.880
+E   8/10  TrL:  1.00871 TrA:   0.900  BestTrA:   0.900
+E   9/10  TrL:  1.00235 TrA:   0.900  BestTrA:   0.900
+E  10/10  TrL:  1.00235 TrA:   0.920  BestTrA:   0.920
+Confusion Matrix:
+     | Predicted
+ True| 0 | 1 | 2 |
+-----|---|---|---|
+    0| 50|  0|  0|
+    1|  2| 41|  7|
+    2|  0|  0| 50|
+Accuracy: 0.940 (141/150)

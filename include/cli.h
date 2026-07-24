@@ -26,10 +26,9 @@ struct CliConfig {
     std::string network_json_out;
     size_t threads      = 1;
     bool show_help      = false;
+    bool confusion_matrix = false;
 #ifdef OPENCL
-    bool opencl         = false;
-    size_t cpu_eval_interval =
-        0; // every N epochs, read GPU weights & eval on CPU
+    bool opencl = false;
 #endif
     size_t max_delay          = 7;
     double weight_init_stddev = 0.1;

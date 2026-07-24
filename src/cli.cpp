@@ -73,6 +73,11 @@ int parse_cli(int argc, char* argv[], CliConfig* cfg) {
         if (arg == "--help" || arg == "-h") {
             cfg->show_help = true;
             ++i;
+        } else if (arg == "--confusion_matrix" || arg == "-m") {
+            if (++i >= argc) {
+                return cli_error("--confusion_matrix requires a value");
+            }
+            cfg->confusion_matrix = (std::string(argv[i]) == "true");
         } else if (arg == "--network_json" || arg == "-n") {
             if (++i >= argc) {
                 return cli_error("--network_json requires a value");
@@ -308,15 +313,7 @@ int parse_cli(int argc, char* argv[], CliConfig* cfg) {
                 return rc;
             }
             cfg->weight_init_stddev = v;
-#ifdef OPENCL
-        } else if (arg == "--cpu_eval_interval") {
-            unsigned long v;
-            int rc = parse_ulong_arg(i, argc, argv, &v, "cpu_eval_interval");
-            if (rc) {
-                return rc;
-            }
-            cfg->cpu_eval_interval = v;
-#endif
+
         } else {
             return cli_error("Unknown argument: %s", arg.c_str());
         }
@@ -362,8 +359,6 @@ void print_usage(const char* prog) {
             "  -N, --network_json_out FILE         Output network JSON\n");
     fprintf(stderr, "  -T, --threads          UINT         Thread count\n");
 #ifdef OPENCL
-    fprintf(stderr, " N/A, --cpu_eval_interval UINT      CPU test every N "
-                    "epochs (0=off)\n");
     fprintf(
         stderr,
         " N/A, --opencl                        Enable OpenCL Acceleration\n");
@@ -371,4 +366,7 @@ void print_usage(const char* prog) {
     fprintf(stderr, "  -D, --max_delay          UINT         Max synapse delay\n");
     fprintf(stderr, " N/A, --weight_init_stddev FLOAT        Weight init std dev (>0)\n");
     fprintf(stderr, "  -h, --help                          Show this help\n");
+    fprintf(stderr,
+            "  -m, --confusion_matrix BOOL         Compute confusion matrix on best\n"
+            "                                      saved network after training\n");
 }

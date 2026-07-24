@@ -8,4 +8,11 @@ E   7/10  TrL: 0.820032 TrA:   0.733  BestTrA:   0.760
 E   8/10  TrL: 0.817784 TrA:   0.767  BestTrA:   0.767
 E   9/10  TrL: 0.817872 TrA:   0.733  BestTrA:   0.767
 E  10/10  TrL: 0.817125 TrA:   0.720  BestTrA:   0.767
-Final CPU Train Loss:   0.813881, Final CPU Train Acc:   0.673333
+Confusion Matrix:
+     | Predicted
+ True| 0 | 1 | 2 |
+-----|---|---|---|
+    0| 50|  0|  0|
+    1|  0| 14| 36|
+    2|  0|  1| 49|
+Accuracy: 0.753 (113/150)

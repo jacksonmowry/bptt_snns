@@ -29,7 +29,7 @@ fi
 # kernel timing report, etc.
 filter_stdout() {
     local input="$1" output="$2"
-    grep -E '^(E[ 0-9]|Final |  \[CPU eval)' "$input" > "$output" || true
+	grep -E '^(E[ 0-9]|Final |  \[CPU eval|Confusion Matrix|True\\Pred| \| Predicted|^[ 0-9]+\|[^|]*|^[ 0-9]*True\||^-+\|+|^Accuracy:)' "$input" >"$output" || true
 }
 
 # Parse a .cfg file into space-separated CLI args

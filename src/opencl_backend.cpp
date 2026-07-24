@@ -1,7 +1,6 @@
 #ifdef OPENCL
 
 #include "opencl_backend.h"
-#include "forward_backward.h"
 #include "network_utils.h"
 #include <algorithm>
 #include <chrono>
@@ -100,39 +99,13 @@ static void write_weights_to_network(neuro::Network* n, size_t total_neurons,
     }
 }
 
-static std::pair<double, double> cpu_eval_test(neuro::Network* n,
-                                               const NetworkConfiguration& nc,
-                                               const Dataset& d, double rho,
-                                               double tau) {
-    if (d.shape[0] == 0) {
-        return {0.0, 0.0};
-    }
-
-    TrainingBundle tb(nc.total_neurons, nc.timesteps, nc.output_neurons, rho,
-                      tau, {}, {}, {});
-    neuro::Processor* p = nullptr;
-    load_network(&p, n);
-
-    double total_loss    = 0.0;
-    size_t total_correct = 0;
-
-    for (int obs = 0; obs < d.shape[0]; obs++) {
-        EvaluationResults er = forward(&tb, p, &d, (size_t)obs, &nc);
-        total_loss += er.loss;
-        total_correct += (size_t)er.correct;
-    }
-
-    delete p;
-    return {total_loss / d.shape[0], (double)total_correct / d.shape[0]};
-}
-
 OpenclBackend::OpenclBackend(const CliConfig& cfg, NetworkConfiguration& nc,
                              const Dataset& train, const Dataset& test,
                              size_t max_incoming, size_t max_outgoing)
     : cfg(cfg), nc(nc), train(train), test(test), max_incoming(max_incoming),
       max_outgoing(max_outgoing), batch_size(cfg.batch_size),
       learning_rate(cfg.learning_rate), decay_rate(cfg.decay_rate),
-      rho(cfg.rho), tau(cfg.tau), b1_t(1.0), b2_t(1.0) {
+      b1_t(1.0), b2_t(1.0) {
 
     Device device(select_device_with_most_flops());
     const size_t encode_work_size        = nc.input_neurons;
@@ -437,49 +410,19 @@ void OpenclBackend::do_one_epoch(size_t epoch) {
     stats.train_loss = avg_train_loss;
     stats.test_acc   = avg_test_acc;
     stats.test_loss  = avg_test_loss;
-
-    // Periodic CPU eval
-    if (cfg.cpu_eval_interval > 0 && (epoch + 1) % cfg.cpu_eval_interval == 0) {
-        weights->read_from_device();
-        write_weights_to_network(nc.n, nc.total_neurons, *weights,
-                                 nc.max_incoming);
-        std::pair<double, double> cpu_result =
-            cpu_eval_test(nc.n, nc, test.shape[0] > 0 ? test : train, rho, tau);
-
-        if (test.shape[0] > 0) {
-            printf(
-                "  [CPU eval @ epoch %4zu] Test Loss: %10g, Test Acc: %10g\n",
-                epoch + 1, cpu_result.first, cpu_result.second);
-        } else {
-            printf(
-                "  [CPU eval @ epoch %4zu] Train Loss: %10g, Train Acc: %10g\n",
-                epoch + 1, cpu_result.first, cpu_result.second);
-        }
-    }
 }
 
 OpenclBackend::~OpenclBackend() {
     // Read GPU weights back to host for state
     weights->read_from_device();
     write_weights_to_network(nc.n, nc.total_neurons, *weights, nc.max_incoming);
-
-    // Final CPU eval on GPU weights
-    std::pair<double, double> cpu_result =
-        cpu_eval_test(nc.n, nc, test.shape[0] > 0 ? test : train, rho, tau);
-    if (test.shape[0] > 0) {
-        printf("Final CPU Test Loss: %10g, Final CPU Test Acc: %10g\n",
-               cpu_result.first, cpu_result.second);
-    } else {
-        printf("Final CPU Train Loss: %10g, Final CPU Train Acc: %10g\n",
-               cpu_result.first, cpu_result.second);
-    }
 }
 
 TrainingStats OpenclBackend::get_stats() const { return stats; }
 
 void OpenclBackend::update_weights(neuro::Network* network) {
     // Read GPU weights back to host — all weight mutation happens on GPU
-    m_weights->read_from_device();
+    weights->read_from_device();
     write_weights_to_network(network, nc.total_neurons, *weights,
                              nc.max_incoming);
 }

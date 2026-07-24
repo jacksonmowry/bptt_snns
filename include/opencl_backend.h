@@ -30,8 +30,6 @@ class OpenclBackend : public TrainingBackend {
     size_t batch_size;
     double learning_rate;
     double decay_rate;
-    double rho;
-    double tau;
 
     // GPU buffers
     std::unique_ptr<Memory<short>> x;

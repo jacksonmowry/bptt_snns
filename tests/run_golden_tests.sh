@@ -19,7 +19,9 @@ BIN="$ROOT_DIR/bin/bptt_learning"
 # kernel timing report, etc.
 filter_stdout() {
 	local input="$1" output="$2"
-	grep -E '^(E[ 0-9]|Final |  \[CPU eval)' "$input" >"$output" || true
+	# Strip carriage returns, then filter essential lines only
+	# Note: use a temp pipe to avoid subshell redirect issues
+	tr -d '\r' < "$input" | grep -E '^(E[ 0-9]|Final |  \[CPU eval|Confusion Matrix| \| Predicted|^[^|]+\|[^|]*|^[ 0-9]*True\||^-+\|+|^Accuracy:)' > "$output"
 }
 
 # --- helpers ---

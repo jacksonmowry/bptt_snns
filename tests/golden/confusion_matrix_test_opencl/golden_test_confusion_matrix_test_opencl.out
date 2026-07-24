@@ -1,0 +1,18 @@
+E   1/10  TrL:  1.09663 TrA:   0.367  TeL:  1.09949 TeA:   0.367  BestTeA:   0.367
+E   2/10  TrL:  1.08029 TrA:   0.608  TeL:  1.08269 TeA:   0.667  BestTeA:   0.667
+E   3/10  TrL:  1.04986 TrA:   0.633  TeL:  1.07532 TeA:   0.667  BestTeA:   0.667
+E   4/10  TrL:  1.03081 TrA:   0.658  TeL:  1.07518 TeA:   0.667  BestTeA:   0.667
+E   5/10  TrL:  1.01274 TrA:   0.667  TeL:  1.07604 TeA:   0.667  BestTeA:   0.667
+E   6/10  TrL:  1.00168 TrA:   0.667  TeL:  1.06906 TeA:   0.667  BestTeA:   0.667
+E   7/10  TrL:  1.00913 TrA:   0.650  TeL:  1.05462 TeA:   0.667  BestTeA:   0.667
+E   8/10  TrL:  1.00242 TrA:   0.667  TeL:  1.06092 TeA:   0.667  BestTeA:   0.667
+E   9/10  TrL:    1.007 TrA:   0.667  TeL:  1.05707 TeA:   0.667  BestTeA:   0.667
+E  10/10  TrL:  1.00789 TrA:   0.667  TeL:  1.08139 TeA:   0.667  BestTeA:   0.667
+Confusion Matrix:
+     | Predicted
+ True| 0 | 1| 2|
+-----|---|--|--|
+    0| 13| 0| 0|
+    1|  3| 0| 7|
+    2|  0| 0| 7|
+Accuracy: 0.667 (20/30)
