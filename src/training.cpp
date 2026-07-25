@@ -7,7 +7,7 @@ using namespace std;
 using nlohmann::json;
 
 TrainingState* init_training(const NetworkConfiguration& nc,
-                             const Dataset& train, size_t threads, double rho,
+                             const ClassificationDataset& train, size_t threads, double rho,
                              double tau) {
     TrainingState* state = new TrainingState();
     size_t total_neurons = nc.total_neurons;

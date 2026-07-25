@@ -13,7 +13,7 @@ ThreadArgs::ThreadArgs(size_t total_neurons, size_t timesteps,
                        const std::vector<std::vector<int>>* delays,
                        const std::vector<double>* thresholds,
                        NetworkConfiguration* nc, const size_t* order,
-                       const Dataset* train, const Dataset* test, int* max_idx,
+                       const ClassificationDataset* train, const ClassificationDataset* test, int* max_idx,
                        int* work_idx, int* done, pthread_mutex_t* mut,
                        pthread_cond_t* have_work, pthread_cond_t* done_work,
                        bool* train_p, bool* die)

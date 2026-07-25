@@ -13,7 +13,7 @@
 using namespace std;
 using namespace neuro;
 
-static void encode(Memory<double>& data, const Dataset& d, bool timeseries) {
+static void encode(Memory<double>& data, const ClassificationDataset& d, bool timeseries) {
     if (timeseries) {
         // data = [observations * (input_features * 2) * dataset_timesteps]
         assert(data.length() ==
@@ -100,7 +100,7 @@ static void write_weights_to_network(neuro::Network* n, size_t total_neurons,
 }
 
 OpenclBackend::OpenclBackend(const CliConfig& cfg, NetworkConfiguration& nc,
-                             const Dataset& train, const Dataset& test,
+                             const ClassificationDataset& train, const ClassificationDataset& test,
                              size_t max_incoming, size_t max_outgoing)
     : cfg(cfg), nc(nc), train(train), test(test), max_incoming(max_incoming),
       max_outgoing(max_outgoing), batch_size(cfg.batch_size),

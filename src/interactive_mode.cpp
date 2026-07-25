@@ -185,8 +185,8 @@ int main(int argc, char* argv[]) {
                     break;
                 }
 
-                /* Create a temporary Dataset from input values */
-                Dataset tmp_ds;
+                /* Create a temporary ClassificationDataset from input values */
+                ClassificationDataset tmp_ds;
                 tmp_ds.data.data = values.data();
                 tmp_ds.data.shape = (int*)malloc(2 * sizeof(int));
                 tmp_ds.data.shape[0] = 1;  /* one sample */

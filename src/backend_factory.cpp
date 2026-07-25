@@ -9,8 +9,8 @@
 
 std::unique_ptr<TrainingBackend> create_backend(const CliConfig& cfg,
                                                 NetworkConfiguration& nc,
-                                                const Dataset& train,
-                                                const Dataset& test) {
+                                                const ClassificationDataset& train,
+                                                const ClassificationDataset& test) {
 #ifdef OPENCL
     if (cfg.opencl) {
         if (!nc.discrete) {

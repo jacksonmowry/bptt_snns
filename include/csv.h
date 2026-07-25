@@ -20,21 +20,37 @@ typedef struct {
     int* shape;                // heap-allocated array of size dims
 } TextData;
 
-/* Combined dataset: real data + text labels */
+/* Combined dataset: real data + text labels (classification) */
 typedef struct {
     RealData data;
     TextData labels;
     bool timeseries;
-} Dataset;
+} ClassificationDataset;
+
+/* Regression dataset: real input + real target */
+typedef struct {
+    RealData input;  // features
+    RealData target; // targets
+    bool timeseries;
+} RegressionDataset;
 
 void load_dataset(const char* data_path, const char* labels_path,
-                  double train_percent, Dataset* train, Dataset* test);
+                  double train_percent, ClassificationDataset* train, ClassificationDataset* test);
 
 void load_dataset_single(const char* data_path, const char* labels_path,
-                         Dataset* out);
+                         ClassificationDataset* out);
 
 void load_dataset_2d(const char* data_path, const char* labels_path,
-                     double train_percent, Dataset* train, Dataset* test);
+                     double train_percent, ClassificationDataset* train, ClassificationDataset* test);
 
 void load_dataset_2d_single(const char* data_path, const char* labels_path,
-                            Dataset* out);
+                            ClassificationDataset* out);
+
+/* Dataset cleanup */
+void free_classification_dataset(ClassificationDataset* ds);
+
+/* Regression dataset loading (future) */
+// void load_regression_dataset(const char* data_path, const char* target_path,
+//                              double train_percent, RegressionDataset* train, RegressionDataset* test);
+// void load_regression_dataset_single(const char* data_path, const char* target_path,
+//                                     RegressionDataset* out);

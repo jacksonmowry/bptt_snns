@@ -73,8 +73,8 @@ int main(int argc, char* argv[]) {
     srand(cfg.seed);
     srand48(cfg.seed);
 
-    Dataset train;
-    Dataset test;
+    ClassificationDataset train;
+    ClassificationDataset test;
     if (cfg.timeseries) {
         if (have_simple) {
             load_dataset_2d(cfg.data_file.c_str(), cfg.label_file.c_str(),
@@ -281,36 +281,16 @@ int main(int argc, char* argv[]) {
     // Cleanup
     backend.reset();
     delete n;
-    free(train.data.data);
-    free(train.labels.data);
-    free(train.data.min_vals);
-    free(train.data.max_vals);
-    free(train.data.shape);
-    free(train.labels.shape);
 
-    bool free_train = train.labels.label_strings != test.labels.label_strings;
-
-    for (int i = 0; i < train.labels.label_strings_count; i++) {
-        free(train.labels.label_strings[i]);
-        train.labels.label_strings[i] = NULL;
+    // Handle shared label_strings between train and test
+    bool shared_labels = (train.labels.label_strings != NULL &&
+                          test.labels.label_strings == train.labels.label_strings);
+    if (shared_labels) {
+        test.labels.label_strings = NULL;
+        test.labels.label_strings_count = 0;
     }
-    free(train.labels.label_strings);
-    train.labels.label_strings = NULL;
-
-    if (free_train) {
-        for (int i = 0; i < test.labels.label_strings_count; i++) {
-            free(test.labels.label_strings[i]);
-            test.labels.label_strings[i] = NULL;
-        }
-        free(test.labels.label_strings);
-        free(test.labels.shape);
-    }
-
-    free(test.data.data);
-    free(test.labels.data);
-    free(test.data.min_vals);
-    free(test.data.max_vals);
-    free(test.data.shape);
+    free_classification_dataset(&train);
+    free_classification_dataset(&test);
 
     return 0;
 }

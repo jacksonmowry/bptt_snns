@@ -12,7 +12,7 @@
 class OpenclBackend : public TrainingBackend {
   public:
     OpenclBackend(const CliConfig& cfg, NetworkConfiguration& nc,
-                  const Dataset& train, const Dataset& test,
+                  const ClassificationDataset& train, const ClassificationDataset& test,
                   size_t max_incoming, size_t max_outgoing);
     ~OpenclBackend() override;
 
@@ -23,8 +23,8 @@ class OpenclBackend : public TrainingBackend {
   private:
     const CliConfig& cfg;
     NetworkConfiguration& nc;
-    const Dataset& train;
-    const Dataset& test;
+    const ClassificationDataset& train;
+    const ClassificationDataset& test;
     size_t max_incoming;
     size_t max_outgoing;
     size_t batch_size;

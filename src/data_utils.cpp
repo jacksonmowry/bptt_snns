@@ -2,9 +2,9 @@
 #include "framework.hpp"
 #include <cassert>
 
-size_t label_count(const Dataset* d) { return (size_t)d->labels.label_strings_count; }
+size_t label_count(const ClassificationDataset* d) { return (size_t)d->labels.label_strings_count; }
 
-void encode_spikes(neuro::Processor* p, const Dataset* d, size_t index,
+void encode_spikes(neuro::Processor* p, const ClassificationDataset* d, size_t index,
                    size_t timesteps, bool timeseries, size_t input_neurons) {
     if (timeseries) {
         // shape = [observations * input_features * timesteps]

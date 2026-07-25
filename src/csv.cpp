@@ -337,11 +337,11 @@ static void free_textdata(TextData td) {
     free(td.shape);
 }
 
-// Build a train/test Dataset from pre-shuffled RealData+TextData (2D, non-timeseries).
+// Build a train/test ClassificationDataset from pre-shuffled RealData+TextData (2D, non-timeseries).
 // Copies min_vals/max_vals from source and recomputes min/max on the split subsets.
 static void build_split_dataset_2d(const RealData* rd, const TextData* td,
                                     int start, int len, int cols,
-                                    bool is_train, Dataset* out) {
+                                    bool is_train, ClassificationDataset* out) {
     // For train, share label_strings; for test, also share (same pool).
     // Always copy data, min_vals, max_vals for each split.
     out->data.data     = (double*)malloc((size_t)len * (size_t)cols * sizeof(double));
@@ -399,11 +399,11 @@ static void build_split_dataset_2d(const RealData* rd, const TextData* td,
     }
 }
 
-// Build a train/test Dataset from pre-shuffled RealData+TextData (3D, timeseries).
+// Build a train/test ClassificationDataset from pre-shuffled RealData+TextData (3D, timeseries).
 static void build_split_dataset_3d(const RealData* rd, const TextData* td,
                                     int start, int len, int block_size,
                                     int input_features,
-                                    bool /*is_train*/, Dataset* out) {
+                                    bool /*is_train*/, ClassificationDataset* out) {
     out->data.data     = (double*)malloc(len * block_size * sizeof(double));
     out->labels.data   = (double*)malloc(len * sizeof(double));
     out->data.min_vals = (double*)malloc(input_features * sizeof(double));
@@ -435,16 +435,30 @@ static void build_split_dataset_3d(const RealData* rd, const TextData* td,
     memcpy(out->data.max_vals, rd->max_vals, input_features * sizeof(double));
 }
 
-// Free a Dataset (deep free only data/labels owned by this dataset).
-// Does NOT free label_strings (shared).
-static void free_dataset(Dataset ds) {
-    free_realdata(ds.data);
-    free(ds.labels.data);
-    free(ds.labels.shape);
+// Free a ClassificationDataset. All heap memory is freed.
+// label_strings are also freed (they were either shared or owned by this dataset).
+void free_classification_dataset(ClassificationDataset* ds) {
+    if (!ds) return;
+    free_realdata(ds->data);
+    if (ds->labels.label_strings) {
+        for (int i = 0; i < ds->labels.label_strings_count; i++) {
+            free(ds->labels.label_strings[i]);
+        }
+        free(ds->labels.label_strings);
+    }
+    free(ds->labels.data);
+    free(ds->labels.shape);
+    ds->data.data = NULL;
+    ds->data.min_vals = NULL;
+    ds->data.max_vals = NULL;
+    ds->data.shape = NULL;
+    ds->labels.data = NULL;
+    ds->labels.label_strings = NULL;
+    ds->labels.shape = NULL;
 }
 
 void load_dataset(const char* data_path, const char* labels_path,
-                  double train_percent, Dataset* train, Dataset* test) {
+                  double train_percent, ClassificationDataset* train, ClassificationDataset* test) {
     assert(train_percent >= 0.00 && train_percent <= 1.00);
     FILE* f_data   = fopen(data_path, "r");
     FILE* f_labels = fopen(labels_path, "r");
@@ -483,6 +497,11 @@ void load_dataset(const char* data_path, const char* labels_path,
     build_split_dataset_2d(&rd, &td, 0, train_len, cols, true, train);
     if (!train->data.data) {
         free_realdata(rd);
+        // td.label_strings was never transferred to any dataset — leak it
+        for (int i = 0; i < td.label_strings_count; i++) {
+            free(td.label_strings[i]);
+        }
+        free(td.label_strings);
         free(td.data);
         free(td.shape);
         *train = {};
@@ -492,8 +511,13 @@ void load_dataset(const char* data_path, const char* labels_path,
 
     build_split_dataset_2d(&rd, &td, train_len, test_len, cols, false, test);
     if (!test->data.data) {
-        free_dataset(*train);
+        free_classification_dataset(train);
         free_realdata(rd);
+        // td.label_strings was never transferred to any dataset — leak it
+        for (int i = 0; i < td.label_strings_count; i++) {
+            free(td.label_strings[i]);
+        }
+        free(td.label_strings);
         free(td.data);
         free(td.shape);
         *train = {};
@@ -509,7 +533,7 @@ void load_dataset(const char* data_path, const char* labels_path,
 }
 
 void load_dataset_single(const char* data_path, const char* labels_path,
-                         Dataset* out) {
+                         ClassificationDataset* out) {
     *out           = {{NULL, NULL, NULL, 2, NULL}, {NULL, NULL, 0, 1, NULL}, false};
     FILE* f_data   = fopen(data_path, "r");
     FILE* f_labels = fopen(labels_path, "r");
@@ -539,7 +563,7 @@ void load_dataset_single(const char* data_path, const char* labels_path,
 }
 
 void load_dataset_2d(const char* data_path, const char* labels_path,
-                     double train_percent, Dataset* train, Dataset* test) {
+                     double train_percent, ClassificationDataset* train, ClassificationDataset* test) {
     assert(train_percent >= 0.0 && train_percent <= 1.0);
     FILE* f_data   = fopen(data_path, "r");
     FILE* f_labels = fopen(labels_path, "r");
@@ -588,6 +612,10 @@ void load_dataset_2d(const char* data_path, const char* labels_path,
     build_split_dataset_3d(&rd, &td, 0, train_len, block_size, input_features, true, train);
     if (!train->data.data) {
         free_realdata(rd);
+        for (int i = 0; i < td.label_strings_count; i++) {
+            free(td.label_strings[i]);
+        }
+        free(td.label_strings);
         free(td.data);
         free(td.shape);
         *train = {};
@@ -597,8 +625,12 @@ void load_dataset_2d(const char* data_path, const char* labels_path,
 
     build_split_dataset_3d(&rd, &td, train_len, test_len, block_size, input_features, false, test);
     if (!test->data.data) {
-        free_dataset(*train);
+        free_classification_dataset(train);
         free_realdata(rd);
+        for (int i = 0; i < td.label_strings_count; i++) {
+            free(td.label_strings[i]);
+        }
+        free(td.label_strings);
         free(td.data);
         free(td.shape);
         *train = {};
@@ -607,14 +639,15 @@ void load_dataset_2d(const char* data_path, const char* labels_path,
     }
 
     free_realdata(rd);
-    // td.data and td.shape are freed via the split datasets
-    // td.label_strings is shared with train/test, don't free
+    // td.data and td.shape are freed directly here (not via the split datasets,
+    // which have their own malloc'd copies). td.label_strings is shared with
+    // train/test, so it must NOT be freed here.
     free(td.data);
     free(td.shape);
 }
 
 void load_dataset_2d_single(const char* data_path, const char* labels_path,
-                            Dataset* out) {
+                            ClassificationDataset* out) {
     *out           = {{NULL, NULL, NULL, 3, NULL}, {NULL, NULL, 0, 1, NULL}, false};
     FILE* f_data   = fopen(data_path, "r");
     FILE* f_labels = fopen(labels_path, "r");

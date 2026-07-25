@@ -96,8 +96,8 @@ neuro::Network* load_and_init_network(
 }
 
 void build_run_metadata(neuro::Network* n, int argc, char* argv[],
-                        const CliConfig& cfg, const Dataset* train,
-                        const Dataset* test, size_t input_neurons,
+                        const CliConfig& cfg, const ClassificationDataset* train,
+                        const ClassificationDataset* test, size_t input_neurons,
                         size_t output_neurons, size_t total_neurons,
                         size_t neuron_count, size_t synapse_count,
                         bool discrete, double min_potential, double min_weight,
