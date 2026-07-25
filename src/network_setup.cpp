@@ -176,20 +176,20 @@ void build_run_metadata(neuro::Network* n, int argc, char* argv[],
     {
         json train_min = json::array();
         json train_max = json::array();
-        for (int i = 0; i < train->shape[1]; i++) {
-            train_min.push_back(train->min_vals[i]);
-            train_max.push_back(train->max_vals[i]);
+        for (int i = 0; i < train->data.shape[1]; i++) {
+            train_min.push_back(train->data.min_vals[i]);
+            train_max.push_back(train->data.max_vals[i]);
         }
         run_metadata["train_data_min"] = train_min;
         run_metadata["train_data_max"] = train_max;
     }
     // Test data min/max arrays (omit if test set empty)
-    if (test->shape[0] > 0) {
+    if (test->data.shape[0] > 0) {
         json test_min = json::array();
         json test_max = json::array();
-        for (int i = 0; i < test->shape[1]; i++) {
-            test_min.push_back(test->min_vals[i]);
-            test_max.push_back(test->max_vals[i]);
+        for (int i = 0; i < test->data.shape[1]; i++) {
+            test_min.push_back(test->data.min_vals[i]);
+            test_max.push_back(test->data.max_vals[i]);
         }
         run_metadata["test_data_min"] = test_min;
         run_metadata["test_data_max"] = test_max;

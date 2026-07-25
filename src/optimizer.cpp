@@ -46,7 +46,7 @@ void weight_updates(const NetworkConfiguration* nc, const Dataset* d,
             double lr = learning_rate;
             if (epoch == 0) {
                 lr =
-                    ((batch_start + current_batch_size) / (double)d->shape[0]) *
+                    ((batch_start + current_batch_size) / (double)d->data.shape[0]) *
                     learning_rate;
             }
 

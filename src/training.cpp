@@ -27,7 +27,7 @@ TrainingState* init_training(const NetworkConfiguration& nc,
     // Threading
     state->tas         = (ThreadArgs*)calloc(threads, sizeof(*state->tas));
     state->tids        = (pthread_t*)calloc(threads, sizeof(*state->tids));
-    state->batch_order = (size_t*)calloc(train.shape[0], sizeof(size_t));
+    state->batch_order = (size_t*)calloc(train.data.shape[0], sizeof(size_t));
 
     for (size_t i = 0; i < threads; i++) {
         state->tas[i] = ThreadArgs(

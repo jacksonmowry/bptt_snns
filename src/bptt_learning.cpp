@@ -99,18 +99,18 @@ int main(int argc, char* argv[]) {
 
     size_t train_labels = label_count(&train);
     size_t test_labels  = label_count(&test);
-    assert(test.shape[0] == 0 || train_labels == test_labels);
+    assert(test.data.shape[0] == 0 || train_labels == test_labels);
 
     /* Verify train and test label mappings match (same labels, same order)
      */
-    if (test.shape[0] > 0) {
+    if (test.data.shape[0] > 0) {
         for (int i = 0; i < (int)train_labels; i++) {
-            if (strcmp(train.label_strings[i], test.label_strings[i])) {
+            if (strcmp(train.labels.label_strings[i], test.labels.label_strings[i])) {
                 fprintf(stderr, "Mismatch between train & test labels:\n");
 
                 fprintf(stderr, "Train: [");
                 for (size_t i = 0; i < train_labels; i++) {
-                    fprintf(stderr, "%s", train.label_strings[i]);
+                    fprintf(stderr, "%s", train.labels.label_strings[i]);
 
                     if (i != train_labels - 1) {
                         fprintf(stderr, " ");
@@ -120,7 +120,7 @@ int main(int argc, char* argv[]) {
 
                 fprintf(stderr, "Test: [");
                 for (size_t i = 0; i < test_labels; i++) {
-                    fprintf(stderr, "%s", test.label_strings[i]);
+                    fprintf(stderr, "%s", test.labels.label_strings[i]);
 
                     if (i != test_labels - 1) {
                         fprintf(stderr, " ");
@@ -133,7 +133,7 @@ int main(int argc, char* argv[]) {
     }
 
     size_t input_neurons =
-        (cfg.timeseries) ? train.shape[1] * 2 : train.shape[1] * 2;
+        (cfg.timeseries) ? train.data.shape[1] * 2 : train.data.shape[1] * 2;
     size_t output_neurons = train_labels;
     size_t hidden_neurons = cfg.hidden_neurons;
     size_t total_neurons  = input_neurons + hidden_neurons + output_neurons;
@@ -232,7 +232,7 @@ int main(int argc, char* argv[]) {
     auto backend = create_backend(cfg, nc, train, test);
 
     // Determine which accuracy metric to track for export
-    bool has_test_data = test.shape[0] > 0;
+    bool has_test_data = test.data.shape[0] > 0;
 
     // Training loop
     // "Best" stats are updated when a new best network is found, not
@@ -261,7 +261,7 @@ int main(int argc, char* argv[]) {
 
             export_network(n, cfg, best_train_acc, best_train_loss,
                            best_test_acc, best_test_loss,
-                           (const char**)train.label_strings,
+                           (const char**)train.labels.label_strings,
                            (int)train_labels);
         }
 
@@ -281,34 +281,36 @@ int main(int argc, char* argv[]) {
     // Cleanup
     backend.reset();
     delete n;
-    free(train.data);
-    free(train.labels);
-    free(train.min_vals);
-    free(train.max_vals);
-    free(train.shape);
+    free(train.data.data);
+    free(train.labels.data);
+    free(train.data.min_vals);
+    free(train.data.max_vals);
+    free(train.data.shape);
+    free(train.labels.shape);
 
-    bool free_train = train.label_strings != test.label_strings;
+    bool free_train = train.labels.label_strings != test.labels.label_strings;
 
-    for (int i = 0; i < train.label_strings_count; i++) {
-        free(train.label_strings[i]);
-        train.label_strings[i] = NULL;
+    for (int i = 0; i < train.labels.label_strings_count; i++) {
+        free(train.labels.label_strings[i]);
+        train.labels.label_strings[i] = NULL;
     }
-    free(train.label_strings);
-    train.label_strings = NULL;
+    free(train.labels.label_strings);
+    train.labels.label_strings = NULL;
 
     if (free_train) {
-        for (int i = 0; i < test.label_strings_count; i++) {
-            free(test.label_strings[i]);
-            test.label_strings[i] = NULL;
+        for (int i = 0; i < test.labels.label_strings_count; i++) {
+            free(test.labels.label_strings[i]);
+            test.labels.label_strings[i] = NULL;
         }
-        free(test.label_strings);
+        free(test.labels.label_strings);
+        free(test.labels.shape);
     }
 
-    free(test.data);
-    free(test.labels);
-    free(test.min_vals);
-    free(test.max_vals);
-    free(test.shape);
+    free(test.data.data);
+    free(test.labels.data);
+    free(test.data.min_vals);
+    free(test.data.max_vals);
+    free(test.data.shape);
 
     return 0;
 }

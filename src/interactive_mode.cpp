@@ -187,17 +187,19 @@ int main(int argc, char* argv[]) {
 
                 /* Create a temporary Dataset from input values */
                 Dataset tmp_ds;
-                tmp_ds.data = values.data();
-                tmp_ds.shape = (int*)malloc(2 * sizeof(int));
-                tmp_ds.shape[0] = 1;  /* one sample */
-                tmp_ds.shape[1] = n;  /* n features */
-                tmp_ds.min_vals = min_vals.data();
-                tmp_ds.max_vals = max_vals.data();
+                tmp_ds.data.data = values.data();
+                tmp_ds.data.shape = (int*)malloc(2 * sizeof(int));
+                tmp_ds.data.shape[0] = 1;  /* one sample */
+                tmp_ds.data.shape[1] = n;  /* n features */
+                tmp_ds.data.min_vals = min_vals.data();
+                tmp_ds.data.max_vals = max_vals.data();
+                tmp_ds.data.dims = 2;
+                tmp_ds.labels.data = nullptr;
+                tmp_ds.labels.label_strings = nullptr;
+                tmp_ds.labels.label_strings_count = 0;
+                tmp_ds.labels.dims = 1;
+                tmp_ds.labels.shape = nullptr;
                 tmp_ds.timeseries = false;
-                tmp_ds.dims = 2;
-                tmp_ds.labels = nullptr;
-                tmp_ds.label_strings = nullptr;
-                tmp_ds.label_strings_count = 0;
 
                 /* Evaluate sample */
                 int pred = evaluate_sample(p, tmp_ds, 0, hidden_neurons,
@@ -206,7 +208,7 @@ int main(int argc, char* argv[]) {
 				string label_str = labels[pred];
                 printf("label %s\n", label_str.c_str());
 
-                free(tmp_ds.shape);
+                free(tmp_ds.data.shape);
             }
 
             /* Cleanup */

@@ -53,12 +53,12 @@ EvaluationResults forward(TrainingBundle* tb, Processor* p, const Dataset* d,
         }
     }
 
-    if (max_idx == (size_t)d->labels[index]) {
+    if (max_idx == (size_t)d->labels.data[index]) {
         er.correct++;
     }
 
     for (size_t i = 0; i < nc->output_neurons; i++) {
-        if (i == (size_t)d->labels[index]) {
+        if (i == (size_t)d->labels.data[index]) {
             tb->target[i] = 1.0;
         } else {
             tb->target[i] = 0.0;

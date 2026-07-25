@@ -17,45 +17,45 @@ static void encode(Memory<double>& data, const Dataset& d, bool timeseries) {
     if (timeseries) {
         // data = [observations * (input_features * 2) * dataset_timesteps]
         assert(data.length() ==
-               (unsigned long)(d.shape[0] * (d.shape[1] * 2) * d.shape[2]));
+               (unsigned long)(d.data.shape[0] * (d.data.shape[1] * 2) * d.data.shape[2]));
 
-        for (int obs = 0; obs < d.shape[0]; obs++) {
-            for (int input_feature = 0; input_feature < d.shape[1];
+        for (int obs = 0; obs < d.data.shape[0]; obs++) {
+            for (int input_feature = 0; input_feature < d.data.shape[1];
                  input_feature++) {
                 double range =
-                    d.max_vals[input_feature] - d.min_vals[input_feature];
+                    d.data.max_vals[input_feature] - d.data.min_vals[input_feature];
                 if (range == 0.0) {
                     continue;
                 }
 
-                for (int dataset_timestep = 0; dataset_timestep < d.shape[2];
+                for (int dataset_timestep = 0; dataset_timestep < d.data.shape[2];
                      dataset_timestep++) {
-                    double x     = (d.data[(obs * d.shape[1] * d.shape[2]) +
-                                           (input_feature * d.shape[2]) +
+                    double x     = (d.data.data[(obs * d.data.shape[1] * d.data.shape[2]) +
+                                           (input_feature * d.data.shape[2]) +
                                            (dataset_timestep)] -
-                                    d.min_vals[input_feature]) /
+                                    d.data.min_vals[input_feature]) /
                                    range;
                     double inv_x = 1.0 - x;
 
                     if (x > 0.0) {
-                        size_t idx = (obs * (d.shape[1] * 2) * d.shape[2]) +
-                                     (input_feature * 2 * d.shape[2]) +
+                        size_t idx = (obs * (d.data.shape[1] * 2) * d.data.shape[2]) +
+                                     (input_feature * 2 * d.data.shape[2]) +
                                      (dataset_timestep);
-                        assert(idx < (size_t)(d.shape[0] * (d.shape[1] * 2) *
-                                              d.shape[2]));
-                        data[(obs * (d.shape[1] * 2) * d.shape[2]) +
-                             (input_feature * 2 * d.shape[2]) +
+                        assert(idx < (size_t)(d.data.shape[0] * (d.data.shape[1] * 2) *
+                                              d.data.shape[2]));
+                        data[(obs * (d.data.shape[1] * 2) * d.data.shape[2]) +
+                             (input_feature * 2 * d.data.shape[2]) +
                              (dataset_timestep)] = 1.0 / x;
                     }
 
                     if (inv_x > 0.0) {
-                        size_t idx = (obs * (d.shape[1] * 2) * d.shape[2]) +
-                                     ((input_feature * 2 + 1) * d.shape[2]) +
+                        size_t idx = (obs * (d.data.shape[1] * 2) * d.data.shape[2]) +
+                                     ((input_feature * 2 + 1) * d.data.shape[2]) +
                                      (dataset_timestep);
-                        assert(idx < (size_t)(d.shape[0] * (d.shape[1] * 2) *
-                                              d.shape[2]));
-                        data[(obs * (d.shape[1] * 2) * d.shape[2]) +
-                             ((input_feature * 2 + 1) * d.shape[2]) +
+                        assert(idx < (size_t)(d.data.shape[0] * (d.data.shape[1] * 2) *
+                                              d.data.shape[2]));
+                        data[(obs * (d.data.shape[1] * 2) * d.data.shape[2]) +
+                             ((input_feature * 2 + 1) * d.data.shape[2]) +
                              (dataset_timestep)] = 1.0 / inv_x;
                     }
                 }
@@ -63,24 +63,24 @@ static void encode(Memory<double>& data, const Dataset& d, bool timeseries) {
         }
     } else {
         // data = [observations * (input_features * 2)]
-        assert(data.length() == (unsigned long)(d.shape[0] * (d.shape[1] * 2)));
+        assert(data.length() == (unsigned long)(d.data.shape[0] * (d.data.shape[1] * 2)));
 
-        for (int row = 0; row < d.shape[0]; row++) {
-            for (int col = 0; col < d.shape[1]; col++) {
-                double range = d.max_vals[col] - d.min_vals[col];
+        for (int row = 0; row < d.data.shape[0]; row++) {
+            for (int col = 0; col < d.data.shape[1]; col++) {
+                double range = d.data.max_vals[col] - d.data.min_vals[col];
                 if (range == 0.0) {
                     continue;
                 }
 
                 double x =
-                    (d.data[row * d.shape[1] + col] - d.min_vals[col]) / range;
+                    (d.data.data[row * d.data.shape[1] + col] - d.data.min_vals[col]) / range;
                 double inv_x = 1.0 - x;
 
                 if (x > 0.0) {
-                    data[(row * d.shape[1] * 2) + (col * 2)] = double(1.0 / x);
+                    data[(row * d.data.shape[1] * 2) + (col * 2)] = double(1.0 / x);
                 }
                 if (inv_x > 0.0) {
-                    data[(row * d.shape[1] * 2) + (col * 2 + 1)] =
+                    data[(row * d.data.shape[1] * 2) + (col * 2 + 1)] =
                         double(1.0 / inv_x);
                 }
             }
@@ -109,7 +109,9 @@ OpenclBackend::OpenclBackend(const CliConfig& cfg, NetworkConfiguration& nc,
 
     Device device(select_device_with_most_flops());
     const size_t encode_work_size        = nc.input_neurons;
-    const size_t encode_timeseries_work_size = nc.input_neurons * train.shape[2];
+    const size_t encode_timeseries_work_size = cfg.timeseries
+        ? nc.input_neurons * train.data.shape[2]
+        : 0;
     const size_t forward_work_size       = nc.total_neurons;
     const size_t loss_work_size          = nc.output_neurons;
     const size_t backward_grad_work_size = nc.total_neurons;
@@ -121,14 +123,14 @@ OpenclBackend::OpenclBackend(const CliConfig& cfg, NetworkConfiguration& nc,
 
     data.reset(new Memory<double>(
         device, cfg.timeseries
-                    ? train.shape[0] * (train.shape[1] * 2) * train.shape[2]
-                    : train.shape[0] * train.shape[1] * 2));
+                    ? train.data.shape[0] * (train.data.shape[1] * 2) * train.data.shape[2]
+                    : train.data.shape[0] * train.data.shape[1] * 2));
 
-    if (test.shape[0] > 0) {
+    if (test.data.shape[0] > 0) {
         test_data.reset(new Memory<double>(
             device, cfg.timeseries
-                        ? test.shape[0] * (test.shape[1] * 2) * test.shape[2]
-                        : test.shape[0] * test.shape[1] * 2));
+                        ? test.data.shape[0] * (test.data.shape[1] * 2) * test.data.shape[2]
+                        : test.data.shape[0] * test.data.shape[1] * 2));
     }
 
     v_thresh.reset(new Memory<short>(device, nc.total_neurons));
@@ -164,12 +166,12 @@ OpenclBackend::OpenclBackend(const CliConfig& cfg, NetworkConfiguration& nc,
 
     encode_kernel.reset(
         new Kernel(device, encode_work_size, "risp_encode_inputs_kernel", *x,
-                   *data, (int)train.shape[1], (int)nc.input_neurons,
+                   *data, (int)train.data.shape[1], (int)nc.input_neurons,
                    (int)nc.timesteps, (uint)0, (short)nc.spike_value_factor));
 
     encode_timeseries_kernel.reset(new Kernel(
         device, encode_timeseries_work_size, "risp_encode_timeseries_inputs_kernel", *x,
-        *data, (int)train.shape[2], (int)nc.input_neurons, (int)nc.timesteps,
+        *data, (int)train.data.shape[2], (int)nc.input_neurons, (int)nc.timesteps,
         (uint)0, (short)nc.spike_value_factor));
 
     forward_kernel.reset(new Kernel(
@@ -205,12 +207,12 @@ OpenclBackend::OpenclBackend(const CliConfig& cfg, NetworkConfiguration& nc,
         (uint)nc.max_incoming, (float)cfg.learning_rate, (float)cfg.decay_rate,
         (uint)1, (uint)cfg.batch_size, (uint)0, (uint)0, (float)0.9f,
         (float)0.999f, (float)0.0f, (float)0.0f, (uint)nc.timesteps,
-        (uint)train.shape[0], (float)nc.scale_factor, (short)nc.min_weight,
+        (uint)train.data.shape[0], (float)nc.scale_factor, (short)nc.min_weight,
         (short)nc.max_weight, (int)nc.steps));
 
     // Encode data
     encode(*data, train, cfg.timeseries);
-    if (test.shape[0] > 0) {
+    if (test.data.shape[0] > 0) {
         encode(*test_data, test, cfg.timeseries);
     }
 
@@ -241,7 +243,7 @@ OpenclBackend::OpenclBackend(const CliConfig& cfg, NetworkConfiguration& nc,
     v_weights->reset();
 
     data->write_to_device();
-    if (test.shape[0] > 0) {
+    if (test.data.shape[0] > 0) {
         test_data->write_to_device();
     }
     v_thresh->write_to_device();
@@ -257,8 +259,8 @@ OpenclBackend::OpenclBackend(const CliConfig& cfg, NetworkConfiguration& nc,
     gradient_slot->write_to_device();
 
     // Init batch order
-    batch_order.resize(train.shape[0]);
-    for (int i = 0; i < train.shape[0]; i++) {
+    batch_order.resize(train.data.shape[0]);
+    for (int i = 0; i < (int)train.data.shape[0]; i++) {
         batch_order[i] = (size_t)i;
     }
 
@@ -272,18 +274,18 @@ void OpenclBackend::do_one_epoch(size_t epoch) {
     loss->reset();
 
     // Shuffle batch order each epoch
-    for (int i = 0; i < train.shape[0]; i++) {
-        int j          = rand() % train.shape[0];
+    for (int i = 0; i < (int)train.data.shape[0]; i++) {
+        int j          = rand() % train.data.shape[0];
         size_t tmp     = batch_order[i];
         batch_order[i] = batch_order[j];
         batch_order[j] = tmp;
     }
 
     // Mini-batch SGD loop
-    for (int batch_start = 0; batch_start < train.shape[0];
+    for (int batch_start = 0; batch_start < train.data.shape[0];
          batch_start += (int)batch_size) {
         size_t current_batch_size =
-            min(batch_size, (size_t)(train.shape[0] - batch_start));
+            min(batch_size, (size_t)(train.data.shape[0] - batch_start));
 
         // Reset accumulators for this batch
         delta_W->reset();
@@ -316,7 +318,7 @@ void OpenclBackend::do_one_epoch(size_t epoch) {
             }
 
             // Loss
-            loss_kernel->set_parameters(7, (uint)(train.labels[obs]));
+            loss_kernel->set_parameters(7, (uint)(train.labels.data[obs]));
             loss_kernel->run();
 
             // Backwards
@@ -344,26 +346,26 @@ void OpenclBackend::do_one_epoch(size_t epoch) {
     epoch_loss += (*loss)[0];
     epoch_correct += (size_t)(*correct)[0];
 
-    double avg_train_loss = epoch_loss / (double)train.shape[0];
-    double avg_train_acc  = epoch_correct / (double)train.shape[0];
+    double avg_train_loss = epoch_loss / (double)train.data.shape[0];
+    double avg_train_acc  = epoch_correct / (double)train.data.shape[0];
 
     // Test evaluation
     double epoch_test_loss    = 0.0;
     size_t epoch_test_correct = 0;
 
-    if (test.shape[0] > 0) {
+    if (test.data.shape[0] > 0) {
         correct->reset();
         loss->reset();
 
         if (cfg.timeseries) {
             encode_timeseries_kernel->set_parameters(1, *test_data);
-            encode_timeseries_kernel->set_parameters(2, (int)test.shape[2]);
+            encode_timeseries_kernel->set_parameters(2, (int)test.data.shape[2]);
         } else {
             encode_kernel->set_parameters(1, *test_data);
-            encode_kernel->set_parameters(2, (int)test.shape[1]);
+            encode_kernel->set_parameters(2, (int)test.data.shape[1]);
         }
 
-        for (int obs = 0; obs < (int)test.shape[0]; obs++) {
+        for (int obs = 0; obs < (int)test.data.shape[0]; obs++) {
             x->reset();
             v->reset();
             s->reset();
@@ -383,7 +385,7 @@ void OpenclBackend::do_one_epoch(size_t epoch) {
                 forward_kernel->run();
             }
 
-            loss_kernel->set_parameters(7, (uint)(test.labels[obs]));
+            loss_kernel->set_parameters(7, (uint)(test.labels.data[obs]));
             loss_kernel->run();
         }
 
@@ -394,17 +396,17 @@ void OpenclBackend::do_one_epoch(size_t epoch) {
 
         if (cfg.timeseries) {
             encode_timeseries_kernel->set_parameters(1, *data);
-            encode_timeseries_kernel->set_parameters(2, (int)train.shape[2]);
+            encode_timeseries_kernel->set_parameters(2, (int)train.data.shape[2]);
         } else {
             encode_kernel->set_parameters(1, *data);
-            encode_kernel->set_parameters(2, (int)train.shape[1]);
+            encode_kernel->set_parameters(2, (int)train.data.shape[1]);
         }
     }
 
     double avg_test_loss =
-        test.shape[0] > 0 ? epoch_test_loss / (double)test.shape[0] : 0.0;
+        test.data.shape[0] > 0 ? epoch_test_loss / (double)test.data.shape[0] : 0.0;
     double avg_test_acc =
-        test.shape[0] > 0 ? epoch_test_correct / (double)test.shape[0] : 0.0;
+        test.data.shape[0] > 0 ? epoch_test_correct / (double)test.data.shape[0] : 0.0;
 
     stats.train_acc  = avg_train_acc;
     stats.train_loss = avg_train_loss;
