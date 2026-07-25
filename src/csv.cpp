@@ -285,38 +285,65 @@ static void compute_3d_dims(FILE* f_data, int* p_num_obs, int* p_features, int* 
     *p_timesteps = timesteps;
 }
 
-// Shuffle rows of a RealData+TextData pair (swap entire rows).
-static void shuffle_realdata_2d(RealData* rd, TextData* td, int rows, int cols) {
-    double* tmp     = (double*)malloc(cols * sizeof(*tmp));
-    for (size_t i = 1; i < (size_t)rows; i++) {
-        size_t swap_idx = rand() % i;
-        memcpy(tmp, rd->data + (i * cols), cols * sizeof(*rd->data));
-        memcpy(rd->data + (i * cols), rd->data + (swap_idx * cols),
-               cols * sizeof(*rd->data));
-        memcpy(rd->data + (swap_idx * cols), tmp, cols * sizeof(*rd->data));
-        double tmp_label    = td->data[i];
-        td->data[i]         = td->data[swap_idx];
-        td->data[swap_idx]  = tmp_label;
+// Compute the stride between consecutive entries (in doubles) from shape/dims.
+// stride = product of shape[1..dims-1]. For 1D data (dims=1), stride=1.
+static size_t entry_stride_doubles(const int* shape, int dims) {
+    size_t stride = 1;
+    for (int i = 1; i < dims; i++) {
+        stride *= (size_t)shape[i];
     }
-    free(tmp);
+    return stride;
 }
 
-// Shuffle rows of a RealData+TextData pair (swap entire 3D blocks).
-static void shuffle_realdata_3d(RealData* rd, TextData* td, int num_obs, int block_size) {
-    double* tmp_block = (double*)malloc(block_size * sizeof(double));
-    for (int i = 1; i < num_obs; i++) {
-        int swap_idx = rand() % i;
-        memcpy(tmp_block, rd->data + (i * block_size),
-               block_size * sizeof(double));
-        memcpy(rd->data + (i * block_size), rd->data + (swap_idx * block_size),
-               block_size * sizeof(double));
-        memcpy(rd->data + (swap_idx * block_size), tmp_block,
-               block_size * sizeof(double));
-        double tmp_label    = td->data[i];
-        td->data[i]         = td->data[swap_idx];
-        td->data[swap_idx]  = tmp_label;
+// Shuffle two double arrays simultaneously with the same permutation.
+// Operates on double* data with dims/shape to compute entry stride.
+// Uses rand() % i for i = 1..num_entries-1, matching the original 2D/3D implementations.
+static void shuffle_two(double* data_a, const int* shape_a, int dims_a,
+                         double* data_b, const int* shape_b, int dims_b) {
+    size_t num_entries = (size_t)shape_a[0];
+    size_t stride_a    = entry_stride_doubles(shape_a, dims_a);
+    size_t stride_b    = entry_stride_doubles(shape_b, dims_b);
+
+    double* tmp_a = (double*)malloc(stride_a * sizeof(double));
+    double* tmp_b = (double*)malloc(stride_b * sizeof(double));
+    if (!tmp_a || !tmp_b) {
+        free(tmp_a);
+        free(tmp_b);
+        return;
     }
-    free(tmp_block);
+
+    for (size_t i = 1; i < num_entries; i++) {
+        size_t swap_idx = rand() % i;
+        memcpy(tmp_a, data_a + (i * stride_a), stride_a * sizeof(double));
+        memcpy(data_a + (i * stride_a), data_a + (swap_idx * stride_a),
+               stride_a * sizeof(double));
+        memcpy(data_a + (swap_idx * stride_a), tmp_a, stride_a * sizeof(double));
+        memcpy(tmp_b, data_b + (i * stride_b), stride_b * sizeof(double));
+        memcpy(data_b + (i * stride_b), data_b + (swap_idx * stride_b),
+               stride_b * sizeof(double));
+        memcpy(data_b + (swap_idx * stride_b), tmp_b, stride_b * sizeof(double));
+    }
+    free(tmp_a);
+    free(tmp_b);
+}
+
+// Shuffle a single double array in place.
+// Operates on double* data with dims/shape to compute entry stride.
+static void shuffle_one(double* data, const int* shape, int dims) {
+    size_t num_entries = (size_t)shape[0];
+    size_t stride      = entry_stride_doubles(shape, dims);
+
+    double* tmp = (double*)malloc(stride * sizeof(double));
+    if (!tmp) return;
+
+    for (size_t i = 1; i < num_entries; i++) {
+        size_t swap_idx = rand() % i;
+        memcpy(tmp, data + (i * stride), stride * sizeof(double));
+        memcpy(data + (i * stride), data + (swap_idx * stride),
+               stride * sizeof(double));
+        memcpy(data + (swap_idx * stride), tmp, stride * sizeof(double));
+    }
+    free(tmp);
 }
 
 // Free all members of a RealData.
@@ -339,11 +366,13 @@ static void free_textdata(TextData td) {
 
 // Build a train/test ClassificationDataset from pre-shuffled RealData+TextData (2D, non-timeseries).
 // Copies min_vals/max_vals from source and recomputes min/max on the split subsets.
+// Each split owns its own copy of label_strings (no sharing). Caller must free via
+// free_classification_dataset.
 static void build_split_dataset_2d(const RealData* rd, const TextData* td,
                                     int start, int len, int cols,
                                     bool is_train, ClassificationDataset* out) {
-    // For train, share label_strings; for test, also share (same pool).
-    // Always copy data, min_vals, max_vals for each split.
+    (void)is_train; // unused now that label_strings are always copied
+    // Always copy data, min_vals, max_vals, and label_strings for each split.
     out->data.data     = (double*)malloc((size_t)len * (size_t)cols * sizeof(double));
     out->labels.data   = (double*)malloc(len * sizeof(double));
     out->data.min_vals = (double*)malloc(cols * sizeof(double));
@@ -355,12 +384,27 @@ static void build_split_dataset_2d(const RealData* rd, const TextData* td,
         return;
     }
 
-    if (is_train) {
-        out->labels.label_strings       = td->label_strings;
-        out->labels.label_strings_count = td->label_strings_count;
-    } else {
-        out->labels.label_strings       = td->label_strings;
-        out->labels.label_strings_count = td->label_strings_count;
+    // Each split owns its own copy of label_strings (no sharing between train/test).
+    out->labels.label_strings       = (char**)malloc(td->label_strings_count * sizeof(char*));
+    out->labels.label_strings_count = td->label_strings_count;
+    if (!out->labels.label_strings) {
+        free(out->data.data); free(out->labels.data);
+        free(out->data.min_vals); free(out->data.max_vals);
+        *out = {};
+        return;
+    }
+    for (int i = 0; i < td->label_strings_count; i++) {
+        out->labels.label_strings[i] = strdup(td->label_strings[i]);
+        if (!out->labels.label_strings[i]) {
+            for (int j = 0; j < i; j++) {
+                free(out->labels.label_strings[j]);
+            }
+            free(out->labels.label_strings);
+            free(out->data.data); free(out->labels.data);
+            free(out->data.min_vals); free(out->data.max_vals);
+            *out = {};
+            return;
+        }
     }
     out->data.dims                  = 2;
     out->data.shape                 = (int*)malloc(2 * sizeof(int));
@@ -400,6 +444,8 @@ static void build_split_dataset_2d(const RealData* rd, const TextData* td,
 }
 
 // Build a train/test ClassificationDataset from pre-shuffled RealData+TextData (3D, timeseries).
+// Each split owns its own copy of label_strings (no sharing). Caller must free via
+// free_classification_dataset.
 static void build_split_dataset_3d(const RealData* rd, const TextData* td,
                                     int start, int len, int block_size,
                                     int input_features,
@@ -415,8 +461,28 @@ static void build_split_dataset_3d(const RealData* rd, const TextData* td,
         return;
     }
 
-    out->labels.label_strings       = td->label_strings;
+    // Each split owns its own copy of label_strings (no sharing between train/test).
+    out->labels.label_strings       = (char**)malloc(td->label_strings_count * sizeof(char*));
     out->labels.label_strings_count = td->label_strings_count;
+    if (!out->labels.label_strings) {
+        free(out->data.data); free(out->labels.data);
+        free(out->data.min_vals); free(out->data.max_vals);
+        *out = {};
+        return;
+    }
+    for (int i = 0; i < td->label_strings_count; i++) {
+        out->labels.label_strings[i] = strdup(td->label_strings[i]);
+        if (!out->labels.label_strings[i]) {
+            for (int j = 0; j < i; j++) {
+                free(out->labels.label_strings[j]);
+            }
+            free(out->labels.label_strings);
+            free(out->data.data); free(out->labels.data);
+            free(out->data.min_vals); free(out->data.max_vals);
+            *out = {};
+            return;
+        }
+    }
     out->data.dims                  = 3;
     out->data.shape                 = (int*)malloc(3 * sizeof(int));
     out->data.shape[0]              = len;
@@ -488,7 +554,7 @@ void load_dataset(const char* data_path, const char* labels_path,
     }
 
     // Shuffle
-    shuffle_realdata_2d(&rd, &td, rows, cols);
+    shuffle_two(rd.data, rd.shape, rd.dims, td.data, td.shape, td.dims);
 
     // Split
     int train_len = (int)(train_percent * rows);
@@ -497,7 +563,7 @@ void load_dataset(const char* data_path, const char* labels_path,
     build_split_dataset_2d(&rd, &td, 0, train_len, cols, true, train);
     if (!train->data.data) {
         free_realdata(rd);
-        // td.label_strings was never transferred to any dataset — leak it
+        // train was never built; free td's owned resources
         for (int i = 0; i < td.label_strings_count; i++) {
             free(td.label_strings[i]);
         }
@@ -511,9 +577,9 @@ void load_dataset(const char* data_path, const char* labels_path,
 
     build_split_dataset_2d(&rd, &td, train_len, test_len, cols, false, test);
     if (!test->data.data) {
-        free_classification_dataset(train);
+        free_classification_dataset(train); // train owns its label_strings copy
         free_realdata(rd);
-        // td.label_strings was never transferred to any dataset — leak it
+        // td.label_strings is owned by td; train/test each have their own copy
         for (int i = 0; i < td.label_strings_count; i++) {
             free(td.label_strings[i]);
         }
@@ -526,8 +592,12 @@ void load_dataset(const char* data_path, const char* labels_path,
     }
 
     free_realdata(rd);
-    // td.data and td.shape are freed via the split datasets
-    // td.label_strings is shared with train/test, don't free
+    // td.data, td.shape, and td.label_strings are owned by td.
+    // train and test each own their own copies of label_strings (freed by free_classification_dataset).
+    for (int i = 0; i < td.label_strings_count; i++) {
+        free(td.label_strings[i]);
+    }
+    free(td.label_strings);
     free(td.data);
     free(td.shape);
 }
@@ -604,7 +674,7 @@ void load_dataset_2d(const char* data_path, const char* labels_path,
     int block_size = input_features * timesteps;
 
     // Shuffle
-    shuffle_realdata_3d(&rd, &td, num_obs, block_size);
+    shuffle_two(rd.data, rd.shape, rd.dims, td.data, td.shape, td.dims);
 
     int train_len = (int)(train_percent * num_obs);
     int test_len  = num_obs - train_len;
@@ -639,9 +709,12 @@ void load_dataset_2d(const char* data_path, const char* labels_path,
     }
 
     free_realdata(rd);
-    // td.data and td.shape are freed directly here (not via the split datasets,
-    // which have their own malloc'd copies). td.label_strings is shared with
-    // train/test, so it must NOT be freed here.
+    // td.data, td.shape, and td.label_strings are owned by td.
+    // train and test each own their own copies of label_strings (freed by free_classification_dataset).
+    for (int i = 0; i < td.label_strings_count; i++) {
+        free(td.label_strings[i]);
+    }
+    free(td.label_strings);
     free(td.data);
     free(td.shape);
 }
@@ -680,5 +753,5 @@ void load_dataset_2d_single(const char* data_path, const char* labels_path,
         return;
     }
 
-    *out = {rd, td, false};
+    *out = {rd, td, true};
 }

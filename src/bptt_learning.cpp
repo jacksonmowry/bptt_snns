@@ -282,13 +282,6 @@ int main(int argc, char* argv[]) {
     backend.reset();
     delete n;
 
-    // Handle shared label_strings between train and test
-    bool shared_labels = (train.labels.label_strings != NULL &&
-                          test.labels.label_strings == train.labels.label_strings);
-    if (shared_labels) {
-        test.labels.label_strings = NULL;
-        test.labels.label_strings_count = 0;
-    }
     free_classification_dataset(&train);
     free_classification_dataset(&test);
 
