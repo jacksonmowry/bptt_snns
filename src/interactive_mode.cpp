@@ -237,47 +237,9 @@ int main(int argc, char* argv[]) {
                     break;
                 }
 
-                // Reset spikes
-                for (size_t i = 0; i < input_neurons; i++) {
-                    fill(spikes[i].begin(), spikes[i].end(), false);
-                }
-
-                // Encode spikes (non-timeseries logic from data_utils.cpp)
-                for (size_t input = 0; input < n; input++) {
-                    double range = max_vals[input] - min_vals[input];
-                    if (range <= 0.0) {
-                        fprintf(stderr,
-                                "Warning: range <= 0 for input %zu, skipping\n",
-                                input);
-                        continue;
-                    }
-                    double x = (values[input] - min_vals[input]) / range;
-                    if (!std::isfinite(x)) {
-                        fprintf(stderr,
-                                "Warning: non-finite normalized value for input "
-                                "%zu, skipping\n",
-                                input);
-                        continue;
-                    }
-                    double inv_x = 1.0 - x;
-
-                    if (x > 0.0) {
-                        double step = 1.0 / x;
-                        if (step > 0.0) {
-                            for (double j = 0.0; j < (double)timesteps; j += step) {
-                                spikes[input * 2][(size_t)j] = true;
-                            }
-                        }
-                    }
-                    if (inv_x > 0.0) {
-                        double step = 1.0 / inv_x;
-                        if (step > 0.0) {
-                            for (double j = 0.0; j < (double)timesteps; j += step) {
-                                spikes[input * 2 + 1][(size_t)j] = true;
-                            }
-                        }
-                    }
-                }
+                // Encode spikes using shared helper
+                spikes = encode_spike_raster(values.data(), n, timesteps,
+                                              min_vals.data(), max_vals.data(), false);
 
                 // Print as 1/0 with no spacing
                 for (size_t i = 0; i < input_neurons; i++) {

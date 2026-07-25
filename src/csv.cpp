@@ -82,6 +82,83 @@ static char** read_label_strings(FILE* f, int rows) {
     return labels;
 }
 
+// Compute min/max values for RealData from its data buffer.
+// Uses shape/dims to determine iteration bounds.
+// Caller must have allocated rd.min_vals and rd.max_vals.
+void compute_realdata_minmax(RealData& rd) {
+    if (!rd.data || !rd.min_vals || !rd.max_vals || !rd.shape)
+        return;
+
+    if (rd.dims == 2) {
+        for (int j = 0; j < rd.shape[1]; j++) {
+            rd.min_vals[j] = rd.data[j];
+            rd.max_vals[j] = rd.data[j];
+        }
+        for (int i = 1; i < rd.shape[0]; i++) {
+            for (int j = 0; j < rd.shape[1]; j++) {
+                double val = rd.data[(size_t)i * (size_t)rd.shape[1] + (size_t)j];
+                if (val < rd.min_vals[j])
+                    rd.min_vals[j] = val;
+                if (val > rd.max_vals[j])
+                    rd.max_vals[j] = val;
+            }
+        }
+    } else if (rd.dims == 3) {
+        for (int feature = 0; feature < rd.shape[1]; feature++) {
+            rd.min_vals[feature] = DBL_MAX;
+            rd.max_vals[feature] = -DBL_MAX;
+        }
+        for (int obs = 0; obs < rd.shape[0]; obs++) {
+            for (int feature = 0; feature < rd.shape[1]; feature++) {
+                for (int column = 0; column < rd.shape[2]; column++) {
+                    size_t idx = (size_t)(obs * rd.shape[1] * rd.shape[2] + feature * rd.shape[2] + column);
+                    double val = rd.data[idx];
+                    if (val < rd.min_vals[feature])
+                        rd.min_vals[feature] = val;
+                    if (val > rd.max_vals[feature])
+                        rd.max_vals[feature] = val;
+                }
+            }
+        }
+    }
+}
+
+// Normalize RealData to [0,1] range using its min_vals/max_vals.
+// Values with zero range are set to NaN to match original behavior.
+// Modifies rd.data in-place; min_vals/max_vals unchanged.
+void normalize_realdata(RealData& rd) {
+    if (!rd.data || !rd.min_vals || !rd.max_vals || !rd.shape)
+        return;
+
+    if (rd.dims == 2) {
+        for (int i = 0; i < rd.shape[0]; i++) {
+            for (int j = 0; j < rd.shape[1]; j++) {
+                double range = rd.max_vals[j] - rd.min_vals[j];
+                if (range == 0.0) {
+                    rd.data[(size_t)i * (size_t)rd.shape[1] + (size_t)j] = 0.0 / 0.0; // NaN
+                } else {
+                    rd.data[(size_t)i * (size_t)rd.shape[1] + (size_t)j] =
+                        (rd.data[(size_t)i * (size_t)rd.shape[1] + (size_t)j] - rd.min_vals[j]) / range;
+                }
+            }
+        }
+    } else if (rd.dims == 3) {
+        for (int obs = 0; obs < rd.shape[0]; obs++) {
+            for (int feature = 0; feature < rd.shape[1]; feature++) {
+                double range = rd.max_vals[feature] - rd.min_vals[feature];
+                for (int column = 0; column < rd.shape[2]; column++) {
+                    size_t idx = (size_t)(obs * rd.shape[1] * rd.shape[2] + feature * rd.shape[2] + column);
+                    if (range == 0.0) {
+                        rd.data[idx] = 0.0 / 0.0; // NaN
+                    } else {
+                        rd.data[idx] = (rd.data[idx] - rd.min_vals[feature]) / range;
+                    }
+                }
+            }
+        }
+    }
+}
+
 // Parse 2D (non-timeseries) data from file.
 // Returns RealData with data, min_vals, max_vals, shape allocated.
 // Caller must free: data.data, data.min_vals, data.max_vals, data.shape.
@@ -109,21 +186,7 @@ static RealData parse_realdata_2d(FILE* f_data, int rows, int cols) {
     }
 
     // Min/max calcs
-    for (int j = 0; j < cols; j++) {
-        rd.min_vals[j] = rd.data[j];
-        rd.max_vals[j] = rd.data[j];
-    }
-    for (int i = 1; i < rows; i++) {
-        for (int j = 0; j < cols; j++) {
-            double val = rd.data[(size_t)i * (size_t)cols + (size_t)j];
-            if (val < rd.min_vals[j]) {
-                rd.min_vals[j] = val;
-            }
-            if (val > rd.max_vals[j]) {
-                rd.max_vals[j] = val;
-            }
-        }
-    }
+    compute_realdata_minmax(rd);
 
     return rd;
 }
@@ -172,24 +235,7 @@ static RealData parse_realdata_3d(FILE* f_data, int num_obs, int input_features,
     }
 
     // Min/max
-    for (int feature = 0; feature < input_features; feature++) {
-        rd.min_vals[feature] = DBL_MAX;
-        rd.max_vals[feature] = -DBL_MAX;
-    }
-    for (int obs = 0; obs < num_obs; obs++) {
-        for (int feature = 0; feature < input_features; feature++) {
-            for (int column = 0; column < timesteps; column++) {
-                double val = rd.data[(obs * block_size) +
-                                     (feature * timesteps) + column];
-                if (val < rd.min_vals[feature]) {
-                    rd.min_vals[feature] = val;
-                }
-                if (val > rd.max_vals[feature]) {
-                    rd.max_vals[feature] = val;
-                }
-            }
-        }
-    }
+    compute_realdata_minmax(rd);
 
     return rd;
 }
@@ -532,22 +578,11 @@ static void build_split_dataset_2d(const RealData* rd, const TextData* td,
     memcpy(out->data.min_vals, rd->min_vals, cols * sizeof(double));
     memcpy(out->data.max_vals, rd->max_vals, cols * sizeof(double));
 
-    // Recompute min/max on the split subset
-    for (int col = 0; col < cols; col++) {
-        out->data.min_vals[col] = out->data.data[col];
-        out->data.max_vals[col] = out->data.data[col];
-    }
-    for (int row = 1; row < len; row++) {
-        for (int col = 0; col < cols; col++) {
-            double val = out->data.data[row * cols + col];
-            if (val < out->data.min_vals[col]) {
-                out->data.min_vals[col] = val;
-            }
-            if (val > out->data.max_vals[col]) {
-                out->data.max_vals[col] = val;
-            }
-        }
-    }
+    // Recompute min/max on split subset
+    compute_realdata_minmax(out->data);
+
+    // Normalize split data to [0,1] using split's min/max
+    normalize_realdata(out->data);
 }
 
 // Build a train/test ClassificationDataset from pre-shuffled RealData+TextData (3D, timeseries).
@@ -606,6 +641,12 @@ static void build_split_dataset_3d(const RealData* rd, const TextData* td,
            len * sizeof(double));
     memcpy(out->data.min_vals, rd->min_vals, input_features * sizeof(double));
     memcpy(out->data.max_vals, rd->max_vals, input_features * sizeof(double));
+
+    // Recompute min/max on split subset
+    compute_realdata_minmax(out->data);
+
+    // Normalize split data to [0,1] using split's min/max
+    normalize_realdata(out->data);
 }
 
 // Free a ClassificationDataset. All heap memory is freed.
@@ -770,6 +811,18 @@ static void split_regression(RegressionDataset* source, double train_percent,
                        (size_t)len * block_size * sizeof(double));
                 memcpy(*out_min, source->input.min_vals, source->input.shape[1] * sizeof(double));
                 memcpy(*out_max, source->input.max_vals, source->input.shape[1] * sizeof(double));
+
+                // Recompute min/max on split subset
+                RealData tmp_rd_in;
+                tmp_rd_in.data       = *out_data;
+                tmp_rd_in.min_vals   = *out_min;
+                tmp_rd_in.max_vals   = *out_max;
+                tmp_rd_in.dims       = 3;
+                tmp_rd_in.shape      = *out_shape;
+                compute_realdata_minmax(tmp_rd_in);
+
+                // Normalize split data to [0,1]
+                normalize_realdata(tmp_rd_in);
             } else {
                 free(*out_data); free(*out_min); free(*out_max);
                 *out_data = NULL; *out_min = NULL; *out_max = NULL;
@@ -789,6 +842,18 @@ static void split_regression(RegressionDataset* source, double train_percent,
                        (size_t)len * cols * sizeof(double));
                 memcpy(*out_min, source->input.min_vals, cols * sizeof(double));
                 memcpy(*out_max, source->input.max_vals, cols * sizeof(double));
+
+                // Recompute min/max on split subset
+                RealData tmp_rd;
+                tmp_rd.data       = *out_data;
+                tmp_rd.min_vals   = *out_min;
+                tmp_rd.max_vals   = *out_max;
+                tmp_rd.dims       = 2;
+                tmp_rd.shape      = *out_shape;
+                compute_realdata_minmax(tmp_rd);
+
+                // Normalize split data to [0,1]
+                normalize_realdata(tmp_rd);
             } else {
                 free(*out_data); free(*out_min); free(*out_max);
                 *out_data = NULL; *out_min = NULL; *out_max = NULL;
@@ -815,6 +880,18 @@ static void split_regression(RegressionDataset* source, double train_percent,
                    (size_t)len * cols * sizeof(double));
             memcpy(*out_min, source->target.min_vals, cols * sizeof(double));
             memcpy(*out_max, source->target.max_vals, cols * sizeof(double));
+
+            // Recompute min/max on split subset
+            RealData tmp_rd;
+            tmp_rd.data       = *out_data;
+            tmp_rd.min_vals   = *out_min;
+            tmp_rd.max_vals   = *out_max;
+            tmp_rd.dims       = 2;
+            tmp_rd.shape      = *out_shape;
+            compute_realdata_minmax(tmp_rd);
+
+            // Normalize split data to [0,1]
+            normalize_realdata(tmp_rd);
         } else {
             free(*out_data); free(*out_min); free(*out_max);
             *out_data = NULL; *out_min = NULL; *out_max = NULL;

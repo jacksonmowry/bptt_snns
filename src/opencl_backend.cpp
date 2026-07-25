@@ -22,19 +22,12 @@ static void encode(Memory<double>& data, const ClassificationDataset& d, bool ti
         for (int obs = 0; obs < d.data.shape[0]; obs++) {
             for (int input_feature = 0; input_feature < d.data.shape[1];
                  input_feature++) {
-                double range =
-                    d.data.max_vals[input_feature] - d.data.min_vals[input_feature];
-                if (range == 0.0) {
-                    continue;
-                }
 
                 for (int dataset_timestep = 0; dataset_timestep < d.data.shape[2];
                      dataset_timestep++) {
-                    double x     = (d.data.data[(obs * d.data.shape[1] * d.data.shape[2]) +
+                    double x = d.data.data[(obs * d.data.shape[1] * d.data.shape[2]) +
                                            (input_feature * d.data.shape[2]) +
-                                           (dataset_timestep)] -
-                                    d.data.min_vals[input_feature]) /
-                                   range;
+                                           (dataset_timestep)];
                     double inv_x = 1.0 - x;
 
                     if (x > 0.0) {
@@ -67,13 +60,7 @@ static void encode(Memory<double>& data, const ClassificationDataset& d, bool ti
 
         for (int row = 0; row < d.data.shape[0]; row++) {
             for (int col = 0; col < d.data.shape[1]; col++) {
-                double range = d.data.max_vals[col] - d.data.min_vals[col];
-                if (range == 0.0) {
-                    continue;
-                }
-
-                double x =
-                    (d.data.data[row * d.data.shape[1] + col] - d.data.min_vals[col]) / range;
+                double x = d.data.data[row * d.data.shape[1] + col];
                 double inv_x = 1.0 - x;
 
                 if (x > 0.0) {

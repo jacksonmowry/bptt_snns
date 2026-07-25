@@ -53,6 +53,16 @@ void load_classification_single(const char* data_path, const char* labels_path, 
 void split_classification(ClassificationDataset* source, double train_percent,
                           ClassificationDataset* train, ClassificationDataset* test);
 
+/* Compute min/max values for RealData from its data buffer.
+ * Uses shape/dims to determine iteration bounds.
+ * Caller must allocate min_vals/max_vals arrays of correct size. */
+void compute_realdata_minmax(RealData& rd);
+
+/* Normalize RealData to [0,1] range using its min_vals/max_vals.
+ * Values with zero range are set to NaN to match original behavior.
+ * Modifies rd.data in-place; min_vals/max_vals unchanged. */
+void normalize_realdata(RealData& rd);
+
 /* Dataset cleanup */
 void free_classification_dataset(ClassificationDataset* ds);
 void free_realdata(RealData rd);
