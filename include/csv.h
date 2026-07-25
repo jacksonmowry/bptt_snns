@@ -34,17 +34,18 @@ typedef struct {
     bool timeseries;
 } RegressionDataset;
 
-void load_dataset(const char* data_path, const char* labels_path,
-                  double train_percent, ClassificationDataset* train, ClassificationDataset* test);
+/* Load a single dataset (either 2D or 3D). Caller must free via free_classification_dataset().
+ * timeseries=true  -> loads 3D data (rows of feature vectors per observation)
+ * timeseries=false -> loads 2D data (single row per observation) */
+void load_dataset(const char* data_path, const char* labels_path, bool timeseries,
+                  ClassificationDataset* out);
 
-void load_dataset_single(const char* data_path, const char* labels_path,
-                         ClassificationDataset* out);
-
-void load_dataset_2d(const char* data_path, const char* labels_path,
-                     double train_percent, ClassificationDataset* train, ClassificationDataset* test);
-
-void load_dataset_2d_single(const char* data_path, const char* labels_path,
-                            ClassificationDataset* out);
+/* Shuffle and split a loaded dataset into train/test.
+ * The source dataset is untouched (shuffled in-place internally before splitting).
+ * Both train and test own independent copies of label_strings. Caller must free via
+ * free_classification_dataset(). */
+void split_dataset(ClassificationDataset* source, double train_percent,
+                   ClassificationDataset* train, ClassificationDataset* test);
 
 /* Dataset cleanup */
 void free_classification_dataset(ClassificationDataset* ds);

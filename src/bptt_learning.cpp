@@ -75,26 +75,16 @@ int main(int argc, char* argv[]) {
 
     ClassificationDataset train;
     ClassificationDataset test;
-    if (cfg.timeseries) {
-        if (have_simple) {
-            load_dataset_2d(cfg.data_file.c_str(), cfg.label_file.c_str(),
-                            cfg.training_percent, &train, &test);
-        } else {
-            load_dataset_2d_single(cfg.train_data_file.c_str(),
-                                   cfg.train_label_file.c_str(), &train);
-            load_dataset_2d_single(cfg.test_data_file.c_str(),
-                                   cfg.test_label_file.c_str(), &test);
-        }
+    if (have_simple) {
+        ClassificationDataset full;
+        load_dataset(cfg.data_file.c_str(), cfg.label_file.c_str(), cfg.timeseries, &full);
+        split_dataset(&full, cfg.training_percent, &train, &test);
+        free_classification_dataset(&full);
     } else {
-        if (have_simple) {
-            load_dataset(cfg.data_file.c_str(), cfg.label_file.c_str(),
-                         cfg.training_percent, &train, &test);
-        } else {
-            load_dataset_single(cfg.train_data_file.c_str(),
-                                cfg.train_label_file.c_str(), &train);
-            load_dataset_single(cfg.test_data_file.c_str(),
-                                cfg.test_label_file.c_str(), &test);
-        }
+        load_dataset(cfg.train_data_file.c_str(), cfg.train_label_file.c_str(),
+                     cfg.timeseries, &train);
+        load_dataset(cfg.test_data_file.c_str(), cfg.test_label_file.c_str(),
+                     cfg.timeseries, &test);
     }
 
     size_t train_labels = label_count(&train);

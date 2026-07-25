@@ -502,7 +502,7 @@ static void build_split_dataset_3d(const RealData* rd, const TextData* td,
 }
 
 // Free a ClassificationDataset. All heap memory is freed.
-// label_strings are also freed (they were either shared or owned by this dataset).
+// label_strings are also freed (each dataset owns its own copy).
 void free_classification_dataset(ClassificationDataset* ds) {
     if (!ds) return;
     free_realdata(ds->data);
@@ -523,88 +523,12 @@ void free_classification_dataset(ClassificationDataset* ds) {
     ds->labels.shape = NULL;
 }
 
-void load_dataset(const char* data_path, const char* labels_path,
-                  double train_percent, ClassificationDataset* train, ClassificationDataset* test) {
-    assert(train_percent >= 0.00 && train_percent <= 1.00);
-    FILE* f_data   = fopen(data_path, "r");
-    FILE* f_labels = fopen(labels_path, "r");
-    if (f_data == NULL || f_labels == NULL) {
-        if (f_data != NULL) fclose(f_data);
-        if (f_labels != NULL) fclose(f_labels);
-        *train = {};
-        *test  = {};
-        return;
-    }
-
-    int cols;
-    int rows = count_2d_lines(f_data, &cols);
-    
-    RealData rd = parse_realdata_2d(f_data, rows, cols);
-    TextData td = parse_textdata(f_labels, rows);
-    
-    fclose(f_data);
-    fclose(f_labels);
-
-    if (!rd.data || !td.data || !rd.min_vals || !rd.max_vals) {
-        free_realdata(rd);
-        free_textdata(td);
-        *train = {};
-        *test  = {};
-        return;
-    }
-
-    // Shuffle
-    shuffle_two(rd.data, rd.shape, rd.dims, td.data, td.shape, td.dims);
-
-    // Split
-    int train_len = (int)(train_percent * rows);
-    int test_len  = rows - train_len;
-
-    build_split_dataset_2d(&rd, &td, 0, train_len, cols, true, train);
-    if (!train->data.data) {
-        free_realdata(rd);
-        // train was never built; free td's owned resources
-        for (int i = 0; i < td.label_strings_count; i++) {
-            free(td.label_strings[i]);
-        }
-        free(td.label_strings);
-        free(td.data);
-        free(td.shape);
-        *train = {};
-        *test  = {};
-        return;
-    }
-
-    build_split_dataset_2d(&rd, &td, train_len, test_len, cols, false, test);
-    if (!test->data.data) {
-        free_classification_dataset(train); // train owns its label_strings copy
-        free_realdata(rd);
-        // td.label_strings is owned by td; train/test each have their own copy
-        for (int i = 0; i < td.label_strings_count; i++) {
-            free(td.label_strings[i]);
-        }
-        free(td.label_strings);
-        free(td.data);
-        free(td.shape);
-        *train = {};
-        *test  = {};
-        return;
-    }
-
-    free_realdata(rd);
-    // td.data, td.shape, and td.label_strings are owned by td.
-    // train and test each own their own copies of label_strings (freed by free_classification_dataset).
-    for (int i = 0; i < td.label_strings_count; i++) {
-        free(td.label_strings[i]);
-    }
-    free(td.label_strings);
-    free(td.data);
-    free(td.shape);
-}
-
-void load_dataset_single(const char* data_path, const char* labels_path,
-                         ClassificationDataset* out) {
-    *out           = {{NULL, NULL, NULL, 2, NULL}, {NULL, NULL, 0, 1, NULL}, false};
+/* Load a single dataset from data+label files. Detects 2D vs 3D via the
+ * timeseries flag. The dataset is NOT shuffled or split. Caller must free
+ * via free_classification_dataset(). */
+void load_dataset(const char* data_path, const char* labels_path, bool timeseries,
+                  ClassificationDataset* out) {
+    *out           = {{NULL, NULL, NULL, 0, NULL}, {NULL, NULL, 0, 0, NULL}, false};
     FILE* f_data   = fopen(data_path, "r");
     FILE* f_labels = fopen(labels_path, "r");
     if (f_data == NULL || f_labels == NULL) {
@@ -613,145 +537,116 @@ void load_dataset_single(const char* data_path, const char* labels_path,
         return;
     }
 
-    int cols;
-    int rows = count_2d_lines(f_data, &cols);
-    
-    RealData rd = parse_realdata_2d(f_data, rows, cols);
-    TextData td = parse_textdata(f_labels, rows);
-    
-    fclose(f_data);
-    fclose(f_labels);
-
-    if (!rd.data || !td.data || !rd.min_vals || !rd.max_vals) {
-        free_realdata(rd);
-        free_textdata(td);
-        *out = {};
-        return;
-    }
-
-    *out = {rd, td, false};
-}
-
-void load_dataset_2d(const char* data_path, const char* labels_path,
-                     double train_percent, ClassificationDataset* train, ClassificationDataset* test) {
-    assert(train_percent >= 0.0 && train_percent <= 1.0);
-    FILE* f_data   = fopen(data_path, "r");
-    FILE* f_labels = fopen(labels_path, "r");
-
-    if (f_data == NULL || f_labels == NULL) {
-        if (f_data != NULL) fclose(f_data);
-        if (f_labels != NULL) fclose(f_labels);
-        *train = {};
-        *test  = {};
-        return;
-    }
-
-    int num_obs, input_features, timesteps;
-    compute_3d_dims(f_data, &num_obs, &input_features, &timesteps);
-
-    if (num_obs == 0) {
+    if (timeseries) {
+        // 3D: timeseries data
+        int num_obs, input_features, timesteps;
+        compute_3d_dims(f_data, &num_obs, &input_features, &timesteps);
         fclose(f_data);
         fclose(f_labels);
-        *train = {};
-        *test  = {};
-        return;
+
+        if (num_obs == 0) {
+            *out = {};
+            return;
+        }
+
+        // Reset file pointer for 3D parsing
+        f_data = fopen(data_path, "r");
+        f_labels = fopen(labels_path, "r");
+        if (!f_data || !f_labels) {
+            if (f_data) fclose(f_data);
+            if (f_labels) fclose(f_labels);
+            *out = {};
+            return;
+        }
+
+        RealData rd = parse_realdata_3d(f_data, num_obs, input_features, timesteps);
+        TextData td = parse_textdata(f_labels, num_obs);
+        fclose(f_data);
+        fclose(f_labels);
+
+        if (!rd.data || !td.data || !rd.min_vals || !rd.max_vals) {
+            free_realdata(rd);
+            free_textdata(td);
+            *out = {};
+            return;
+        }
+
+        *out = {rd, td, true};
+    } else {
+        // 2D: non-timeseries data
+        int cols;
+        int rows = count_2d_lines(f_data, &cols);
+        fclose(f_data);
+        fclose(f_labels);
+
+        if (rows == 0) {
+            *out = {};
+            return;
+        }
+
+        // Reset file pointers for 2D parsing
+        f_data = fopen(data_path, "r");
+        f_labels = fopen(labels_path, "r");
+        if (!f_data || !f_labels) {
+            if (f_data) fclose(f_data);
+            if (f_labels) fclose(f_labels);
+            *out = {};
+            return;
+        }
+
+        RealData rd = parse_realdata_2d(f_data, rows, cols);
+        TextData td = parse_textdata(f_labels, rows);
+        fclose(f_data);
+        fclose(f_labels);
+
+        if (!rd.data || !td.data || !rd.min_vals || !rd.max_vals) {
+            free_realdata(rd);
+            free_textdata(td);
+            *out = {};
+            return;
+        }
+
+        *out = {rd, td, false};
+    }
+}
+
+/* Shuffle and split a loaded dataset into train/test.
+ * Shuffles the source dataset in-place, then splits into train (first train_len)
+ * and test (remaining). Both train and test own independent label_strings copies.
+ * Source dataset is left in a shuffled but otherwise unchanged state.
+ * Caller must free train and test via free_classification_dataset(). */
+void split_dataset(ClassificationDataset* source, double train_percent,
+                   ClassificationDataset* train, ClassificationDataset* test) {
+    *train = {};
+    *test  = {};
+    assert(train_percent >= 0.00 && train_percent <= 1.00);
+
+    if (!source->data.data || !source->labels.data) {
+        return; // empty source
     }
 
-    RealData rd = parse_realdata_3d(f_data, num_obs, input_features, timesteps);
-    TextData td = parse_textdata(f_labels, num_obs);
-    
-    fclose(f_data);
-    fclose(f_labels);
+    // Shuffle in-place (both data and labels together)
+    shuffle_two(source->data.data, source->data.shape, source->data.dims,
+                source->labels.data, source->labels.shape, source->labels.dims);
 
-    if (!rd.data || !td.data || !rd.min_vals || !rd.max_vals) {
-        free_realdata(rd);
-        free_textdata(td);
-        *train = {};
-        *test  = {};
-        return;
-    }
-
-    int block_size = input_features * timesteps;
-
-    // Shuffle
-    shuffle_two(rd.data, rd.shape, rd.dims, td.data, td.shape, td.dims);
-
+    int num_obs = source->data.shape[0];
     int train_len = (int)(train_percent * num_obs);
     int test_len  = num_obs - train_len;
 
-    build_split_dataset_3d(&rd, &td, 0, train_len, block_size, input_features, true, train);
-    if (!train->data.data) {
-        free_realdata(rd);
-        for (int i = 0; i < td.label_strings_count; i++) {
-            free(td.label_strings[i]);
-        }
-        free(td.label_strings);
-        free(td.data);
-        free(td.shape);
-        *train = {};
-        *test  = {};
-        return;
+    if (source->data.dims == 3) {
+        // 3D split
+        int block_size = source->data.shape[1] * source->data.shape[2];
+        int input_features = source->data.shape[1];
+        build_split_dataset_3d(&source->data, &source->labels,
+                               0, train_len, block_size, input_features, true, train);
+        build_split_dataset_3d(&source->data, &source->labels,
+                               train_len, test_len, block_size, input_features, false, test);
+    } else {
+        // 2D split
+        int cols = source->data.shape[1];
+        build_split_dataset_2d(&source->data, &source->labels,
+                               0, train_len, cols, true, train);
+        build_split_dataset_2d(&source->data, &source->labels,
+                               train_len, test_len, cols, false, test);
     }
-
-    build_split_dataset_3d(&rd, &td, train_len, test_len, block_size, input_features, false, test);
-    if (!test->data.data) {
-        free_classification_dataset(train);
-        free_realdata(rd);
-        for (int i = 0; i < td.label_strings_count; i++) {
-            free(td.label_strings[i]);
-        }
-        free(td.label_strings);
-        free(td.data);
-        free(td.shape);
-        *train = {};
-        *test  = {};
-        return;
-    }
-
-    free_realdata(rd);
-    // td.data, td.shape, and td.label_strings are owned by td.
-    // train and test each own their own copies of label_strings (freed by free_classification_dataset).
-    for (int i = 0; i < td.label_strings_count; i++) {
-        free(td.label_strings[i]);
-    }
-    free(td.label_strings);
-    free(td.data);
-    free(td.shape);
-}
-
-void load_dataset_2d_single(const char* data_path, const char* labels_path,
-                            ClassificationDataset* out) {
-    *out           = {{NULL, NULL, NULL, 3, NULL}, {NULL, NULL, 0, 1, NULL}, false};
-    FILE* f_data   = fopen(data_path, "r");
-    FILE* f_labels = fopen(labels_path, "r");
-
-    if (f_data == NULL || f_labels == NULL) {
-        if (f_data != NULL) fclose(f_data);
-        if (f_labels != NULL) fclose(f_labels);
-        return;
-    }
-
-    int num_obs, input_features, timesteps;
-    compute_3d_dims(f_data, &num_obs, &input_features, &timesteps);
-
-    if (num_obs == 0) {
-        fclose(f_data);
-        fclose(f_labels);
-        return;
-    }
-
-    RealData rd = parse_realdata_3d(f_data, num_obs, input_features, timesteps);
-    TextData td = parse_textdata(f_labels, num_obs);
-    
-    fclose(f_data);
-    fclose(f_labels);
-
-    if (!rd.data || !td.data || !rd.min_vals || !rd.max_vals) {
-        free_realdata(rd);
-        free_textdata(td);
-        *out = {};
-        return;
-    }
-
-    *out = {rd, td, true};
 }
