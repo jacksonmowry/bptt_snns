@@ -76,15 +76,14 @@ int main(int argc, char* argv[]) {
     ClassificationDataset train;
     ClassificationDataset test;
     if (have_simple) {
-        ClassificationDataset full;
-        load_dataset(cfg.data_file.c_str(), cfg.label_file.c_str(), cfg.timeseries, &full);
-        split_dataset(&full, cfg.training_percent, &train, &test);
-        free_classification_dataset(&full);
+        load_classification_dataset(cfg.data_file.c_str(), cfg.label_file.c_str(),
+                                     cfg.training_percent, cfg.timeseries,
+                                     &train, &test);
     } else {
-        load_dataset(cfg.train_data_file.c_str(), cfg.train_label_file.c_str(),
-                     cfg.timeseries, &train);
-        load_dataset(cfg.test_data_file.c_str(), cfg.test_label_file.c_str(),
-                     cfg.timeseries, &test);
+        load_classification_single(cfg.train_data_file.c_str(), cfg.train_label_file.c_str(),
+                                    cfg.timeseries, &train);
+        load_classification_single(cfg.test_data_file.c_str(), cfg.test_label_file.c_str(),
+                                    cfg.timeseries, &test);
     }
 
     size_t train_labels = label_count(&train);

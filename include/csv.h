@@ -34,24 +34,37 @@ typedef struct {
     bool timeseries;
 } RegressionDataset;
 
-/* Load a single dataset (either 2D or 3D). Caller must free via free_classification_dataset().
- * timeseries=true  -> loads 3D data (rows of feature vectors per observation)
- * timeseries=false -> loads 2D data (single row per observation) */
-void load_dataset(const char* data_path, const char* labels_path, bool timeseries,
-                  ClassificationDataset* out);
+/* Low-level loaders — file I/O and parsing encapsulated. Returns heap-allocated structs.
+ * Caller must free via free_realdata() or free_textdata(). */
+RealData load_realdata_2d(const char* path);       /* 2D data: rows x cols */
+RealData load_realdata_3d(const char* path);       /* 3D data: obs x features x timesteps */
+TextData load_textdata(const char* path, int count); /* text labels, count = number of observations */
 
-/* Shuffle and split a loaded dataset into train/test.
- * The source dataset is untouched (shuffled in-place internally before splitting).
- * Both train and test own independent copies of label_strings. Caller must free via
- * free_classification_dataset(). */
-void split_dataset(ClassificationDataset* source, double train_percent,
-                   ClassificationDataset* train, ClassificationDataset* test);
+/* High-level classification dataset loader. Loads both files, shuffles, and splits.
+ * Caller must free train and test via free_classification_dataset(). */
+void load_classification_dataset(const char* data_path, const char* labels_path,
+                                  double train_percent, bool timeseries,
+                                  ClassificationDataset* train, ClassificationDataset* test);
+
+/* Low-level classification: load a single dataset (no split), then split separately. */
+void load_classification_single(const char* data_path, const char* labels_path, bool timeseries,
+                                 ClassificationDataset* out);
+
+void split_classification(ClassificationDataset* source, double train_percent,
+                          ClassificationDataset* train, ClassificationDataset* test);
 
 /* Dataset cleanup */
 void free_classification_dataset(ClassificationDataset* ds);
+void free_realdata(RealData rd);
+void free_textdata(TextData td);
 
-/* Regression dataset loading (future) */
-// void load_regression_dataset(const char* data_path, const char* target_path,
-//                              double train_percent, RegressionDataset* train, RegressionDataset* test);
-// void load_regression_dataset_single(const char* data_path, const char* target_path,
-//                                     RegressionDataset* out);
+/* Regression dataset loading */
+void load_regression_dataset(const char* data_path, const char* target_path,
+                              double train_percent, bool timeseries,
+                              RegressionDataset* train, RegressionDataset* test);
+
+void load_regression_dataset_single(const char* data_path, const char* target_path,
+                                     bool timeseries,
+                                     RegressionDataset* out);
+
+void free_regression_dataset(RegressionDataset* ds);
