@@ -107,6 +107,7 @@ int main(int argc, char* argv[]) {
 
         // Fields live under Associated_Data.other
         const json& other = network_json.at("Associated_Data").at("other");
+		auto labels = other["label_mapping"];
 
         // Extract metadata from loaded network JSON
         size_t timesteps = other.value("timesteps", 0);
@@ -202,7 +203,8 @@ int main(int argc, char* argv[]) {
                 int pred = evaluate_sample(p, tmp_ds, 0, hidden_neurons,
                                            output_neurons, timesteps,
                                            timeseries, input_neurons);
-                printf("PRED %d\n", pred);
+				string label_str = labels[pred];
+                printf("label %s\n", label_str.c_str());
 
                 free(tmp_ds.shape);
             }

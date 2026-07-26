@@ -37,8 +37,8 @@ bin/bptt_learning: src/bptt_learning.cpp $(ALL_OBJ) $(RISP_OBJ) $(FR_LIB)
 opencl: clean_objs
 	$(MAKE) BUILDFLAGS="-DOPENCL" OPENCL_INCLUDE="-Ivendor/OpenCL-Wrapper/include" LDLIBS="-Lvendor/lib -lOpenCL"
 
-bin/interactive_mode: src/interactive_mode.cpp obj/evaluation.o obj/data_utils.o obj/network_utils.o
-	$(CXX) -std=c++11 -Wall -Wextra -O3 -march=native -Iinclude -Ivendor -Iframework-open/include -Iframework-open/include/utils -o $@ src/interactive_mode.cpp obj/evaluation.o obj/data_utils.o obj/network_utils.o $(RISP_OBJ) framework-open/lib/libframework.a
+bin/interactive_mode: src/interactive_mode.cpp $(ALL_OBJ) $(RISP_OBJ) $(FR_LIB)
+	$(CXX) $(FR_CFLAGS) -o $@ $^ $(LDLIBS)
 
 # Libraries ###################################################################
 framework-open/lib/libframework.a: $(FR_OBJ) framework-open/include/framework.hpp
