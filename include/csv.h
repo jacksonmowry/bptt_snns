@@ -44,8 +44,25 @@ void load_dataset(const char* data_path, const char* labels_path,
 std::pair<Dataset, std::vector<std::string>> load_dataset_single(
     const char* data_path, const char* labels_path, bool timeseries);
 
+/* Regression dataset loading: loads two RealData files (data + target),
+ * normalizes both, shuffles and splits into train/test.
+ * label_strings is filled with an empty vector. */
+void load_regression_dataset(const char* data_path, const char* labels_path,
+                             double train_percent, bool timeseries,
+                             Dataset* train, Dataset* test,
+                             std::vector<std::string>& label_strings);
+
+/* Low-level: load a single regression dataset (no split), then split separately.
+ * Both data and labels are normalized. */
+Dataset load_regression_dataset_single(
+    const char* data_path, const char* labels_path, bool timeseries);
+
 void split_dataset(Dataset* source, double train_percent,
                    Dataset* train, Dataset* test);
+
+/* Regression: shuffle and split a loaded regression dataset. */
+void split_regression_dataset(Dataset* source, double train_percent,
+                              Dataset* train, Dataset* test);
 
 /* Compute min/max values for RealData from its data buffer.
  * Uses shape/dims to determine iteration bounds.

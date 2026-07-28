@@ -32,6 +32,7 @@ struct CliConfig {
 #endif
     size_t max_delay          = 7;
     double weight_init_stddev = 0.1;
+    bool regression           = false;
 };
 
 int parse_cli(int argc, char* argv[], CliConfig* cfg);
