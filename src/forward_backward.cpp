@@ -10,7 +10,7 @@
 
 using namespace neuro;
 
-EvaluationResults forward(TrainingBundle* tb, Processor* p, const ClassificationDataset* d,
+EvaluationResults forward(TrainingBundle* tb, Processor* p, const Dataset* d,
                           size_t index, const NetworkConfiguration* nc) {
     EvaluationResults er = {0.0, 0.0};
 

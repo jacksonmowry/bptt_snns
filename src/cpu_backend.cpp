@@ -9,7 +9,7 @@
 using namespace std;
 
 CpuBackend::CpuBackend(const CliConfig& cfg, NetworkConfiguration& nc,
-                       const ClassificationDataset& train, const ClassificationDataset& test)
+                       const Dataset& train, const Dataset& test)
     : cfg(cfg), nc(nc), train(train), test(test), batch_size(cfg.batch_size),
       learning_rate(cfg.learning_rate), decay_rate(cfg.decay_rate) {
     size_t threads = cfg.threads;

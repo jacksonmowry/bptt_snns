@@ -15,7 +15,7 @@
 #define ADAM_EPS (1.0e-8)
 #endif
 
-void weight_updates(const NetworkConfiguration* nc, const ClassificationDataset* d,
+void weight_updates(const NetworkConfiguration* nc, const Dataset* d,
                     size_t current_batch_size, size_t batch_size,
                     size_t batch_start, size_t epoch, double& b1_t,
                     double& b2_t, std::vector<std::vector<double>>& m_weights,

@@ -520,20 +520,20 @@ void free_realdata(RealData rd) {
     free(rd.shape);
 }
 
-// Helper: create an empty ClassificationDataset
-static ClassificationDataset make_empty_dataset() {
-    ClassificationDataset out;
+// Helper: create an empty Dataset
+static Dataset make_empty_dataset() {
+    Dataset out;
     out.data = {NULL, NULL, NULL, 0, NULL};
     out.labels = {NULL, NULL, NULL, 0, NULL};
     out.timeseries = false;
     return out;
 }
 
-// Helper: allocate and populate a ClassificationDataset split (2D).
+// Helper: allocate and populate a Dataset split (2D).
 // Copies data subset, label indices, min/max; recomputes min/max and normalizes data.
 static void build_split_dataset_2d(const RealData* rd, const RealData* labels,
                                     int start, int len, int cols,
-                                    ClassificationDataset* out) {
+                                    Dataset* out) {
     out->data.data     = (double*)malloc((size_t)len * (size_t)cols * sizeof(double));
     out->labels.data   = (double*)malloc(len * sizeof(double));
     out->data.min_vals = (double*)malloc(cols * sizeof(double));
@@ -571,12 +571,12 @@ static void build_split_dataset_2d(const RealData* rd, const RealData* labels,
     normalize_realdata(out->data);
 }
 
-// Helper: allocate and populate a ClassificationDataset split (3D).
+// Helper: allocate and populate a Dataset split (3D).
 // Copies data subset, label indices, min/max; recomputes min/max and normalizes data.
 static void build_split_dataset_3d(const RealData* rd, const RealData* labels,
                                     int start, int len, int block_size,
                                     int input_features,
-                                    ClassificationDataset* out) {
+                                    Dataset* out) {
     out->data.data     = (double*)malloc(len * block_size * sizeof(double));
     out->labels.data   = (double*)malloc(len * sizeof(double));
     out->data.min_vals = (double*)malloc(input_features * sizeof(double));
@@ -612,8 +612,8 @@ static void build_split_dataset_3d(const RealData* rd, const RealData* labels,
     normalize_realdata(out->data);
 }
 
-// Free a ClassificationDataset. All heap memory is freed.
-void free_classification_dataset(ClassificationDataset* ds) {
+// Free a Dataset. All heap memory is freed.
+void free_dataset(Dataset* ds) {
     if (!ds) return;
     free_realdata(ds->data);
     free_realdata(ds->labels);
@@ -627,11 +627,11 @@ void free_classification_dataset(ClassificationDataset* ds) {
     ds->labels.shape = NULL;
 }
 
-/* Load a single classification dataset (no shuffle, no split). Detects 2D vs 3D
- * via timeseries flag. Caller must free via free_classification_dataset(). */
-std::pair<ClassificationDataset, std::vector<std::string>> load_classification_single(
+/* Load a single dataset (no shuffle, no split). Detects 2D vs 3D
+ * via timeseries flag. Caller must free via free_dataset(). */
+std::pair<Dataset, std::vector<std::string>> load_dataset_single(
     const char* data_path, const char* labels_path, bool timeseries) {
-    ClassificationDataset out = make_empty_dataset();
+    Dataset out = make_empty_dataset();
     std::vector<std::string> label_strings;
 
     RealData rd;
@@ -660,10 +660,10 @@ std::pair<ClassificationDataset, std::vector<std::string>> load_classification_s
     return {out, std::move(label_strings)};
 }
 
-/* Shuffle and split a loaded classification dataset. Shuffles in-place, splits into
- * train/test. Caller must free via free_classification_dataset(). */
-void split_classification(ClassificationDataset* source, double train_percent,
-                          ClassificationDataset* train, ClassificationDataset* test) {
+/* Shuffle and split a loaded dataset. Shuffles in-place, splits into
+ * train/test. Caller must free via free_dataset(). */
+void split_dataset(Dataset* source, double train_percent,
+                   Dataset* train, Dataset* test) {
     *train = make_empty_dataset();
     *test  = make_empty_dataset();
     assert(train_percent >= 0.00 && train_percent <= 1.00);
@@ -696,218 +696,15 @@ void split_classification(ClassificationDataset* source, double train_percent,
     }
 }
 
-/* Full classification dataset loading: load + shuffle + split into train/test.
- * Convenience wrapper around load_classification_single + split_classification.
+/* Full dataset loading: load + shuffle + split into train/test.
+ * Convenience wrapper around load_dataset_single + split_dataset.
  * label_strings filled with unique label names (same for train and test). */
-void load_classification_dataset(const char* data_path, const char* labels_path,
-                                  double train_percent, bool timeseries,
-                                  ClassificationDataset* train, ClassificationDataset* test,
-                                  std::vector<std::string>& label_strings) {
-    auto result = load_classification_single(data_path, labels_path, timeseries);
-    split_classification(&result.first, train_percent, train, test);
-    free_classification_dataset(&result.first);
+void load_dataset(const char* data_path, const char* labels_path,
+                  double train_percent, bool timeseries,
+                  Dataset* train, Dataset* test,
+                  std::vector<std::string>& label_strings) {
+    auto result = load_dataset_single(data_path, labels_path, timeseries);
+    split_dataset(&result.first, train_percent, train, test);
+    free_dataset(&result.first);
     label_strings = std::move(result.second);
-}
-
-/* Free all heap memory in a RegressionDataset. */
-void free_regression_dataset(RegressionDataset* ds) {
-    if (!ds) return;
-    free_realdata(ds->input);
-    free_realdata(ds->target);
-    ds->input.data = NULL;
-    ds->input.min_vals = NULL;
-    ds->input.max_vals = NULL;
-    ds->input.shape = NULL;
-    ds->target.data = NULL;
-    ds->target.min_vals = NULL;
-    ds->target.max_vals = NULL;
-    ds->target.shape = NULL;
-}
-
-/* Split a loaded regression dataset into train/test. Shuffles input and target
- * together using the same permutation, then copies subsets for each split.
- * Caller must free train and test via free_regression_dataset(). */
-static void split_regression(RegressionDataset* source, double train_percent,
-                              RegressionDataset* train, RegressionDataset* test) {
-    *train = {0};
-    *test  = {0};
-    assert(train_percent >= 0.00 && train_percent <= 1.00);
-
-    if (!source->input.data || !source->target.data) return;
-
-    // Validate shapes match on first dimension
-    assert(source->input.shape[0] == source->target.shape[0]);
-
-    int num_samples = source->input.shape[0];
-    int train_len = (int)(train_percent * num_samples);
-    int test_len  = num_samples - train_len;
-
-    // Shuffle input and target together
-    shuffle_two(source->input.data, source->input.shape, source->input.dims,
-                source->target.data, source->target.shape, source->target.dims);
-
-    // Helper to allocate and split input (2D or 3D). Cleans up on partial failure.
-    auto split_input = [&](double** out_data, double** out_min, double** out_max,
-                           int* out_dims, int** out_shape, int start, int len) {
-        *out_data = NULL; *out_min = NULL; *out_max = NULL;
-        *out_shape = NULL;
-
-        if (source->input.dims == 3) {
-            *out_dims = 3;
-            *out_shape = (int*)malloc(3 * sizeof(int));
-            if (!*out_shape) return;
-            (*out_shape)[0] = len;
-            (*out_shape)[1] = source->input.shape[1];
-            (*out_shape)[2] = source->input.shape[2];
-            int block_size = source->input.shape[1] * source->input.shape[2];
-            *out_data = (double*)malloc((size_t)len * block_size * sizeof(double));
-            *out_min = (double*)malloc(source->input.shape[1] * sizeof(double));
-            *out_max = (double*)malloc(source->input.shape[1] * sizeof(double));
-            if (*out_data && *out_min && *out_max) {
-                memcpy(*out_data, source->input.data + (start * block_size),
-                       (size_t)len * block_size * sizeof(double));
-                memcpy(*out_min, source->input.min_vals, source->input.shape[1] * sizeof(double));
-                memcpy(*out_max, source->input.max_vals, source->input.shape[1] * sizeof(double));
-
-                // Recompute min/max on split subset
-                RealData tmp_rd_in;
-                tmp_rd_in.data       = *out_data;
-                tmp_rd_in.min_vals   = *out_min;
-                tmp_rd_in.max_vals   = *out_max;
-                tmp_rd_in.dims       = 3;
-                tmp_rd_in.shape      = *out_shape;
-                compute_realdata_minmax(tmp_rd_in);
-
-                // Normalize split data to [0,1]
-                normalize_realdata(tmp_rd_in);
-            } else {
-                free(*out_data); free(*out_min); free(*out_max);
-                *out_data = NULL; *out_min = NULL; *out_max = NULL;
-            }
-        } else {
-            *out_dims = 2;
-            *out_shape = (int*)malloc(2 * sizeof(int));
-            if (!*out_shape) return;
-            (*out_shape)[0] = len;
-            (*out_shape)[1] = source->input.shape[1];
-            int cols = source->input.shape[1];
-            *out_data = (double*)malloc((size_t)len * cols * sizeof(double));
-            *out_min = (double*)malloc(cols * sizeof(double));
-            *out_max = (double*)malloc(cols * sizeof(double));
-            if (*out_data && *out_min && *out_max) {
-                memcpy(*out_data, source->input.data + (start * cols),
-                       (size_t)len * cols * sizeof(double));
-                memcpy(*out_min, source->input.min_vals, cols * sizeof(double));
-                memcpy(*out_max, source->input.max_vals, cols * sizeof(double));
-
-                // Recompute min/max on split subset
-                RealData tmp_rd;
-                tmp_rd.data       = *out_data;
-                tmp_rd.min_vals   = *out_min;
-                tmp_rd.max_vals   = *out_max;
-                tmp_rd.dims       = 2;
-                tmp_rd.shape      = *out_shape;
-                compute_realdata_minmax(tmp_rd);
-
-                // Normalize split data to [0,1]
-                normalize_realdata(tmp_rd);
-            } else {
-                free(*out_data); free(*out_min); free(*out_max);
-                *out_data = NULL; *out_min = NULL; *out_max = NULL;
-            }
-        }
-    };
-
-    // Helper to allocate and split target (always 2D: [samples x num_targets]).
-    auto split_target = [&](double** out_data, double** out_min, double** out_max,
-                            int* out_dims, int** out_shape, int start, int len) {
-        *out_data = NULL; *out_min = NULL; *out_max = NULL;
-        *out_shape = NULL;
-        *out_dims = 2;
-        *out_shape = (int*)malloc(2 * sizeof(int));
-        if (!*out_shape) return;
-        (*out_shape)[0] = len;
-        (*out_shape)[1] = source->target.shape[1];
-        int cols = source->target.shape[1];
-        *out_data = (double*)malloc((size_t)len * cols * sizeof(double));
-        *out_min = (double*)malloc(cols * sizeof(double));
-        *out_max = (double*)malloc(cols * sizeof(double));
-        if (*out_data && *out_min && *out_max) {
-            memcpy(*out_data, source->target.data + (start * cols),
-                   (size_t)len * cols * sizeof(double));
-            memcpy(*out_min, source->target.min_vals, cols * sizeof(double));
-            memcpy(*out_max, source->target.max_vals, cols * sizeof(double));
-
-            // Recompute min/max on split subset
-            RealData tmp_rd;
-            tmp_rd.data       = *out_data;
-            tmp_rd.min_vals   = *out_min;
-            tmp_rd.max_vals   = *out_max;
-            tmp_rd.dims       = 2;
-            tmp_rd.shape      = *out_shape;
-            compute_realdata_minmax(tmp_rd);
-
-            // Normalize split data to [0,1]
-            normalize_realdata(tmp_rd);
-        } else {
-            free(*out_data); free(*out_min); free(*out_max);
-            *out_data = NULL; *out_min = NULL; *out_max = NULL;
-        }
-    };
-
-    // Split train (first train_len samples)
-    split_input(&train->input.data, &train->input.min_vals, &train->input.max_vals,
-                &train->input.dims, &train->input.shape, 0, train_len);
-    split_target(&train->target.data, &train->target.min_vals, &train->target.max_vals,
-                 &train->target.dims, &train->target.shape, 0, train_len);
-
-    // Split test (remaining samples)
-    split_input(&test->input.data, &test->input.min_vals, &test->input.max_vals,
-                &test->input.dims, &test->input.shape, train_len, test_len);
-    split_target(&test->target.data, &test->target.min_vals, &test->target.max_vals,
-                 &test->target.dims, &test->target.shape, train_len, test_len);
-
-    train->timeseries = source->timeseries;
-    test->timeseries  = source->timeseries;
-}
-
-/* Load a single regression dataset (no split). Target file is always 2D
- * [samples x num_targets], never 3D. Caller must free via
- * free_regression_dataset(). */
-void load_regression_dataset_single(const char* data_path, const char* target_path,
-                                     bool timeseries, RegressionDataset* out) {
-    *out = {0};
-
-    if (timeseries) {
-        RealData input = load_realdata_3d(data_path);
-        RealData target = load_realdata_2d(target_path);
-        if (input.data && target.data && input.shape[0] == target.shape[0]) {
-            *out = {input, target, true};
-        } else {
-            free_realdata(input);
-            free_realdata(target);
-            *out = {};
-        }
-    } else {
-        RealData input = load_realdata_2d(data_path);
-        RealData target = load_realdata_2d(target_path);
-        if (input.data && target.data && input.shape[0] == target.shape[0]) {
-            *out = {input, target, false};
-        } else {
-            free_realdata(input);
-            free_realdata(target);
-            *out = {};
-        }
-    }
-}
-
-/* Load regression dataset with train/test split. Caller must free via
- * free_regression_dataset(). */
-void load_regression_dataset(const char* data_path, const char* target_path,
-                              double train_percent, bool timeseries,
-                              RegressionDataset* train, RegressionDataset* test) {
-    RegressionDataset full;
-    load_regression_dataset_single(data_path, target_path, timeseries, &full);
-    split_regression(&full, train_percent, train, test);
-    free_regression_dataset(&full);
 }

@@ -14,19 +14,12 @@ typedef struct {
     int* shape;      // heap-allocated array of size dims
 } RealData;
 
-/* Combined dataset: real data + real label indices (classification) */
+/* Combined dataset: real data + real label indices */
 typedef struct {
     RealData data;      // input features
     RealData labels;    // label indices (dims=1, shape=[count])
     bool timeseries;
-} ClassificationDataset;
-
-/* Regression dataset: real input + real target */
-typedef struct {
-    RealData input;  // features
-    RealData target; // targets
-    bool timeseries;
-} RegressionDataset;
+} Dataset;
 
 /* Low-level loaders — file I/O and parsing encapsulated. Returns heap-allocated structs.
  * Caller must free via free_realdata(). */
@@ -38,21 +31,21 @@ RealData load_realdata_3d(const char* path);       /* 3D data: obs x features x 
  * Caller must free the RealData's data/shape via free_realdata(). */
 std::pair<RealData, std::vector<std::string>> load_textdata(const char* path, int count);
 
-/* High-level classification dataset loader. Loads both files, shuffles, and splits.
+/* High-level dataset loader. Loads both files, shuffles, and splits.
  * label_strings filled with unique label names (same for train and test).
- * Caller must free train and test via free_classification_dataset(). */
-void load_classification_dataset(const char* data_path, const char* labels_path,
-                                  double train_percent, bool timeseries,
-                                  ClassificationDataset* train, ClassificationDataset* test,
-                                  std::vector<std::string>& label_strings);
+ * Caller must free train and test via free_dataset(). */
+void load_dataset(const char* data_path, const char* labels_path,
+                  double train_percent, bool timeseries,
+                  Dataset* train, Dataset* test,
+                  std::vector<std::string>& label_strings);
 
-/* Low-level classification: load a single dataset (no split), then split separately.
- * Returns {ClassificationDataset, label_strings}. */
-std::pair<ClassificationDataset, std::vector<std::string>> load_classification_single(
+/* Low-level: load a single dataset (no split), then split separately.
+ * Returns {Dataset, label_strings}. */
+std::pair<Dataset, std::vector<std::string>> load_dataset_single(
     const char* data_path, const char* labels_path, bool timeseries);
 
-void split_classification(ClassificationDataset* source, double train_percent,
-                          ClassificationDataset* train, ClassificationDataset* test);
+void split_dataset(Dataset* source, double train_percent,
+                   Dataset* train, Dataset* test);
 
 /* Compute min/max values for RealData from its data buffer.
  * Uses shape/dims to determine iteration bounds.
@@ -65,16 +58,5 @@ void compute_realdata_minmax(RealData& rd);
 void normalize_realdata(RealData& rd);
 
 /* Dataset cleanup */
-void free_classification_dataset(ClassificationDataset* ds);
+void free_dataset(Dataset* ds);
 void free_realdata(RealData rd);
-
-/* Regression dataset loading */
-void load_regression_dataset(const char* data_path, const char* target_path,
-                              double train_percent, bool timeseries,
-                              RegressionDataset* train, RegressionDataset* test);
-
-void load_regression_dataset_single(const char* data_path, const char* target_path,
-                                     bool timeseries,
-                                     RegressionDataset* out);
-
-void free_regression_dataset(RegressionDataset* ds);

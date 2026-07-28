@@ -4,7 +4,7 @@
 #include "framework.hpp"
 #include <vector>
 
-void encode_spikes(neuro::Processor* p, const ClassificationDataset* d, size_t index,
+void encode_spikes(neuro::Processor* p, const Dataset* d, size_t index,
                    size_t timesteps, bool timeseries, size_t input_neurons);
 
 /* Encode a single non-timeseries sample into a spike raster.

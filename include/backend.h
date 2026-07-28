@@ -24,5 +24,5 @@ class TrainingBackend {
 
 std::unique_ptr<TrainingBackend> create_backend(const CliConfig& cfg,
                                                 NetworkConfiguration& nc,
-                                                const ClassificationDataset& train,
-                                                const ClassificationDataset& test);
+                                                const Dataset& train,
+                                                const Dataset& test);

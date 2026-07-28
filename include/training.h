@@ -40,5 +40,5 @@ struct TrainingState {
 
 // Allocate and initialize training state + threads.
 TrainingState* init_training(const NetworkConfiguration& nc,
-                             const ClassificationDataset& train, size_t threads, double rho,
+                             const Dataset& train, size_t threads, double rho,
                              double tau);

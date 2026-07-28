@@ -2,7 +2,7 @@
 #include "framework.hpp"
 #include <cassert>
 
-void encode_spikes(neuro::Processor* p, const ClassificationDataset* d, size_t index,
+void encode_spikes(neuro::Processor* p, const Dataset* d, size_t index,
                    size_t timesteps, bool timeseries, size_t input_neurons) {
     if (timeseries) {
         // shape = [observations * input_features * timesteps]

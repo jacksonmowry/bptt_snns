@@ -8,13 +8,13 @@
 #include <string>
 
 
-int evaluate_sample(neuro::Processor* p, const ClassificationDataset& dataset, size_t idx,
+int evaluate_sample(neuro::Processor* p, const Dataset& dataset, size_t idx,
                     size_t hidden_neurons, size_t output_neurons,
                     size_t timesteps, bool timeseries, size_t input_neurons);
 
 // Generate confusion matrix for the best saved network.
-bool run_confusion_matrix(const CliConfig& cfg, const ClassificationDataset& train,
-                          const ClassificationDataset& test,
+bool run_confusion_matrix(const CliConfig& cfg, const Dataset& train,
+                          const Dataset& test,
                           const std::vector<std::string>& label_strings,
                           size_t input_neurons, size_t hidden_neurons,
                           size_t output_neurons, size_t timesteps, bool timeseries);

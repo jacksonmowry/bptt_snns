@@ -16,7 +16,7 @@ using namespace std;
 using namespace neuro;
 
 /* Run inference on a single sample and return predicted class index */
-int evaluate_sample(Processor* p, const ClassificationDataset& dataset, size_t idx,
+int evaluate_sample(Processor* p, const Dataset& dataset, size_t idx,
                     size_t hidden_neurons, size_t output_neurons,
                     size_t timesteps, bool timeseries, size_t input_neurons) {
     p->clear_activity();
@@ -47,8 +47,8 @@ int evaluate_sample(Processor* p, const ClassificationDataset& dataset, size_t i
     return pred;
 }
 
-bool run_confusion_matrix(const CliConfig& cfg, const ClassificationDataset& train,
-                          const ClassificationDataset& test,
+bool run_confusion_matrix(const CliConfig& cfg, const Dataset& train,
+                          const Dataset& test,
                           const std::vector<std::string>& label_strings,
                           size_t input_neurons, size_t hidden_neurons,
                           size_t output_neurons, size_t timesteps, bool timeseries) {
@@ -80,7 +80,7 @@ bool run_confusion_matrix(const CliConfig& cfg, const ClassificationDataset& tra
     load_network(&p, best_net);
 
     /* Choose dataset: test if present, otherwise train */
-    const ClassificationDataset* eval_dataset = &test;
+    const Dataset* eval_dataset = &test;
     if (test.data.shape[0] == 0) {
         eval_dataset = &train;
     }

@@ -73,21 +73,21 @@ int main(int argc, char* argv[]) {
     srand(cfg.seed);
     srand48(cfg.seed);
 
-    ClassificationDataset train;
-    ClassificationDataset test;
+    Dataset train;
+    Dataset test;
     std::vector<std::string> label_strings;
     if (have_simple) {
-        load_classification_dataset(cfg.data_file.c_str(), cfg.label_file.c_str(),
+        load_dataset(cfg.data_file.c_str(), cfg.label_file.c_str(),
                                      cfg.training_percent, cfg.timeseries,
                                      &train, &test, label_strings);
     } else {
-        auto [train_ds, train_ls] = load_classification_single(
+        auto [train_ds, train_ls] = load_dataset_single(
             cfg.train_data_file.c_str(), cfg.train_label_file.c_str(),
             cfg.timeseries);
         train = train_ds;
         label_strings = std::move(train_ls);
 
-        auto [test_ds, test_ls] = load_classification_single(
+        auto [test_ds, test_ls] = load_dataset_single(
             cfg.test_data_file.c_str(), cfg.test_label_file.c_str(),
             cfg.timeseries);
         test = test_ds;
@@ -253,8 +253,8 @@ int main(int argc, char* argv[]) {
     backend.reset();
     delete n;
 
-    free_classification_dataset(&train);
-    free_classification_dataset(&test);
+    free_dataset(&train);
+    free_dataset(&test);
 
     return 0;
 }
