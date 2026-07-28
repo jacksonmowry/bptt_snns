@@ -48,9 +48,10 @@ int evaluate_sample(Processor* p, const ClassificationDataset& dataset, size_t i
 }
 
 bool run_confusion_matrix(const CliConfig& cfg, const ClassificationDataset& train,
-                          const ClassificationDataset& test, size_t input_neurons,
-                          size_t hidden_neurons, size_t output_neurons,
-                          size_t timesteps, bool timeseries) {
+                          const ClassificationDataset& test,
+                          const std::vector<std::string>& label_strings,
+                          size_t input_neurons, size_t hidden_neurons,
+                          size_t output_neurons, size_t timesteps, bool timeseries) {
     if (cfg.network_json_out.empty()) {
         return false;
     }
@@ -97,7 +98,7 @@ bool run_confusion_matrix(const CliConfig& cfg, const ClassificationDataset& tra
     }
 
     /* Build confusion matrix */
-    size_t num_classes = (size_t)train.labels.label_strings_count;
+    size_t num_classes = label_strings.size();
     vector<vector<size_t>> cm(num_classes, vector<size_t>(num_classes, 0));
     size_t correct = 0;
     for (size_t idx = 0; idx < num_samples; idx++) {
@@ -114,7 +115,7 @@ bool run_confusion_matrix(const CliConfig& cfg, const ClassificationDataset& tra
     /* Compute column widths: max of label string length and cell width */
     vector<size_t> col_widths(num_classes, 0);
     for (size_t j = 0; j < num_classes; j++) {
-        size_t label_len = strlen(train.labels.label_strings[j]);
+        size_t label_len = label_strings[j].size();
         for (size_t i = 0; i < num_classes; i++) {
             char buf[32];
             snprintf(buf, sizeof(buf), "%zu", cm[i][j]);
@@ -132,7 +133,7 @@ bool run_confusion_matrix(const CliConfig& cfg, const ClassificationDataset& tra
     /* Left label column width */
     size_t left_label_width = 0;
     for (size_t i = 0; i < num_classes; i++) {
-        left_label_width = max(left_label_width, strlen(train.labels.label_strings[i]));
+        left_label_width = max(left_label_width, label_strings[i].size());
     }
     left_label_width = max(left_label_width, (size_t)strlen("True"));
     left_label_width += 1; /* 1 space padding */
@@ -158,8 +159,8 @@ bool run_confusion_matrix(const CliConfig& cfg, const ClassificationDataset& tra
     printf("|");
     for (size_t j = 0; j < num_classes; j++) {
         printf(" ");
-        printf("%s", train.labels.label_strings[j]);
-        for (size_t k = strlen(train.labels.label_strings[j]); k < col_widths[j]; k++) {
+        printf("%s", label_strings[j].c_str());
+        for (size_t k = label_strings[j].size(); k < col_widths[j]; k++) {
             printf(" ");
         }
         printf("|");
@@ -169,7 +170,7 @@ bool run_confusion_matrix(const CliConfig& cfg, const ClassificationDataset& tra
 
     /* Data rows */
     for (size_t i = 0; i < num_classes; i++) {
-        printf(" %*s", (int)left_label_width - 1, train.labels.label_strings[i]);
+        printf(" %*s", (int)left_label_width - 1, label_strings[i].c_str());
         printf("|");
         for (size_t j = 0; j < num_classes; j++) {
             char buf[32];

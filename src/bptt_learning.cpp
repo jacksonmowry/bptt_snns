@@ -75,51 +75,33 @@ int main(int argc, char* argv[]) {
 
     ClassificationDataset train;
     ClassificationDataset test;
+    std::vector<std::string> label_strings;
     if (have_simple) {
         load_classification_dataset(cfg.data_file.c_str(), cfg.label_file.c_str(),
                                      cfg.training_percent, cfg.timeseries,
-                                     &train, &test);
+                                     &train, &test, label_strings);
     } else {
-        load_classification_single(cfg.train_data_file.c_str(), cfg.train_label_file.c_str(),
-                                    cfg.timeseries, &train);
-        load_classification_single(cfg.test_data_file.c_str(), cfg.test_label_file.c_str(),
-                                    cfg.timeseries, &test);
-    }
+        auto [train_ds, train_ls] = load_classification_single(
+            cfg.train_data_file.c_str(), cfg.train_label_file.c_str(),
+            cfg.timeseries);
+        train = train_ds;
+        label_strings = std::move(train_ls);
 
-    size_t train_labels = label_count(&train);
-    size_t test_labels  = label_count(&test);
-    assert(test.data.shape[0] == 0 || train_labels == test_labels);
+        auto [test_ds, test_ls] = load_classification_single(
+            cfg.test_data_file.c_str(), cfg.test_label_file.c_str(),
+            cfg.timeseries);
+        test = test_ds;
 
-    /* Verify train and test label mappings match (same labels, same order)
-     */
-    if (test.data.shape[0] > 0) {
-        for (int i = 0; i < (int)train_labels; i++) {
-            if (strcmp(train.labels.label_strings[i], test.labels.label_strings[i])) {
-                fprintf(stderr, "Mismatch between train & test labels:\n");
-
-                fprintf(stderr, "Train: [");
-                for (size_t i = 0; i < train_labels; i++) {
-                    fprintf(stderr, "%s", train.labels.label_strings[i]);
-
-                    if (i != train_labels - 1) {
-                        fprintf(stderr, " ");
-                    }
-                }
-                fprintf(stderr, "]\n");
-
-                fprintf(stderr, "Test: [");
-                for (size_t i = 0; i < test_labels; i++) {
-                    fprintf(stderr, "%s", test.labels.label_strings[i]);
-
-                    if (i != test_labels - 1) {
-                        fprintf(stderr, " ");
-                    }
-                }
-                fprintf(stderr, "]\n");
-                exit(1);
-            }
+        /* Verify train and test label mappings match (same labels, same order) */
+        if (test.data.shape[0] > 0) {
+            assert(test_ls == label_strings);
+            (void)test_ls;
         }
     }
+
+    size_t train_labels = label_strings.size();
+    size_t test_labels  = label_strings.size();
+    assert(test.data.shape[0] == 0 || train_labels == test_labels);
 
     size_t input_neurons =
         (cfg.timeseries) ? train.data.shape[1] * 2 : train.data.shape[1] * 2;
@@ -250,8 +232,7 @@ int main(int argc, char* argv[]) {
 
             export_network(n, cfg, best_train_acc, best_train_loss,
                            best_test_acc, best_test_loss,
-                           (const char**)train.labels.label_strings,
-                           (int)train_labels);
+                           label_strings);
         }
 
         print_epoch_log(epoch, cfg.epochs, stats, best_train_acc, best_test_acc,
@@ -260,7 +241,8 @@ int main(int argc, char* argv[]) {
 
     /* Confusion matrix on best saved network (if flag is set) */
     if (cfg.confusion_matrix) {
-        run_confusion_matrix(cfg, train, test, input_neurons, hidden_neurons,
+        run_confusion_matrix(cfg, train, test, label_strings,
+                             input_neurons, hidden_neurons,
                              output_neurons, cfg.timesteps, cfg.timeseries);
     }
 

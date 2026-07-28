@@ -5,6 +5,8 @@
 #include <cstdlib>
 #include <cstdio>
 #include <cstring>
+#include <vector>
+#include <string>
 
 /* Forward declarations for helpers used by high-level loaders */
 static int count_2d_lines(FILE* f_data, int* p_cols);
@@ -16,28 +18,26 @@ static int cmpstringp(const void* p1, const void* p2) {
 
 // Build unique sorted label list from raw strings. Returns count.
 static void build_label_mapping(char** raw_labels, int obs_count,
-                                double* indices_out, char*** unique_labels_out,
-                                int* unique_count_out) {
-    char** unique = (char**)malloc(obs_count * sizeof(char*));
-    int ucount    = 0;
+                                double* indices_out, std::vector<std::string>& label_strings_out) {
+    std::vector<char*> unique;
 
     for (int i = 0; i < obs_count; i++) {
         bool found = false;
-        for (int j = 0; j < ucount; j++) {
-            if (strcmp(raw_labels[i], unique[j]) == 0) {
+        for (auto* u : unique) {
+            if (strcmp(raw_labels[i], u) == 0) {
                 found = true;
                 break;
             }
         }
         if (!found) {
-            unique[ucount++] = raw_labels[i];
+            unique.push_back(raw_labels[i]);
         }
     }
 
-    qsort(unique, ucount, sizeof(char*), cmpstringp);
+    qsort(unique.data(), unique.size(), sizeof(char*), cmpstringp);
 
     for (int i = 0; i < obs_count; i++) {
-        for (int j = 0; j < ucount; j++) {
+        for (int j = 0; j < (int)unique.size(); j++) {
             if (strcmp(raw_labels[i], unique[j]) == 0) {
                 indices_out[i] = (double)j;
                 break;
@@ -47,8 +47,8 @@ static void build_label_mapping(char** raw_labels, int obs_count,
 
     for (int i = 0; i < obs_count; i++) {
         bool is_unique = false;
-        for (int j = 0; j < ucount; j++) {
-            if (raw_labels[i] == unique[j]) {
+        for (auto* u : unique) {
+            if (raw_labels[i] == u) {
                 is_unique = true;
                 break;
             }
@@ -59,8 +59,9 @@ static void build_label_mapping(char** raw_labels, int obs_count,
     }
     free(raw_labels);
 
-    *unique_labels_out = unique;
-    *unique_count_out  = ucount;
+    for (auto* s : unique) {
+        label_strings_out.push_back(s);
+    }
 }
 
 // Read all labels as strings. Returns array of strings (caller frees).
@@ -241,23 +242,23 @@ static RealData parse_realdata_3d(FILE* f_data, int num_obs, int input_features,
 }
 
 // Parse labels from file.
-// Returns TextData with data, label_strings, shape allocated.
-// Caller must free: labels.data, labels.label_strings, labels.shape.
-static TextData parse_textdata(FILE* f_labels, int count) {
-    TextData td = {NULL, NULL, 0, 1, NULL};
+// Returns {label indices as RealData (dims=1), vector of label strings}.
+// Caller must free the RealData via free_realdata().
+static std::pair<RealData, std::vector<std::string>> parse_textdata(FILE* f_labels, int count) {
+    RealData rd = {NULL, NULL, NULL, 1, NULL};
     
-    td.data     = (double*)malloc(count * sizeof(double));
+    rd.data     = (double*)malloc(count * sizeof(double));
     
     rewind(f_labels);
     char** raw_labels = read_label_strings(f_labels, count);
     
-    build_label_mapping(raw_labels, count, td.data, &td.label_strings,
-                        &td.label_strings_count);
+    std::vector<std::string> label_strings;
+    build_label_mapping(raw_labels, count, rd.data, label_strings);
     
-    td.shape   = (int*)malloc(1 * sizeof(int));
-    td.shape[0] = count;
+    rd.shape   = (int*)malloc(1 * sizeof(int));
+    rd.shape[0] = count;
     
-    return td;
+    return {rd, std::move(label_strings)};
 }
 
 /* Load 2D data from file. Returns RealData with dims=2, shape=[rows, cols].
@@ -343,24 +344,36 @@ RealData load_realdata_3d(const char* path) {
     return rd;
 }
 
-/* Load text labels from file. Returns TextData.
+/* Load text labels from file. Returns {label indices RealData (dims=1), vector of label strings}.
  * count = number of observations (rows) in the file.
- * Caller must free via free_textdata(). */
-TextData load_textdata(const char* path, int count) {
-    TextData td = {NULL, NULL, 0, 1, NULL};
-    if (count <= 0) return td;
+ * Caller must free the RealData via free_realdata(). */
+std::pair<RealData, std::vector<std::string>> load_textdata(const char* path, int count) {
+    RealData rd = {NULL, NULL, NULL, 1, NULL};
+    std::vector<std::string> label_strings;
+
+    if (count <= 0) {
+        rd.shape = (int*)malloc(1 * sizeof(int));
+        rd.shape[0] = 0;
+        return {rd, std::move(label_strings)};
+    }
 
     FILE* f = fopen(path, "r");
-    if (!f) return td;
+    if (!f) {
+        rd.shape = (int*)malloc(1 * sizeof(int));
+        rd.shape[0] = 0;
+        return {rd, std::move(label_strings)};
+    }
 
-    td = parse_textdata(f, count);
+    auto result = parse_textdata(f, count);
     fclose(f);
 
-    if (!td.data) {
-        free_textdata(td);
-        td = {NULL, NULL, 0, 1, NULL};
+    if (!result.first.data) {
+        free_realdata(result.first);
+        result.first = {NULL, NULL, NULL, 1, NULL};
+        result.first.shape = (int*)malloc(1 * sizeof(int));
+        result.first.shape[0] = 0;
     }
-    return td;
+    return result;
 }
 
 // Count non-blank lines and compute dimensions for 2D data.
@@ -507,25 +520,20 @@ void free_realdata(RealData rd) {
     free(rd.shape);
 }
 
-// Free all members of a TextData.
-void free_textdata(TextData td) {
-    free(td.data);
-    for (int i = 0; i < td.label_strings_count; i++) {
-        free(td.label_strings[i]);
-    }
-    free(td.label_strings);
-    free(td.shape);
+// Helper: create an empty ClassificationDataset
+static ClassificationDataset make_empty_dataset() {
+    ClassificationDataset out;
+    out.data = {NULL, NULL, NULL, 0, NULL};
+    out.labels = {NULL, NULL, NULL, 0, NULL};
+    out.timeseries = false;
+    return out;
 }
 
-// Build a train/test ClassificationDataset from pre-shuffled RealData+TextData (2D, non-timeseries).
-// Copies min_vals/max_vals from source and recomputes min/max on the split subsets.
-// Each split owns its own copy of label_strings (no sharing). Caller must free via
-// free_classification_dataset.
-static void build_split_dataset_2d(const RealData* rd, const TextData* td,
+// Helper: allocate and populate a ClassificationDataset split (2D).
+// Copies data subset, label indices, min/max; recomputes min/max and normalizes data.
+static void build_split_dataset_2d(const RealData* rd, const RealData* labels,
                                     int start, int len, int cols,
-                                    bool is_train, ClassificationDataset* out) {
-    (void)is_train; // unused now that label_strings are always copied
-    // Always copy data, min_vals, max_vals, and label_strings for each split.
+                                    ClassificationDataset* out) {
     out->data.data     = (double*)malloc((size_t)len * (size_t)cols * sizeof(double));
     out->labels.data   = (double*)malloc(len * sizeof(double));
     out->data.min_vals = (double*)malloc(cols * sizeof(double));
@@ -533,32 +541,10 @@ static void build_split_dataset_2d(const RealData* rd, const TextData* td,
     if (!out->data.data || !out->labels.data || !out->data.min_vals || !out->data.max_vals) {
         free(out->data.data); free(out->labels.data);
         free(out->data.min_vals); free(out->data.max_vals);
-        *out = {};
+        *out = make_empty_dataset();
         return;
     }
 
-    // Each split owns its own copy of label_strings (no sharing between train/test).
-    out->labels.label_strings       = (char**)malloc(td->label_strings_count * sizeof(char*));
-    out->labels.label_strings_count = td->label_strings_count;
-    if (!out->labels.label_strings) {
-        free(out->data.data); free(out->labels.data);
-        free(out->data.min_vals); free(out->data.max_vals);
-        *out = {};
-        return;
-    }
-    for (int i = 0; i < td->label_strings_count; i++) {
-        out->labels.label_strings[i] = strdup(td->label_strings[i]);
-        if (!out->labels.label_strings[i]) {
-            for (int j = 0; j < i; j++) {
-                free(out->labels.label_strings[j]);
-            }
-            free(out->labels.label_strings);
-            free(out->data.data); free(out->labels.data);
-            free(out->data.min_vals); free(out->data.max_vals);
-            *out = {};
-            return;
-        }
-    }
     out->data.dims                  = 2;
     out->data.shape                 = (int*)malloc(2 * sizeof(int));
     out->data.shape[0]              = len;
@@ -571,7 +557,7 @@ static void build_split_dataset_2d(const RealData* rd, const TextData* td,
     // Copy data subset
     memcpy(out->data.data, rd->data + (start * cols),
            len * cols * sizeof(double));
-    memcpy(out->labels.data, td->data + start,
+    memcpy(out->labels.data, labels->data + start,
            len * sizeof(double));
 
     // Copy min/max from source
@@ -585,13 +571,12 @@ static void build_split_dataset_2d(const RealData* rd, const TextData* td,
     normalize_realdata(out->data);
 }
 
-// Build a train/test ClassificationDataset from pre-shuffled RealData+TextData (3D, timeseries).
-// Each split owns its own copy of label_strings (no sharing). Caller must free via
-// free_classification_dataset.
-static void build_split_dataset_3d(const RealData* rd, const TextData* td,
+// Helper: allocate and populate a ClassificationDataset split (3D).
+// Copies data subset, label indices, min/max; recomputes min/max and normalizes data.
+static void build_split_dataset_3d(const RealData* rd, const RealData* labels,
                                     int start, int len, int block_size,
                                     int input_features,
-                                    bool /*is_train*/, ClassificationDataset* out) {
+                                    ClassificationDataset* out) {
     out->data.data     = (double*)malloc(len * block_size * sizeof(double));
     out->labels.data   = (double*)malloc(len * sizeof(double));
     out->data.min_vals = (double*)malloc(input_features * sizeof(double));
@@ -599,32 +584,10 @@ static void build_split_dataset_3d(const RealData* rd, const TextData* td,
     if (!out->data.data || !out->labels.data || !out->data.min_vals || !out->data.max_vals) {
         free(out->data.data); free(out->labels.data);
         free(out->data.min_vals); free(out->data.max_vals);
-        *out = {};
+        *out = make_empty_dataset();
         return;
     }
 
-    // Each split owns its own copy of label_strings (no sharing between train/test).
-    out->labels.label_strings       = (char**)malloc(td->label_strings_count * sizeof(char*));
-    out->labels.label_strings_count = td->label_strings_count;
-    if (!out->labels.label_strings) {
-        free(out->data.data); free(out->labels.data);
-        free(out->data.min_vals); free(out->data.max_vals);
-        *out = {};
-        return;
-    }
-    for (int i = 0; i < td->label_strings_count; i++) {
-        out->labels.label_strings[i] = strdup(td->label_strings[i]);
-        if (!out->labels.label_strings[i]) {
-            for (int j = 0; j < i; j++) {
-                free(out->labels.label_strings[j]);
-            }
-            free(out->labels.label_strings);
-            free(out->data.data); free(out->labels.data);
-            free(out->data.min_vals); free(out->data.max_vals);
-            *out = {};
-            return;
-        }
-    }
     out->data.dims                  = 3;
     out->data.shape                 = (int*)malloc(3 * sizeof(int));
     out->data.shape[0]              = len;
@@ -637,7 +600,7 @@ static void build_split_dataset_3d(const RealData* rd, const TextData* td,
 
     memcpy(out->data.data, rd->data + (start * block_size),
            len * block_size * sizeof(double));
-    memcpy(out->labels.data, td->data + start,
+    memcpy(out->labels.data, labels->data + start,
            len * sizeof(double));
     memcpy(out->data.min_vals, rd->min_vals, input_features * sizeof(double));
     memcpy(out->data.max_vals, rd->max_vals, input_features * sizeof(double));
@@ -650,67 +613,59 @@ static void build_split_dataset_3d(const RealData* rd, const TextData* td,
 }
 
 // Free a ClassificationDataset. All heap memory is freed.
-// label_strings are also freed (each dataset owns its own copy).
 void free_classification_dataset(ClassificationDataset* ds) {
     if (!ds) return;
     free_realdata(ds->data);
-    if (ds->labels.label_strings) {
-        for (int i = 0; i < ds->labels.label_strings_count; i++) {
-            free(ds->labels.label_strings[i]);
-        }
-        free(ds->labels.label_strings);
-    }
-    free(ds->labels.data);
-    free(ds->labels.shape);
+    free_realdata(ds->labels);
     ds->data.data = NULL;
     ds->data.min_vals = NULL;
     ds->data.max_vals = NULL;
     ds->data.shape = NULL;
     ds->labels.data = NULL;
-    ds->labels.label_strings = NULL;
+    ds->labels.min_vals = NULL;
+    ds->labels.max_vals = NULL;
     ds->labels.shape = NULL;
 }
 
 /* Load a single classification dataset (no shuffle, no split). Detects 2D vs 3D
  * via timeseries flag. Caller must free via free_classification_dataset(). */
-void load_classification_single(const char* data_path, const char* labels_path,
-                                 bool timeseries, ClassificationDataset* out) {
-    *out           = {{NULL, NULL, NULL, 0, NULL}, {NULL, NULL, 0, 0, NULL}, false};
+std::pair<ClassificationDataset, std::vector<std::string>> load_classification_single(
+    const char* data_path, const char* labels_path, bool timeseries) {
+    ClassificationDataset out = make_empty_dataset();
+    std::vector<std::string> label_strings;
+
+    RealData rd;
+    RealData label_rd;
 
     if (timeseries) {
-        RealData rd = load_realdata_3d(data_path);
-        int count = rd.shape ? rd.shape[0] : 0;
-        TextData td = load_textdata(labels_path, count);
-
-        if (rd.data && td.data) {
-            *out = {rd, td, true};
-        } else {
-            free_realdata(rd);
-            free_textdata(td);
-            *out = {};
-        }
+        rd = load_realdata_3d(data_path);
     } else {
-        RealData rd = load_realdata_2d(data_path);
-        int count = rd.shape ? rd.shape[0] : 0;
-        TextData td = load_textdata(labels_path, count);
-
-        if (rd.data && td.data) {
-            *out = {rd, td, false};
-        } else {
-            free_realdata(rd);
-            free_textdata(td);
-            *out = {};
-        }
+        rd = load_realdata_2d(data_path);
     }
+
+    int count = rd.shape ? rd.shape[0] : 0;
+    auto label_result = load_textdata(labels_path, count);
+    label_rd = std::move(label_result.first);
+    label_strings = std::move(label_result.second);
+
+    if (rd.data && label_rd.data) {
+        out.data = rd;
+        out.labels = label_rd;
+        out.timeseries = timeseries;
+    } else {
+        free_realdata(rd);
+        free_realdata(label_rd);
+    }
+
+    return {out, std::move(label_strings)};
 }
 
 /* Shuffle and split a loaded classification dataset. Shuffles in-place, splits into
- * train/test. Both own independent label_strings. Caller must free via
- * free_classification_dataset(). */
+ * train/test. Caller must free via free_classification_dataset(). */
 void split_classification(ClassificationDataset* source, double train_percent,
                           ClassificationDataset* train, ClassificationDataset* test) {
-    *train = {};
-    *test  = {};
+    *train = make_empty_dataset();
+    *test  = make_empty_dataset();
     assert(train_percent >= 0.00 && train_percent <= 1.00);
 
     if (!source->data.data || !source->labels.data) {
@@ -729,27 +684,29 @@ void split_classification(ClassificationDataset* source, double train_percent,
         int block_size = source->data.shape[1] * source->data.shape[2];
         int input_features = source->data.shape[1];
         build_split_dataset_3d(&source->data, &source->labels,
-                               0, train_len, block_size, input_features, true, train);
+                               0, train_len, block_size, input_features, train);
         build_split_dataset_3d(&source->data, &source->labels,
-                               train_len, test_len, block_size, input_features, false, test);
+                               train_len, test_len, block_size, input_features, test);
     } else {
         int cols = source->data.shape[1];
         build_split_dataset_2d(&source->data, &source->labels,
-                               0, train_len, cols, true, train);
+                               0, train_len, cols, train);
         build_split_dataset_2d(&source->data, &source->labels,
-                               train_len, test_len, cols, false, test);
+                               train_len, test_len, cols, test);
     }
 }
 
 /* Full classification dataset loading: load + shuffle + split into train/test.
- * Convenience wrapper around load_classification_single + split_classification. */
+ * Convenience wrapper around load_classification_single + split_classification.
+ * label_strings filled with unique label names (same for train and test). */
 void load_classification_dataset(const char* data_path, const char* labels_path,
                                   double train_percent, bool timeseries,
-                                  ClassificationDataset* train, ClassificationDataset* test) {
-    ClassificationDataset full;
-    load_classification_single(data_path, labels_path, timeseries, &full);
-    split_classification(&full, train_percent, train, test);
-    free_classification_dataset(&full);
+                                  ClassificationDataset* train, ClassificationDataset* test,
+                                  std::vector<std::string>& label_strings) {
+    auto result = load_classification_single(data_path, labels_path, timeseries);
+    split_classification(&result.first, train_percent, train, test);
+    free_classification_dataset(&result.first);
+    label_strings = std::move(result.second);
 }
 
 /* Free all heap memory in a RegressionDataset. */

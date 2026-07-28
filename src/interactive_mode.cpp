@@ -195,8 +195,8 @@ int main(int argc, char* argv[]) {
                 tmp_ds.data.max_vals = max_vals.data();
                 tmp_ds.data.dims = 2;
                 tmp_ds.labels.data = nullptr;
-                tmp_ds.labels.label_strings = nullptr;
-                tmp_ds.labels.label_strings_count = 0;
+                tmp_ds.labels.min_vals = nullptr;
+                tmp_ds.labels.max_vals = nullptr;
                 tmp_ds.labels.dims = 1;
                 tmp_ds.labels.shape = nullptr;
                 tmp_ds.timeseries = false;
