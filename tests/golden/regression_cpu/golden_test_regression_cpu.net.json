@@ -40,16 +40,16 @@
         "--loss",
         "mse",
         "--network_json_out",
-        "/tmp/tmp.DFg1xDoT7e"
+        "/home/jackson/bptt/tests/golden/regression_cpu/_tmp_gen.json"
       ],
-      "compile_time": 1785320565,
+      "compile_time": 1785330048,
       "connectivity": 0.2,
       "data_file": "data/diabetes_data.csv",
       "decay_rate": 0.0001,
       "discrete": true,
       "epoch": 10,
       "epochs": 10,
-      "git_commit": "cd4b9c2419bd989e51b98fc91a57852ec0a078e2",
+      "git_commit": "ff6e94c7f7b55dc5460c47beef868d9a2ec54124",
       "hidden_neurons": 16,
       "input_neurons": 20,
       "label_file": "data/diabetes_label.csv",
@@ -61,15 +61,16 @@
       "min_potential": -1.0,
       "min_weight": -127.0,
       "network_json": "networks/risp_127.json",
-      "network_json_out": "/tmp/tmp.DFg1xDoT7e",
+      "network_json_out": "/home/jackson/bptt/tests/golden/regression_cpu/_tmp_gen.json",
       "neuron_count": 37,
       "output_neurons": 1,
       "proc_name": "risp",
+      "regression": true,
       "rho": 1.4,
       "scale": 256,
       "scale_factor": 0.0078125,
       "seed": 42,
-      "start_time": 1785320565.926583,
+      "start_time": 1785330048.478609,
       "synapse_count": 263,
       "tau": 0.95,
       "test_data_file": "",
@@ -98,6 +99,18 @@
         -0.0963461565416647
       ],
       "test_label_file": "",
+      "test_labels": {
+        "max": [
+          311.0
+        ],
+        "min": [
+          43.0
+        ],
+        "shape": [
+          89,
+          1
+        ]
+      },
       "threads": 1,
       "timeseries": false,
       "timesteps": 32,
@@ -128,6 +141,18 @@
         -0.137767225690012
       ],
       "train_label_file": "",
+      "train_labels": {
+        "max": [
+          346.0
+        ],
+        "min": [
+          25.0
+        ],
+        "shape": [
+          353,
+          1
+        ]
+      },
       "training_percent": 0.8,
       "weight_init_stddev": 0.1
     },

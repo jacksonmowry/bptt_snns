@@ -104,7 +104,8 @@ void build_run_metadata(neuro::Network* n, int argc, char* argv[],
                         bool discrete, double min_potential, double min_weight,
                         double max_weight, double max_threshold,
                         const std::string& leak_prop, int scale,
-                        double scale_factor, size_t effective_max_delay) {
+                        double scale_factor, size_t effective_max_delay,
+                        bool is_regression) {
     // CLI arguments
     json cli_args = json::array();
     for (int i = 1; i < argc; i++) {
@@ -194,6 +195,39 @@ void build_run_metadata(neuro::Network* n, int argc, char* argv[],
         }
         run_metadata["test_data_min"] = test_min;
         run_metadata["test_data_max"] = test_max;
+    }
+
+    // Regression label stats (both train and test)
+    if (is_regression) {
+        auto export_label_stats = [](const RealData* labels) {
+            json j;
+            if (labels && labels->data && labels->shape) {
+                json shape_json;
+                for (int i = 0; i < labels->dims; i++) {
+                    shape_json.push_back(labels->shape[i]);
+                }
+                j["shape"] = shape_json;
+                if (labels->min_vals && labels->max_vals) {
+                    json min_json, max_json;
+                    if (labels->dims == 1) {
+                        min_json.push_back(labels->min_vals[0]);
+                        max_json.push_back(labels->max_vals[0]);
+                    } else {
+                        for (int i = 0; i < labels->shape[1]; i++) {
+                            min_json.push_back(labels->min_vals[i]);
+                            max_json.push_back(labels->max_vals[i]);
+                        }
+                    }
+                    j["min"] = min_json;
+                    j["max"] = max_json;
+                }
+            }
+            return j;
+        };
+        run_metadata["train_labels"] = export_label_stats(&train->labels);
+        if (test->data.shape[0] > 0) {
+            run_metadata["test_labels"] = export_label_stats(&test->labels);
+        }
     }
 
     // Merge with existing Associated_Data -> other if any

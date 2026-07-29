@@ -27,7 +27,8 @@ void build_run_metadata(neuro::Network* n, int argc, char* argv[],
                         bool discrete, double min_potential, double min_weight,
                         double max_weight, double max_threshold,
                         const std::string& leak_prop, int scale,
-                        double scale_factor, size_t effective_max_delay);
+                        double scale_factor, size_t effective_max_delay,
+                        bool is_regression);
 
 // Generate nodes/edges for an empty network. Returns (neuron_count,
 // synapse_count).

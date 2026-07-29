@@ -61,6 +61,7 @@ static void build_label_mapping(char** raw_labels, int obs_count,
 
     for (auto* s : unique) {
         label_strings_out.push_back(s);
+        free(s);  // transfer ownership
     }
 }
 
@@ -179,9 +180,16 @@ static RealData parse_realdata_2d(FILE* f_data, int rows, int cols) {
     for (int i = 0; i < rows; i++) {
         if (fgets(line, sizeof(line), f_data) != NULL) {
             char* token = strtok(line, ",");
+            int parsed = 0;
             for (int j = 0; j < cols && token != NULL; j++) {
                 rd.data[(size_t)i * (size_t)cols + (size_t)j] = atof(token);
                 token = strtok(NULL, ",");
+                parsed++;
+            }
+            if (parsed < cols) {
+                fprintf(stderr, "%s: truncated line %d "
+                                "(expected %d values, got %d)\n",
+                        __func__, i + 1, cols, parsed);
             }
         }
     }
@@ -205,7 +213,7 @@ static RealData parse_realdata_3d(FILE* f_data, int num_obs, int input_features,
 
     int block_size = input_features * timesteps;
     int total_data = num_obs * block_size;
-    rd.data        = (double*)malloc(total_data * sizeof(double));
+    rd.data        = (double*)calloc(total_data, sizeof(double));
     rd.min_vals    = (double*)malloc(input_features * sizeof(double));
     rd.max_vals    = (double*)malloc(input_features * sizeof(double));
 
@@ -227,12 +235,19 @@ static RealData parse_realdata_3d(FILE* f_data, int num_obs, int input_features,
             continue;
         }
         char* token = strtok(line, ",");
+        int parsed = 0;
         for (int c = 0; c < timesteps && token != NULL; c++) {
             rd.data[(obs_idx * block_size) + (line_cnt * timesteps) + c] =
                 atof(token);
             token = strtok(NULL, ",");
+            parsed++;
         }
         line_cnt++;
+        if (parsed < timesteps) {
+            fprintf(stderr, "%s: truncated line at obs %d, line %d "
+                            "(expected %d values, got %d)\n",
+                    __func__, obs_idx, line_cnt, timesteps, parsed);
+        }
     }
 
     // Min/max
@@ -405,6 +420,7 @@ static void compute_3d_dims(FILE* f_data, int* p_num_obs, int* p_features, int* 
     char line[4096 * 16];
     int num_obs   = 0;
     int non_empty = 0;
+    int first_ts  = 0;
     
     rewind(f_data);
     while (fgets(line, sizeof(line), f_data) != NULL) {
@@ -417,38 +433,31 @@ static void compute_3d_dims(FILE* f_data, int* p_num_obs, int* p_features, int* 
         }
         if (!is_blank) {
             non_empty++;
+            // Count commas to determine timesteps per feature
+            int ts = 1;
+            for (int i = 0; line[i]; i++) {
+                if (line[i] == ',') {
+                    ts++;
+                }
+            }
+            if (first_ts == 0) {
+                first_ts = ts;
+            } else if (ts != first_ts) {
+                fprintf(stderr, "%s: inconsistent column count: "
+                                "line %d has %d cols, first non-blank line has %d\n",
+                        __func__, non_empty, ts, first_ts);
+            }
         } else {
             num_obs++;
         }
     }
     if (non_empty > 0) {
-        num_obs++;
-    }
-    
-    rewind(f_data);
-    int timesteps = 0;
-    while (fgets(line, sizeof(line), f_data) != NULL) {
-        int is_blank = 1;
-        for (int k = 0; line[k]; k++) {
-            if (line[k] != '\n' && line[k] != '\r' && line[k] != ' ') {
-                is_blank = 0;
-                break;
-            }
-        }
-        if (!is_blank) {
-            for (int i = 0; line[i]; i++) {
-                if (line[i] == ',') {
-                    timesteps++;
-                }
-            }
-            timesteps++;
-            break;
-        }
+        num_obs++;  // last observation
     }
     
     *p_num_obs   = num_obs;
     *p_features  = (num_obs > 0) ? non_empty / num_obs : 0;
-    *p_timesteps = timesteps;
+    *p_timesteps = first_ts;
 }
 
 // Compute the stride between consecutive entries (in doubles) from shape/dims.
@@ -600,7 +609,8 @@ static void build_split_dataset(const RealData* data, const RealData* labels,
     // Normalize split data to [0,1] using split's min/max
     normalize_realdata(out->data);
 
-    // For regression: compute and normalize labels
+    // For regression labels (dims > 1): compute and normalize
+    // Classification labels (dims=1) are integer indices, no normalization needed
     if (labels->dims > 1) {
         compute_realdata_minmax(out->labels);
         normalize_realdata(out->labels);

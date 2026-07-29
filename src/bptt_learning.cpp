@@ -108,6 +108,19 @@ int main(int argc, char* argv[]) {
             cfg.timeseries, cfg.regression);
         test = test_ds;
 
+        /* Normalize regression labels for split path (build_split_dataset
+         * handles normalization for the simple path) */
+        if (cfg.regression) {
+            if (train.labels.data && train.labels.shape) {
+                compute_realdata_minmax(train.labels);
+                normalize_realdata(train.labels);
+            }
+            if (test.labels.data && test.labels.shape) {
+                compute_realdata_minmax(test.labels);
+                normalize_realdata(test.labels);
+            }
+        }
+
         /* Verify train and test label mappings match (same labels, same
          * order) — only for classification */
         if (!cfg.regression && test.data.shape[0] > 0) {
@@ -181,7 +194,7 @@ int main(int argc, char* argv[]) {
                        output_neurons, total_neurons, neuron_count,
                        synapse_count, discrete, min_potential, min_weight,
                        max_weight, max_threshold, leak_prop, scale,
-                       scale_factor, effective_max_delay);
+                       scale_factor, effective_max_delay, cfg.regression);
 
     NetworkConfiguration nc = {
         .n              = n,
@@ -265,7 +278,8 @@ int main(int argc, char* argv[]) {
             backend->update_weights(n);
 
             export_network(n, cfg, best_train_acc, best_train_loss,
-                           best_test_acc, best_test_loss, label_strings);
+                           best_test_acc, best_test_loss, label_strings,
+                           cfg.regression);
         }
 
         double train_metric = cfg.regression ? best_train_loss : best_train_acc;
