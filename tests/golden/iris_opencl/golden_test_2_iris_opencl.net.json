@@ -3,9 +3,9 @@
     "other": {
       "batch_size": 1,
       "best_test_acc": 0.9,
-      "best_test_loss": 0.8703279495239258,
+      "best_test_loss": 0.8703280131022135,
       "best_train_acc": 0.8916666666666667,
-      "best_train_loss": 0.8983939488728842,
+      "best_train_loss": 0.8983938852945964,
       "cli_args": [
         "--network_json",
         "networks/risp_127.json",

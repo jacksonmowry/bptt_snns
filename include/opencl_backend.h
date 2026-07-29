@@ -3,6 +3,7 @@
 #ifdef OPENCL
 
 #include "backend.h"
+#include "shared.h"
 #include "opencl.hpp"
 #include <chrono>
 #include <memory>
@@ -13,7 +14,8 @@ class OpenclBackend : public TrainingBackend {
   public:
     OpenclBackend(const CliConfig& cfg, NetworkConfiguration& nc,
                   const Dataset& train, const Dataset& test,
-                  size_t max_incoming, size_t max_outgoing);
+                  size_t max_incoming, size_t max_outgoing,
+                  LossFunc loss_func);
     ~OpenclBackend() override;
 
     void do_one_epoch(size_t epoch) override;
@@ -30,11 +32,14 @@ class OpenclBackend : public TrainingBackend {
     size_t batch_size;
     double learning_rate;
     double decay_rate;
+    LossFunc loss_func;
 
     // GPU buffers
     std::unique_ptr<Memory<short>> x;
     std::unique_ptr<Memory<double>> data;
+    std::unique_ptr<Memory<double>> targets;
     std::unique_ptr<Memory<double>> test_data;
+    std::unique_ptr<Memory<double>> test_targets;
     std::unique_ptr<Memory<short>> v_thresh;
     std::unique_ptr<Memory<short>> weights;
     std::unique_ptr<Memory<uint>> delays;

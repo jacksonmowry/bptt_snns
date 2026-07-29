@@ -10,6 +10,7 @@ double normal(double mean, double stddev);
 void softmax(const double* logits, double* out, size_t n);
 double cross_entropy(const double* logits, const double* targets, double* grads,
                      size_t n);
+double mse(const double* logits, const double* targets, double* grads, size_t n);
 double alpha(bool leak);
 double spike_surrogate(double v_pre_t, double v_thresh, double scale_rho,
                        double tau_rho_scaled);

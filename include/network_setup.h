@@ -15,7 +15,8 @@ neuro::Network* load_and_init_network(
     double& decay_rate, double& tau, double& rho, size_t& timesteps,
     size_t& hidden_neurons, unsigned long& seed, size_t& epochs,
     size_t& batch_size, double& training_percent, size_t& threads,
-    bool& timeseries, size_t& max_delay, double& weight_init_stddev);
+    bool& timeseries, size_t& max_delay, double& weight_init_stddev,
+    LossFunc loss_func);
 
 // Build and attach full reproducibility metadata to the network.
 void build_run_metadata(neuro::Network* n, int argc, char* argv[],

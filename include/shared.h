@@ -43,6 +43,8 @@ struct EvaluationResults {
     double loss;
 };
 
+enum class LossFunc { CCE, MSE };
+
 struct NetworkConfiguration {
     neuro::Network* n;
 
@@ -65,4 +67,5 @@ struct NetworkConfiguration {
     double min_weight;
     double max_weight;
     double spike_value_factor;
+    LossFunc loss_func;
 };

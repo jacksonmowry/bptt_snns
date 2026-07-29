@@ -15,7 +15,8 @@ neuro::Network* load_and_init_network(
     double& decay_rate, double& tau, double& rho, size_t& timesteps,
     size_t& hidden_neurons, unsigned long& seed, size_t& epochs,
     size_t& batch_size, double& training_percent, size_t& threads,
-    bool& timeseries, size_t& max_delay, double& weight_init_stddev) {
+    bool& timeseries, size_t& max_delay, double& weight_init_stddev,
+    LossFunc loss_func) {
     json emptynet;
     std::ifstream fin(json_file);
     fin >> emptynet;

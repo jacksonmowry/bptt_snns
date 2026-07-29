@@ -10,7 +10,8 @@
 std::unique_ptr<TrainingBackend> create_backend(const CliConfig& cfg,
                                                 NetworkConfiguration& nc,
                                                 const Dataset& train,
-                                                const Dataset& test) {
+                                                const Dataset& test,
+                                                LossFunc loss_func) {
 #ifdef OPENCL
     if (cfg.opencl) {
         if (!nc.discrete) {
@@ -19,8 +20,9 @@ std::unique_ptr<TrainingBackend> create_backend(const CliConfig& cfg,
                 "OpenCL support is not enabled for non-discrete networks.\n");
             exit(1);
         }
-        return std::unique_ptr<TrainingBackend>(new OpenclBackend(
-            cfg, nc, train, test, nc.max_incoming, nc.max_outgoing));
+        return std::unique_ptr<TrainingBackend>(
+            new OpenclBackend(cfg, nc, train, test, nc.max_incoming,
+                              nc.max_outgoing, loss_func));
     }
 #endif
     return std::unique_ptr<TrainingBackend>(

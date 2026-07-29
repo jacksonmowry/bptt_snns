@@ -5,7 +5,7 @@
       "best_test_acc": 0.0,
       "best_test_loss": 0.0,
       "best_train_acc": 0.7666666666666667,
-      "best_train_loss": 0.8177838134765625,
+      "best_train_loss": 0.8177838643391927,
       "cli_args": [
         "--network_json",
         "networks/risp_127.json",

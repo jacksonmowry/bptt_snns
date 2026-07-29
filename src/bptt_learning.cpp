@@ -23,16 +23,30 @@ using namespace std;
 using namespace neuro;
 
 static void print_epoch_log(size_t epoch, size_t total_epochs,
-                            const TrainingStats& stats, double best_train_acc,
-                            double best_test_acc, bool has_test_data) {
-    if (has_test_data) {
-        printf("E%4zu/%zu  TrL: %8g TrA: %7.3f  TeL: %8g TeA: %7.3f  BestTeA: "
-               "%7.3f\n",
-               epoch + 1, total_epochs, stats.train_loss, stats.train_acc,
-               stats.test_loss, stats.test_acc, best_test_acc);
+                            const TrainingStats& stats, double best_train_metric,
+                            double best_test_metric, bool has_test_data,
+                            bool is_regression) {
+    if (is_regression) {
+        if (has_test_data) {
+            printf("E%4zu/%zu  TrL: %8g  TeL: %8g  BestTeL: "
+                   "%8g\n",
+                   epoch + 1, total_epochs, stats.train_loss,
+                   stats.test_loss, best_test_metric);
+        } else {
+            printf("E%4zu/%zu  TrL: %8g  BestTrL: "
+                   "%8g\n", epoch + 1, total_epochs,
+                   stats.train_loss, best_train_metric);
+        }
     } else {
-        printf("E%4zu/%zu  TrL: %8g TrA: %7.3f  BestTrA: %7.3f\n", epoch + 1,
-               total_epochs, stats.train_loss, stats.train_acc, best_train_acc);
+        if (has_test_data) {
+            printf("E%4zu/%zu  TrL: %8g TrA: %7.3f  TeL: %8g TeA: %7.3f  BestTeA: "
+                   "%7.3f\n",
+                   epoch + 1, total_epochs, stats.train_loss, stats.train_acc,
+                   stats.test_loss, stats.test_acc, best_test_metric);
+        } else {
+            printf("E%4zu/%zu  TrL: %8g TrA: %7.3f  BestTrA: %7.3f\n", epoch + 1,
+                   total_epochs, stats.train_loss, stats.train_acc, best_train_metric);
+        }
     }
 }
 
@@ -125,7 +139,9 @@ int main(int argc, char* argv[]) {
 
     size_t input_neurons =
         (cfg.timeseries) ? train.data.shape[1] * 2 : train.data.shape[1] * 2;
-    size_t output_neurons = is_regression ? train.labels.shape[1] : train_labels;
+    size_t output_neurons = is_regression
+                                ? (train.labels.dims == 1 ? 1 : train.labels.shape[1])
+                                : train_labels;
     size_t hidden_neurons = cfg.hidden_neurons;
     size_t total_neurons  = input_neurons + hidden_neurons + output_neurons;
 
@@ -133,7 +149,7 @@ int main(int argc, char* argv[]) {
         cfg.network_json_file, cfg.connectivity, cfg.learning_rate,
         cfg.decay_rate, cfg.tau, cfg.rho, cfg.timesteps, hidden_neurons,
         cfg.seed, cfg.epochs, cfg.batch_size, cfg.training_percent, cfg.threads,
-        cfg.timeseries, cfg.max_delay, cfg.weight_init_stddev);
+        cfg.timeseries, cfg.max_delay, cfg.weight_init_stddev, cfg.loss_func);
 
     bool discrete         = n->get_data("proc_params")["discrete"];
     std::string leak_prop = n->get_data("proc_params")["leak_mode"];
@@ -199,6 +215,7 @@ int main(int argc, char* argv[]) {
         .min_weight     = min_weight,
         .max_weight     = max_weight,
         .spike_value_factor = spike_value_factor,
+        .loss_func      = cfg.loss_func,
     };
 
     // Compute max_in/outgoing from network topology
@@ -220,9 +237,9 @@ int main(int argc, char* argv[]) {
     nc.max_incoming = max_incoming;
 
     // Create backend via factory
-    auto backend = create_backend(cfg, nc, train, test);
+    auto backend = create_backend(cfg, nc, train, test, cfg.loss_func);
 
-    // Determine which accuracy metric to track for export
+    // Determine which metric to track for export
     bool has_test_data = test.data.shape[0] > 0;
 
     // Training loop
@@ -238,10 +255,18 @@ int main(int argc, char* argv[]) {
         backend->do_one_epoch(epoch);
         stats = backend->get_stats();
 
-        // Export only on new high accuracy
-        double cur_best_acc  = has_test_data ? stats.test_acc : stats.train_acc;
-        double prev_best_acc = has_test_data ? best_test_acc : best_train_acc;
-        if (cur_best_acc > prev_best_acc) {
+        // Export on improved accuracy (classification) or reduced loss (regression)
+        bool improved = false;
+        if (is_regression) {
+            double cur_loss  = has_test_data ? stats.test_loss : stats.train_loss;
+            double prev_loss = has_test_data ? best_test_loss : best_train_loss;
+            improved = cur_loss < prev_loss;
+        } else {
+            double cur_acc  = has_test_data ? stats.test_acc : stats.train_acc;
+            double prev_acc = has_test_data ? best_test_acc : best_train_acc;
+            improved = cur_acc > prev_acc;
+        }
+        if (improved) {
             best_train_acc  = stats.train_acc;
             best_train_loss = stats.train_loss;
             best_test_acc   = stats.test_acc;
@@ -255,8 +280,10 @@ int main(int argc, char* argv[]) {
                            label_strings);
         }
 
-        print_epoch_log(epoch, cfg.epochs, stats, best_train_acc, best_test_acc,
-                        has_test_data);
+        double train_metric = is_regression ? best_train_loss : best_train_acc;
+        double test_metric  = is_regression ? best_test_loss : best_test_acc;
+        print_epoch_log(epoch, cfg.epochs, stats, train_metric, test_metric,
+                        has_test_data, is_regression);
     }
 
     /* Confusion matrix on best saved network (if flag is set, classification only) */

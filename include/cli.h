@@ -1,5 +1,6 @@
 #pragma once
 
+#include "shared.h"
 #include <cstddef>
 #include <string>
 
@@ -12,6 +13,7 @@ struct CliConfig {
     std::string test_data_file;
     std::string test_label_file;
     bool timeseries         = false;
+    LossFunc loss_func      = LossFunc::CCE;
     double connectivity     = 0.2;
     double learning_rate    = 0.008;
     double decay_rate       = 0.0001;

@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <cassert>
 #include <cfloat>
+#include <cstring>
 
 using namespace neuro;
 
@@ -53,22 +54,72 @@ EvaluationResults forward(TrainingBundle* tb, Processor* p, const Dataset* d,
         }
     }
 
-    if (max_idx == (size_t)d->labels.data[index]) {
-        er.correct++;
-    }
-
-    for (size_t i = 0; i < nc->output_neurons; i++) {
-        if (i == (size_t)d->labels.data[index]) {
-            tb->target[i] = 1.0;
+    if (nc->loss_func == LossFunc::CCE) {
+        /* Classification: assert single-column label (one-hot target) */
+        if (d->labels.dims == 1) {
+            assert(d->labels.shape[0] > 0);
         } else {
-            tb->target[i] = 0.0;
+            assert(d->labels.dims == 2);
+            assert(d->labels.shape[1] == 1);
         }
-    }
 
-    double loss_spike =
-        cross_entropy(tb->spike_logits.data(), tb->target.data(),
-                      tb->dL_ds.data(), nc->output_neurons);
-    er.loss = loss_spike;
+        double label_val = d->labels.data[index];
+        size_t label_idx = (size_t)label_val;
+        assert(label_idx < nc->output_neurons);
+
+        if (max_idx == label_idx) {
+            er.correct++;
+        }
+
+        for (size_t i = 0; i < nc->output_neurons; i++) {
+            if (i == label_idx) {
+                tb->target[i] = 1.0;
+            } else {
+                tb->target[i] = 0.0;
+            }
+        }
+
+        double loss_spike =
+            cross_entropy(tb->spike_logits.data(), tb->target.data(),
+                          tb->dL_ds.data(), nc->output_neurons);
+        er.loss = loss_spike;
+
+    } else {
+        /* Regression (MSE): labels 1D (single target) or 2D (multi-target) */
+        if (d->labels.dims == 1) {
+            assert(d->labels.shape[0] > 0);
+        } else {
+            assert(d->labels.dims == 2);
+            assert(d->labels.shape[1] >= 1);
+            assert(d->labels.shape[1] == (int)nc->output_neurons);
+        }
+
+        /* Accuracy not meaningful for MSE — leave at 0 */
+        er.correct = 0;
+
+        /* Populate target from label row */
+        memset(tb->target.data(), 0, nc->output_neurons * sizeof(double));
+
+        if (d->labels.dims == 1) {
+            /* 1D labels: single target per observation */
+            assert(nc->output_neurons == 1);
+            tb->target[0] = d->labels.data[index];
+        } else {
+            /* 2D labels: multiple targets per observation */
+            size_t label_cols = (size_t)d->labels.shape[1];
+            const double* label_row = d->labels.data + index * label_cols;
+
+            size_t copy_count = (nc->output_neurons < label_cols)
+                                    ? nc->output_neurons
+                                    : label_cols;
+            memcpy(tb->target.data(), label_row, copy_count * sizeof(double));
+        }
+
+        double loss_spike =
+            mse(tb->spike_logits.data(), tb->target.data(),
+                tb->dL_ds.data(), nc->output_neurons);
+        er.loss = loss_spike;
+    }
 
     return er;
 }
