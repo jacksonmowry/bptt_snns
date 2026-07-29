@@ -655,12 +655,11 @@ std::pair<Dataset, std::vector<std::string>> load_dataset_single(
     int count = rd.shape ? rd.shape[0] : 0;
     
     if (is_regression) {
-        // Regression: labels are numeric RealData
-        if (timeseries) {
-            label_rd = load_realdata_3d(labels_path);
-        } else {
-            label_rd = load_realdata_2d(labels_path);
-        }
+        // Regression: labels are numeric RealData.
+        // Always load as 2D — timeseries flag only affects input data
+        // structure, not label structure. Regression targets are
+        // per-observation (one vector per sample), not sequences.
+        label_rd = load_realdata_2d(labels_path);
         label_strings = {};
     } else {
         // Classification: labels are text strings mapped to integer indices
