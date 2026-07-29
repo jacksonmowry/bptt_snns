@@ -32,37 +32,27 @@ RealData load_realdata_3d(const char* path);       /* 3D data: obs x features x 
 std::pair<RealData, std::vector<std::string>> load_textdata(const char* path, int count);
 
 /* High-level dataset loader. Loads both files, shuffles, and splits.
- * label_strings filled with unique label names (same for train and test).
+ * For classification: labels_path contains text labels mapped to integer indices.
+ * For regression: labels_path contains numeric target data.
+ * label_strings filled with unique label names (empty for regression).
  * Caller must free train and test via free_dataset(). */
 void load_dataset(const char* data_path, const char* labels_path,
                   double train_percent, bool timeseries,
                   Dataset* train, Dataset* test,
-                  std::vector<std::string>& label_strings);
+                  std::vector<std::string>& label_strings,
+                  bool is_regression = false);
 
 /* Low-level: load a single dataset (no split), then split separately.
+ * For classification: returns {Dataset, label_strings}.
+ * For regression: returns {Dataset, empty vector}.
+ * Both data and labels are loaded as RealData; labels are normalized.
  * Returns {Dataset, label_strings}. */
 std::pair<Dataset, std::vector<std::string>> load_dataset_single(
-    const char* data_path, const char* labels_path, bool timeseries);
-
-/* Regression dataset loading: loads two RealData files (data + target),
- * normalizes both, shuffles and splits into train/test.
- * label_strings is filled with an empty vector. */
-void load_regression_dataset(const char* data_path, const char* labels_path,
-                             double train_percent, bool timeseries,
-                             Dataset* train, Dataset* test,
-                             std::vector<std::string>& label_strings);
-
-/* Low-level: load a single regression dataset (no split), then split separately.
- * Both data and labels are normalized. */
-Dataset load_regression_dataset_single(
-    const char* data_path, const char* labels_path, bool timeseries);
+    const char* data_path, const char* labels_path, bool timeseries,
+    bool is_regression = false);
 
 void split_dataset(Dataset* source, double train_percent,
                    Dataset* train, Dataset* test);
-
-/* Regression: shuffle and split a loaded regression dataset. */
-void split_regression_dataset(Dataset* source, double train_percent,
-                              Dataset* train, Dataset* test);
 
 /* Compute min/max values for RealData from its data buffer.
  * Uses shape/dims to determine iteration bounds.

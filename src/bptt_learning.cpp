@@ -91,48 +91,28 @@ int main(int argc, char* argv[]) {
     Dataset train;
     Dataset test;
     std::vector<std::string> label_strings;
-    bool is_regression = cfg.regression;
 
-    if (is_regression) {
-        /* Regression mode: loads two RealData files, no label strings */
-        if (have_simple) {
-            load_regression_dataset(cfg.data_file.c_str(),
-                                    cfg.label_file.c_str(),
-                                    cfg.training_percent, cfg.timeseries,
-                                    &train, &test, label_strings);
-        } else {
-            train = load_regression_dataset_single(cfg.train_data_file.c_str(),
-                                                   cfg.train_label_file.c_str(),
-                                                   cfg.timeseries);
-
-            test = load_regression_dataset_single(cfg.test_data_file.c_str(),
-                                                  cfg.test_label_file.c_str(),
-                                                  cfg.timeseries);
-        }
+    if (have_simple) {
+        load_dataset(cfg.data_file.c_str(), cfg.label_file.c_str(),
+                     cfg.training_percent, cfg.timeseries, &train, &test,
+                     label_strings, cfg.regression);
     } else {
-        /* Classification mode: loads data + text labels */
-        if (have_simple) {
-            load_dataset(cfg.data_file.c_str(), cfg.label_file.c_str(),
-                         cfg.training_percent, cfg.timeseries, &train, &test,
-                         label_strings);
-        } else {
-            auto [train_ds, train_ls] = load_dataset_single(
-                cfg.train_data_file.c_str(), cfg.train_label_file.c_str(),
-                cfg.timeseries);
-            train         = train_ds;
-            label_strings = std::move(train_ls);
+        auto [train_ds, train_ls] = load_dataset_single(
+            cfg.train_data_file.c_str(), cfg.train_label_file.c_str(),
+            cfg.timeseries, cfg.regression);
+        train         = train_ds;
+        label_strings = std::move(train_ls);
 
-            auto [test_ds, test_ls] = load_dataset_single(
-                cfg.test_data_file.c_str(), cfg.test_label_file.c_str(),
-                cfg.timeseries);
-            test = test_ds;
+        auto [test_ds, test_ls] = load_dataset_single(
+            cfg.test_data_file.c_str(), cfg.test_label_file.c_str(),
+            cfg.timeseries, cfg.regression);
+        test = test_ds;
 
-            /* Verify train and test label mappings match (same labels, same
-             * order) */
-            if (test.data.shape[0] > 0) {
-                assert(test_ls == label_strings);
-                (void)test_ls;
-            }
+        /* Verify train and test label mappings match (same labels, same
+         * order) — only for classification */
+        if (!cfg.regression && test.data.shape[0] > 0) {
+            assert(test_ls == label_strings);
+            (void)test_ls;
         }
     }
 
@@ -143,8 +123,12 @@ int main(int argc, char* argv[]) {
     size_t input_neurons =
         (cfg.timeseries) ? train.data.shape[1] * 2 : train.data.shape[1] * 2;
     size_t output_neurons =
-        is_regression ? (train.labels.dims == 1 ? 1 : train.labels.shape[1])
-                      : train_labels;
+        cfg.regression
+            ? (train.labels.dims == 1
+                   ? 1
+                   : (size_t)train.labels.shape[1] *
+                         (train.labels.dims == 3 ? train.labels.shape[2] : 1))
+            : train_labels;
     size_t hidden_neurons = cfg.hidden_neurons;
     size_t total_neurons  = input_neurons + hidden_neurons + output_neurons;
 
@@ -261,7 +245,7 @@ int main(int argc, char* argv[]) {
         // Export on improved accuracy (classification) or reduced loss
         // (regression)
         bool improved = false;
-        if (is_regression) {
+        if (cfg.regression) {
             double cur_loss =
                 has_test_data ? stats.test_loss : stats.train_loss;
             double prev_loss = has_test_data ? best_test_loss : best_train_loss;
@@ -284,15 +268,15 @@ int main(int argc, char* argv[]) {
                            best_test_acc, best_test_loss, label_strings);
         }
 
-        double train_metric = is_regression ? best_train_loss : best_train_acc;
-        double test_metric  = is_regression ? best_test_loss : best_test_acc;
+        double train_metric = cfg.regression ? best_train_loss : best_train_acc;
+        double test_metric  = cfg.regression ? best_test_loss : best_test_acc;
         print_epoch_log(epoch, cfg.epochs, stats, train_metric, test_metric,
-                        has_test_data, is_regression);
+                        has_test_data, cfg.regression);
     }
 
     /* Confusion matrix on best saved network (if flag is set, classification
      * only) */
-    if (cfg.confusion_matrix && !is_regression) {
+    if (cfg.confusion_matrix && !cfg.regression) {
         run_confusion_matrix(cfg, train, test, label_strings, input_neurons,
                              hidden_neurons, output_neurons, cfg.timesteps,
                              cfg.timeseries);

@@ -529,87 +529,82 @@ static Dataset make_empty_dataset() {
     return out;
 }
 
-// Helper: allocate and populate a Dataset split (2D).
-// Copies data subset, label indices, min/max; recomputes min/max and normalizes data.
-static void build_split_dataset_2d(const RealData* rd, const RealData* labels,
-                                    int start, int len, int cols,
-                                    Dataset* out) {
-    out->data.data     = (double*)malloc((size_t)len * (size_t)cols * sizeof(double));
-    out->labels.data   = (double*)malloc(len * sizeof(double));
-    out->data.min_vals = (double*)malloc(cols * sizeof(double));
-    out->data.max_vals = (double*)malloc(cols * sizeof(double));
+// Generic split builder: handles both 2D and 3D, both classification and regression.
+// - data: input features RealData (source)
+// - labels: label/target RealData (source). For classification: dims=1, shape=[num_obs].
+// - start, len: range within source
+// - out: output Dataset (filled)
+static void build_split_dataset(const RealData* data, const RealData* labels,
+                                 int start, int len,
+                                 Dataset* out) {
+    *out = make_empty_dataset();
+    
+    size_t stride = entry_stride_doubles(data->shape, data->dims);
+    
+    // Allocate data
+    out->data.data     = (double*)malloc((size_t)len * stride * sizeof(double));
+    out->labels.data   = (double*)malloc((size_t)len * entry_stride_doubles(labels->shape, labels->dims) * sizeof(double));
+    out->data.min_vals = (double*)malloc(data->shape[1] * sizeof(double));
+    out->data.max_vals = (double*)malloc(data->shape[1] * sizeof(double));
+    
     if (!out->data.data || !out->labels.data || !out->data.min_vals || !out->data.max_vals) {
         free(out->data.data); free(out->labels.data);
         free(out->data.min_vals); free(out->data.max_vals);
         *out = make_empty_dataset();
         return;
     }
-
-    out->data.dims                  = 2;
-    out->data.shape                 = (int*)malloc(2 * sizeof(int));
-    out->data.shape[0]              = len;
-    out->data.shape[1]              = cols;
-    out->labels.dims                = 1;
-    out->labels.shape               = (int*)malloc(1 * sizeof(int));
-    out->labels.shape[0]            = len;
-    out->timeseries                 = false;
+    
+    // For regression labels: allocate min/max; for classification labels (1D): no min/max needed
+    if (labels->dims > 1) {
+        out->labels.min_vals = (double*)malloc(labels->shape[1] * sizeof(double));
+        out->labels.max_vals = (double*)malloc(labels->shape[1] * sizeof(double));
+        if (!out->labels.min_vals || !out->labels.max_vals) {
+            free(out->labels.min_vals); free(out->labels.max_vals);
+            free(out->data.data); free(out->labels.data);
+            free(out->data.min_vals); free(out->data.max_vals);
+            *out = make_empty_dataset();
+            return;
+        }
+    }
 
     // Copy data subset
-    memcpy(out->data.data, rd->data + (start * cols),
-           len * cols * sizeof(double));
-    memcpy(out->labels.data, labels->data + start,
-           len * sizeof(double));
+    memcpy(out->data.data, data->data + (size_t)start * stride,
+           (size_t)len * stride * sizeof(double));
+    // Copy labels subset
+    size_t label_stride = entry_stride_doubles(labels->shape, labels->dims);
+    memcpy(out->labels.data, labels->data + (size_t)start * label_stride,
+           (size_t)len * label_stride * sizeof(double));
 
-    // Copy min/max from source
-    memcpy(out->data.min_vals, rd->min_vals, cols * sizeof(double));
-    memcpy(out->data.max_vals, rd->max_vals, cols * sizeof(double));
-
-    // Recompute min/max on split subset
-    compute_realdata_minmax(out->data);
-
-    // Normalize split data to [0,1] using split's min/max
-    normalize_realdata(out->data);
-}
-
-// Helper: allocate and populate a Dataset split (3D).
-// Copies data subset, label indices, min/max; recomputes min/max and normalizes data.
-static void build_split_dataset_3d(const RealData* rd, const RealData* labels,
-                                    int start, int len, int block_size,
-                                    int input_features,
-                                    Dataset* out) {
-    out->data.data     = (double*)malloc(len * block_size * sizeof(double));
-    out->labels.data   = (double*)malloc(len * sizeof(double));
-    out->data.min_vals = (double*)malloc(input_features * sizeof(double));
-    out->data.max_vals = (double*)malloc(input_features * sizeof(double));
-    if (!out->data.data || !out->labels.data || !out->data.min_vals || !out->data.max_vals) {
-        free(out->data.data); free(out->labels.data);
-        free(out->data.min_vals); free(out->data.max_vals);
-        *out = make_empty_dataset();
-        return;
+    // For regression: copy min/max for labels
+    if (labels->dims > 1) {
+        memcpy(out->labels.min_vals, labels->min_vals, labels->shape[1] * sizeof(double));
+        memcpy(out->labels.max_vals, labels->max_vals, labels->shape[1] * sizeof(double));
     }
 
-    out->data.dims                  = 3;
-    out->data.shape                 = (int*)malloc(3 * sizeof(int));
+    // Set shape info
+    out->data.dims                  = data->dims;
+    out->data.shape                 = (int*)malloc(data->dims * sizeof(int));
+    memcpy(out->data.shape, data->shape, data->dims * sizeof(int));
     out->data.shape[0]              = len;
-    out->data.shape[1]              = input_features;
-    out->data.shape[2]              = rd->shape[2]; // timesteps
-    out->labels.dims                = 1;
-    out->labels.shape               = (int*)malloc(1 * sizeof(int));
+    
+    out->labels.dims                = labels->dims;
+    out->labels.shape               = (int*)malloc(labels->dims * sizeof(int));
+    memcpy(out->labels.shape, labels->shape, labels->dims * sizeof(int));
     out->labels.shape[0]            = len;
-    out->timeseries                 = true;
+    
+    out->timeseries                 = (data->dims == 3);
 
-    memcpy(out->data.data, rd->data + (start * block_size),
-           len * block_size * sizeof(double));
-    memcpy(out->labels.data, labels->data + start,
-           len * sizeof(double));
-    memcpy(out->data.min_vals, rd->min_vals, input_features * sizeof(double));
-    memcpy(out->data.max_vals, rd->max_vals, input_features * sizeof(double));
-
-    // Recompute min/max on split subset
+    // Recompute min/max on split data subset
     compute_realdata_minmax(out->data);
 
     // Normalize split data to [0,1] using split's min/max
     normalize_realdata(out->data);
+
+    // For regression: compute and normalize labels
+    if (labels->dims > 1) {
+        compute_realdata_minmax(out->labels);
+        normalize_realdata(out->labels);
+    }
 }
 
 // Free a Dataset. All heap memory is freed.
@@ -628,9 +623,13 @@ void free_dataset(Dataset* ds) {
 }
 
 /* Load a single dataset (no shuffle, no split). Detects 2D vs 3D
- * via timeseries flag. Caller must free via free_dataset(). */
+ * via timeseries flag. Handles both classification and regression.
+ * For classification: labels loaded as text strings mapped to indices.
+ * For regression: labels loaded as numeric RealData.
+ * Caller must free via free_dataset(). */
 std::pair<Dataset, std::vector<std::string>> load_dataset_single(
-    const char* data_path, const char* labels_path, bool timeseries) {
+    const char* data_path, const char* labels_path, bool timeseries,
+    bool is_regression) {
     Dataset out = make_empty_dataset();
     std::vector<std::string> label_strings;
 
@@ -644,9 +643,21 @@ std::pair<Dataset, std::vector<std::string>> load_dataset_single(
     }
 
     int count = rd.shape ? rd.shape[0] : 0;
-    auto label_result = load_textdata(labels_path, count);
-    label_rd = std::move(label_result.first);
-    label_strings = std::move(label_result.second);
+    
+    if (is_regression) {
+        // Regression: labels are numeric RealData
+        if (timeseries) {
+            label_rd = load_realdata_3d(labels_path);
+        } else {
+            label_rd = load_realdata_2d(labels_path);
+        }
+        label_strings = {};
+    } else {
+        // Classification: labels are text strings mapped to integer indices
+        auto label_result = load_textdata(labels_path, count);
+        label_rd = std::move(label_result.first);
+        label_strings = std::move(label_result.second);
+    }
 
     if (rd.data && label_rd.data) {
         out.data = rd;
@@ -661,7 +672,8 @@ std::pair<Dataset, std::vector<std::string>> load_dataset_single(
 }
 
 /* Shuffle and split a loaded dataset. Shuffles in-place, splits into
- * train/test. Caller must free via free_dataset(). */
+ * train/test. Handles both classification and regression via dims check.
+ * Caller must free via free_dataset(). */
 void split_dataset(Dataset* source, double train_percent,
                    Dataset* train, Dataset* test) {
     *train = make_empty_dataset();
@@ -680,215 +692,24 @@ void split_dataset(Dataset* source, double train_percent,
     int train_len = (int)(train_percent * num_obs);
     int test_len  = num_obs - train_len;
 
-    if (source->data.dims == 3) {
-        int block_size = source->data.shape[1] * source->data.shape[2];
-        int input_features = source->data.shape[1];
-        build_split_dataset_3d(&source->data, &source->labels,
-                               0, train_len, block_size, input_features, train);
-        build_split_dataset_3d(&source->data, &source->labels,
-                               train_len, test_len, block_size, input_features, test);
-    } else {
-        int cols = source->data.shape[1];
-        build_split_dataset_2d(&source->data, &source->labels,
-                               0, train_len, cols, train);
-        build_split_dataset_2d(&source->data, &source->labels,
-                               train_len, test_len, cols, test);
-    }
+    build_split_dataset(&source->data, &source->labels,
+                        0, train_len, train);
+    build_split_dataset(&source->data, &source->labels,
+                        train_len, test_len, test);
 }
 
 /* Full dataset loading: load + shuffle + split into train/test.
  * Convenience wrapper around load_dataset_single + split_dataset.
- * label_strings filled with unique label names (same for train and test). */
+ * label_strings filled with unique label names (empty for regression).
+ * For classification: labels_path contains text labels.
+ * For regression: labels_path contains numeric target data. */
 void load_dataset(const char* data_path, const char* labels_path,
                   double train_percent, bool timeseries,
                   Dataset* train, Dataset* test,
-                  std::vector<std::string>& label_strings) {
-    auto result = load_dataset_single(data_path, labels_path, timeseries);
+                  std::vector<std::string>& label_strings,
+                  bool is_regression) {
+    auto result = load_dataset_single(data_path, labels_path, timeseries, is_regression);
     split_dataset(&result.first, train_percent, train, test);
     free_dataset(&result.first);
     label_strings = std::move(result.second);
-}
-
-// Helper: allocate and populate a regression dataset split (2D).
-// Both data and labels are normalized using their own min/max.
-static void build_regression_split_2d(const RealData* data, const RealData* labels,
-                                      int start, int len, int cols,
-                                      Dataset* out) {
-    out->data.data     = (double*)malloc((size_t)len * (size_t)cols * sizeof(double));
-    out->labels.data   = (double*)malloc((size_t)len * cols * sizeof(double));
-    out->data.min_vals = (double*)malloc(cols * sizeof(double));
-    out->data.max_vals = (double*)malloc(cols * sizeof(double));
-    out->labels.min_vals = (double*)malloc(cols * sizeof(double));
-    out->labels.max_vals = (double*)malloc(cols * sizeof(double));
-    
-    if (!out->data.data || !out->labels.data || 
-        !out->data.min_vals || !out->data.max_vals ||
-        !out->labels.min_vals || !out->labels.max_vals) {
-        free(out->data.data); free(out->labels.data);
-        free(out->data.min_vals); free(out->data.max_vals);
-        free(out->labels.min_vals); free(out->labels.max_vals);
-        *out = make_empty_dataset();
-        return;
-    }
-
-    out->data.dims                  = 2;
-    out->data.shape                 = (int*)malloc(2 * sizeof(int));
-    out->data.shape[0]              = len;
-    out->data.shape[1]              = cols;
-    out->labels.dims                = 2;
-    out->labels.shape               = (int*)malloc(2 * sizeof(int));
-    out->labels.shape[0]            = len;
-    out->labels.shape[1]            = cols;
-    out->timeseries                 = false;
-
-    // Copy data subset
-    memcpy(out->data.data, data->data + (start * cols),
-           len * cols * sizeof(double));
-    // Copy labels subset
-    memcpy(out->labels.data, labels->data + (start * cols),
-           len * cols * sizeof(double));
-
-    // Compute and normalize data
-    memcpy(out->data.min_vals, data->min_vals, cols * sizeof(double));
-    memcpy(out->data.max_vals, data->max_vals, cols * sizeof(double));
-    compute_realdata_minmax(out->data);
-    normalize_realdata(out->data);
-
-    // Compute and normalize labels
-    memcpy(out->labels.min_vals, labels->min_vals, cols * sizeof(double));
-    memcpy(out->labels.max_vals, labels->max_vals, cols * sizeof(double));
-    compute_realdata_minmax(out->labels);
-    normalize_realdata(out->labels);
-}
-
-// Helper: allocate and populate a regression dataset split (3D).
-// Both data and labels are normalized using their own min/max.
-static void build_regression_split_3d(const RealData* data, const RealData* labels,
-                                      int start, int len, int block_size,
-                                      int input_features,
-                                      Dataset* out) {
-    out->data.data     = (double*)malloc(len * block_size * sizeof(double));
-    out->labels.data   = (double*)malloc(len * block_size * sizeof(double));
-    out->data.min_vals = (double*)malloc(input_features * sizeof(double));
-    out->data.max_vals = (double*)malloc(input_features * sizeof(double));
-    out->labels.min_vals = (double*)malloc(input_features * sizeof(double));
-    out->labels.max_vals = (double*)malloc(input_features * sizeof(double));
-
-    if (!out->data.data || !out->labels.data ||
-        !out->data.min_vals || !out->data.max_vals ||
-        !out->labels.min_vals || !out->labels.max_vals) {
-        free(out->data.data); free(out->labels.data);
-        free(out->data.min_vals); free(out->data.max_vals);
-        free(out->labels.min_vals); free(out->labels.max_vals);
-        *out = make_empty_dataset();
-        return;
-    }
-
-    out->data.dims                  = 3;
-    out->data.shape                 = (int*)malloc(3 * sizeof(int));
-    out->data.shape[0]              = len;
-    out->data.shape[1]              = input_features;
-    out->data.shape[2]              = data->shape[2]; // timesteps
-    out->labels.dims                = 3;
-    out->labels.shape               = (int*)malloc(3 * sizeof(int));
-    out->labels.shape[0]            = len;
-    out->labels.shape[1]            = input_features;
-    out->labels.shape[2]            = data->shape[2]; // timesteps
-    out->timeseries                 = true;
-
-    // Copy data subset
-    memcpy(out->data.data, data->data + (start * block_size),
-           len * block_size * sizeof(double));
-    // Copy labels subset
-    memcpy(out->labels.data, labels->data + (start * block_size),
-           len * block_size * sizeof(double));
-
-    // Compute and normalize data
-    memcpy(out->data.min_vals, data->min_vals, input_features * sizeof(double));
-    memcpy(out->data.max_vals, data->max_vals, input_features * sizeof(double));
-    compute_realdata_minmax(out->data);
-    normalize_realdata(out->data);
-
-    // Compute and normalize labels
-    memcpy(out->labels.min_vals, labels->min_vals, input_features * sizeof(double));
-    memcpy(out->labels.max_vals, labels->max_vals, input_features * sizeof(double));
-    compute_realdata_minmax(out->labels);
-    normalize_realdata(out->labels);
-}
-
-// Regression: load a single dataset (no split). Loads two RealData files.
-// Min/max computed but not normalized — normalization happens in split builders.
-Dataset load_regression_dataset_single(
-    const char* data_path, const char* labels_path, bool timeseries) {
-    Dataset out = make_empty_dataset();
-
-    RealData rd, label_rd;
-
-    if (timeseries) {
-        rd    = load_realdata_3d(data_path);
-        label_rd = load_realdata_3d(labels_path);
-    } else {
-        rd    = load_realdata_2d(data_path);
-        label_rd = load_realdata_2d(labels_path);
-    }
-
-    if (rd.data && label_rd.data && rd.shape[0] == label_rd.shape[0]) {
-        out.data      = rd;
-        out.labels    = label_rd;
-        out.timeseries = timeseries;
-    } else {
-        free_realdata(rd);
-        free_realdata(label_rd);
-    }
-
-    return out;
-}
-
-// Regression: shuffle and split a loaded dataset.
-// Shuffles both data and labels together with the same permutation.
-void split_regression_dataset(Dataset* source, double train_percent,
-                              Dataset* train, Dataset* test) {
-    *train = make_empty_dataset();
-    *test  = make_empty_dataset();
-    assert(train_percent >= 0.00 && train_percent <= 1.00);
-
-    if (!source->data.data || !source->labels.data) {
-        return; // empty source
-    }
-
-    // Shuffle both data and labels with same permutation
-    shuffle_two(source->data.data, source->data.shape, source->data.dims,
-                source->labels.data, source->labels.shape, source->labels.dims);
-
-    int num_obs = source->data.shape[0];
-    int train_len = (int)(train_percent * num_obs);
-    int test_len  = num_obs - train_len;
-
-    if (source->data.dims == 3) {
-        int block_size = source->data.shape[1] * source->data.shape[2];
-        int input_features = source->data.shape[1];
-        build_regression_split_3d(&source->data, &source->labels,
-                                  0, train_len, block_size, input_features, train);
-        build_regression_split_3d(&source->data, &source->labels,
-                                  train_len, test_len, block_size, input_features, test);
-    } else {
-        int cols = source->data.shape[1];
-        build_regression_split_2d(&source->data, &source->labels,
-                                  0, train_len, cols, train);
-        build_regression_split_2d(&source->data, &source->labels,
-                                  train_len, test_len, cols, test);
-    }
-}
-
-/* Full regression dataset loading: load + shuffle + split into train/test.
- * Convenience wrapper around load_regression_dataset_single + split_regression_dataset.
- * label_strings is filled with an empty vector. */
-void load_regression_dataset(const char* data_path, const char* labels_path,
-                             double train_percent, bool timeseries,
-                             Dataset* train, Dataset* test,
-                             std::vector<std::string>& label_strings) {
-    Dataset source = load_regression_dataset_single(data_path, labels_path, timeseries);
-    split_regression_dataset(&source, train_percent, train, test);
-    free_dataset(&source);
-    label_strings = {};
 }

@@ -85,13 +85,15 @@ EvaluationResults forward(TrainingBundle* tb, Processor* p, const Dataset* d,
         er.loss = loss_spike;
 
     } else {
-        /* Regression (MSE): labels 1D (single target) or 2D (multi-target) */
+        /* Regression (MSE): labels 1D (not used), 2D (1+ output neurons), or 3D (3D timeseries targets, not yet used) */
         if (d->labels.dims == 1) {
             assert(d->labels.shape[0] > 0);
-        } else {
-            assert(d->labels.dims == 2);
+        } else if (d->labels.dims == 2) {
             assert(d->labels.shape[1] >= 1);
             assert(d->labels.shape[1] == (int)nc->output_neurons);
+        } else {
+            assert(d->labels.dims == 3);
+            assert(d->labels.shape[1] * d->labels.shape[2] == (int)nc->output_neurons);
         }
 
         /* Accuracy not meaningful for MSE — leave at 0 */
@@ -104,7 +106,7 @@ EvaluationResults forward(TrainingBundle* tb, Processor* p, const Dataset* d,
             /* 1D labels: single target per observation */
             assert(nc->output_neurons == 1);
             tb->target[0] = d->labels.data[index];
-        } else {
+        } else if (d->labels.dims == 2) {
             /* 2D labels: multiple targets per observation */
             size_t label_cols = (size_t)d->labels.shape[1];
             const double* label_row = d->labels.data + index * label_cols;
@@ -113,6 +115,14 @@ EvaluationResults forward(TrainingBundle* tb, Processor* p, const Dataset* d,
                                     ? nc->output_neurons
                                     : label_cols;
             memcpy(tb->target.data(), label_row, copy_count * sizeof(double));
+        } else {
+            /* 3D labels: multiple features x timesteps targets */
+            size_t label_stride = (size_t)d->labels.shape[1] * (size_t)d->labels.shape[2];
+            const double* label_block = d->labels.data + index * label_stride;
+            size_t copy_count = (nc->output_neurons < label_stride)
+                                    ? nc->output_neurons
+                                    : label_stride;
+            memcpy(tb->target.data(), label_block, copy_count * sizeof(double));
         }
 
         double loss_spike =

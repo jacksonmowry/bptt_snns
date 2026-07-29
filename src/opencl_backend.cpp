@@ -248,7 +248,7 @@ OpenclBackend::OpenclBackend(const CliConfig& cfg, NetworkConfiguration& nc,
 
     // Fill targets buffer (all rows, all columns)
     // CCE: labels have 1 column (class index), stored in column 0
-    // MSE: labels 1D (single target) or 2D (multi-target)
+    // MSE: labels 1D (not used), 2D (1+ output neuron), or 3D (not yet used)
     for (size_t i = 0; i < train.data.shape[0]; i++) {
         for (size_t j = 0; j < nc.output_neurons; j++) {
             if (loss_func == LossFunc::CCE) {
@@ -257,9 +257,13 @@ OpenclBackend::OpenclBackend(const CliConfig& cfg, NetworkConfiguration& nc,
             } else if (train.labels.dims == 1) {
                 // MSE 1D labels: single target per observation
                 (*targets)[i * nc.output_neurons + j] = (j == 0) ? train.labels.data[i] : 0.0;
-            } else {
+            } else if (train.labels.dims == 2) {
                 // MSE 2D labels: multi-target
                 size_t label_stride = (size_t)train.labels.shape[1];
+                (*targets)[i * nc.output_neurons + j] = (j < label_stride) ? train.labels.data[i * label_stride + j] : 0.0;
+            } else {
+                // MSE 3D labels: multiple features x timesteps
+                size_t label_stride = (size_t)train.labels.shape[1] * (size_t)train.labels.shape[2];
                 (*targets)[i * nc.output_neurons + j] = (j < label_stride) ? train.labels.data[i * label_stride + j] : 0.0;
             }
         }
@@ -276,9 +280,13 @@ OpenclBackend::OpenclBackend(const CliConfig& cfg, NetworkConfiguration& nc,
                 } else if (test.labels.dims == 1) {
                     // MSE 1D labels: single target per observation
                     (*test_targets)[i * nc.output_neurons + j] = (j == 0) ? test.labels.data[i] : 0.0;
-                } else {
+                } else if (test.labels.dims == 2) {
                     // MSE 2D labels: multi-target
                     size_t test_label_stride = (size_t)test.labels.shape[1];
+                    (*test_targets)[i * nc.output_neurons + j] = (j < test_label_stride) ? test.labels.data[i * test_label_stride + j] : 0.0;
+                } else {
+                    // MSE 3D labels: multiple features x timesteps
+                    size_t test_label_stride = (size_t)test.labels.shape[1] * (size_t)test.labels.shape[2];
                     (*test_targets)[i * nc.output_neurons + j] = (j < test_label_stride) ? test.labels.data[i * test_label_stride + j] : 0.0;
                 }
             }
