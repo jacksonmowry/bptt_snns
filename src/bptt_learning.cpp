@@ -1,11 +1,10 @@
 #include "backend.h"
 #include "cli.h"
-#include "data_utils.h"
 #include "evaluation.h"
 #include "network_setup.h"
 #include "network_utils.h"
 #include "shared.h"
-#include "training.h"
+#include <algorithm>
 #include <cassert>
 #include <cfloat>
 #include <cmath>
@@ -15,7 +14,6 @@
 #include <cstring>
 #include <ctime>
 #include <string>
-#include <algorithm>
 #include <utility>
 #include <vector>
 
@@ -23,29 +21,32 @@ using namespace std;
 using namespace neuro;
 
 static void print_epoch_log(size_t epoch, size_t total_epochs,
-                            const TrainingStats& stats, double best_train_metric,
-                            double best_test_metric, bool has_test_data,
-                            bool is_regression) {
+                            const TrainingStats& stats,
+                            double best_train_metric, double best_test_metric,
+                            bool has_test_data, bool is_regression) {
     if (is_regression) {
         if (has_test_data) {
             printf("E%4zu/%zu  TrL: %8g  TeL: %8g  BestTeL: "
                    "%8g\n",
-                   epoch + 1, total_epochs, stats.train_loss,
-                   stats.test_loss, best_test_metric);
+                   epoch + 1, total_epochs, stats.train_loss, stats.test_loss,
+                   best_test_metric);
         } else {
             printf("E%4zu/%zu  TrL: %8g  BestTrL: "
-                   "%8g\n", epoch + 1, total_epochs,
-                   stats.train_loss, best_train_metric);
+                   "%8g\n",
+                   epoch + 1, total_epochs, stats.train_loss,
+                   best_train_metric);
         }
     } else {
         if (has_test_data) {
-            printf("E%4zu/%zu  TrL: %8g TrA: %7.3f  TeL: %8g TeA: %7.3f  BestTeA: "
-                   "%7.3f\n",
-                   epoch + 1, total_epochs, stats.train_loss, stats.train_acc,
-                   stats.test_loss, stats.test_acc, best_test_metric);
+            printf(
+                "E%4zu/%zu  TrL: %8g TrA: %7.3f  TeL: %8g TeA: %7.3f  BestTeA: "
+                "%7.3f\n",
+                epoch + 1, total_epochs, stats.train_loss, stats.train_acc,
+                stats.test_loss, stats.test_acc, best_test_metric);
         } else {
-            printf("E%4zu/%zu  TrL: %8g TrA: %7.3f  BestTrA: %7.3f\n", epoch + 1,
-                   total_epochs, stats.train_loss, stats.train_acc, best_train_metric);
+            printf("E%4zu/%zu  TrL: %8g TrA: %7.3f  BestTrA: %7.3f\n",
+                   epoch + 1, total_epochs, stats.train_loss, stats.train_acc,
+                   best_train_metric);
         }
     }
 }
@@ -91,33 +92,34 @@ int main(int argc, char* argv[]) {
     Dataset test;
     std::vector<std::string> label_strings;
     bool is_regression = cfg.regression;
-    
+
     if (is_regression) {
         /* Regression mode: loads two RealData files, no label strings */
         if (have_simple) {
-            load_regression_dataset(cfg.data_file.c_str(), cfg.label_file.c_str(),
+            load_regression_dataset(cfg.data_file.c_str(),
+                                    cfg.label_file.c_str(),
                                     cfg.training_percent, cfg.timeseries,
                                     &train, &test, label_strings);
         } else {
-            train = load_regression_dataset_single(
-                cfg.train_data_file.c_str(), cfg.train_label_file.c_str(),
-                cfg.timeseries);
+            train = load_regression_dataset_single(cfg.train_data_file.c_str(),
+                                                   cfg.train_label_file.c_str(),
+                                                   cfg.timeseries);
 
-            test = load_regression_dataset_single(
-                cfg.test_data_file.c_str(), cfg.test_label_file.c_str(),
-                cfg.timeseries);
+            test = load_regression_dataset_single(cfg.test_data_file.c_str(),
+                                                  cfg.test_label_file.c_str(),
+                                                  cfg.timeseries);
         }
     } else {
         /* Classification mode: loads data + text labels */
         if (have_simple) {
             load_dataset(cfg.data_file.c_str(), cfg.label_file.c_str(),
-                                         cfg.training_percent, cfg.timeseries,
-                                         &train, &test, label_strings);
+                         cfg.training_percent, cfg.timeseries, &train, &test,
+                         label_strings);
         } else {
             auto [train_ds, train_ls] = load_dataset_single(
                 cfg.train_data_file.c_str(), cfg.train_label_file.c_str(),
                 cfg.timeseries);
-            train = train_ds;
+            train         = train_ds;
             label_strings = std::move(train_ls);
 
             auto [test_ds, test_ls] = load_dataset_single(
@@ -125,7 +127,8 @@ int main(int argc, char* argv[]) {
                 cfg.timeseries);
             test = test_ds;
 
-            /* Verify train and test label mappings match (same labels, same order) */
+            /* Verify train and test label mappings match (same labels, same
+             * order) */
             if (test.data.shape[0] > 0) {
                 assert(test_ls == label_strings);
                 (void)test_ls;
@@ -139,9 +142,9 @@ int main(int argc, char* argv[]) {
 
     size_t input_neurons =
         (cfg.timeseries) ? train.data.shape[1] * 2 : train.data.shape[1] * 2;
-    size_t output_neurons = is_regression
-                                ? (train.labels.dims == 1 ? 1 : train.labels.shape[1])
-                                : train_labels;
+    size_t output_neurons =
+        is_regression ? (train.labels.dims == 1 ? 1 : train.labels.shape[1])
+                      : train_labels;
     size_t hidden_neurons = cfg.hidden_neurons;
     size_t total_neurons  = input_neurons + hidden_neurons + output_neurons;
 
@@ -215,7 +218,7 @@ int main(int argc, char* argv[]) {
         .min_weight     = min_weight,
         .max_weight     = max_weight,
         .spike_value_factor = spike_value_factor,
-        .loss_func      = cfg.loss_func,
+        .loss_func          = cfg.loss_func,
     };
 
     // Compute max_in/outgoing from network topology
@@ -255,16 +258,18 @@ int main(int argc, char* argv[]) {
         backend->do_one_epoch(epoch);
         stats = backend->get_stats();
 
-        // Export on improved accuracy (classification) or reduced loss (regression)
+        // Export on improved accuracy (classification) or reduced loss
+        // (regression)
         bool improved = false;
         if (is_regression) {
-            double cur_loss  = has_test_data ? stats.test_loss : stats.train_loss;
+            double cur_loss =
+                has_test_data ? stats.test_loss : stats.train_loss;
             double prev_loss = has_test_data ? best_test_loss : best_train_loss;
-            improved = cur_loss < prev_loss;
+            improved         = cur_loss < prev_loss;
         } else {
             double cur_acc  = has_test_data ? stats.test_acc : stats.train_acc;
             double prev_acc = has_test_data ? best_test_acc : best_train_acc;
-            improved = cur_acc > prev_acc;
+            improved        = cur_acc > prev_acc;
         }
         if (improved) {
             best_train_acc  = stats.train_acc;
@@ -276,8 +281,7 @@ int main(int argc, char* argv[]) {
             backend->update_weights(n);
 
             export_network(n, cfg, best_train_acc, best_train_loss,
-                           best_test_acc, best_test_loss,
-                           label_strings);
+                           best_test_acc, best_test_loss, label_strings);
         }
 
         double train_metric = is_regression ? best_train_loss : best_train_acc;
@@ -286,11 +290,12 @@ int main(int argc, char* argv[]) {
                         has_test_data, is_regression);
     }
 
-    /* Confusion matrix on best saved network (if flag is set, classification only) */
+    /* Confusion matrix on best saved network (if flag is set, classification
+     * only) */
     if (cfg.confusion_matrix && !is_regression) {
-        run_confusion_matrix(cfg, train, test, label_strings,
-                             input_neurons, hidden_neurons,
-                             output_neurons, cfg.timesteps, cfg.timeseries);
+        run_confusion_matrix(cfg, train, test, label_strings, input_neurons,
+                             hidden_neurons, output_neurons, cfg.timesteps,
+                             cfg.timeseries);
     }
 
     // Finalize: sync weights to network
