@@ -3,7 +3,6 @@
 #include "cli.h"
 #include "csv.h"
 #include "framework.hpp"
-#include "shared.h"
 #include <cstddef>
 #include <string>
 #include <vector>
@@ -15,7 +14,7 @@ neuro::Network* load_and_init_network(
     double& decay_rate, double& tau, double& rho, size_t& timesteps,
     size_t& hidden_neurons, unsigned long& seed, size_t& epochs,
     size_t& batch_size, double& training_percent, size_t& threads,
-    bool& timeseries, size_t& max_delay, double& weight_init_stddev);
+    size_t& timeseries, size_t& max_delay, double& weight_init_stddev);
 
 // Build and attach full reproducibility metadata to the network.
 void build_run_metadata(neuro::Network* n, int argc, char* argv[],
@@ -26,7 +25,8 @@ void build_run_metadata(neuro::Network* n, int argc, char* argv[],
                         bool discrete, double min_potential, double min_weight,
                         double max_weight, double max_threshold,
                         const std::string& leak_prop, int scale,
-                        double scale_factor, size_t effective_max_delay);
+                        double scale_factor, size_t effective_max_delay,
+                        bool is_regression);
 
 // Generate nodes/edges for an empty network. Returns (neuron_count,
 // synapse_count).

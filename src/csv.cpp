@@ -1,67 +1,47 @@
 #include "csv.h"
+#include <algorithm>
 #include <assert.h>
 #include <cfloat>
 #include <cstddef>
+#include <cstdio>
 #include <cstdlib>
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
+#include <cstring>
+#include <string>
+#include <vector>
 
-static int cmpstringp(const void* p1, const void* p2) {
-    return strcmp(*(const char**)p1, *(const char**)p2);
-}
+// Forward declarations for helpers used by high-level loaders
+static int compute_2d_dims(FILE* f_data, int* p_cols);
 
 // Build unique sorted label list from raw strings. Returns count.
-static void build_label_mapping(char** raw_labels, int obs_count,
-                                double* indices_out, char*** unique_labels_out,
-                                int* unique_count_out) {
-    // Collect unique labels (preserve first occurrence order, we sort later)
-    char** unique = (char**)malloc(obs_count * sizeof(char*));
-    int ucount    = 0;
+static std::vector<std::string>
+build_label_mapping(char** raw_labels, int obs_count, double* indices_out) {
+    std::vector<std::string> label_strings_out;
 
     for (int i = 0; i < obs_count; i++) {
         bool found = false;
-        for (int j = 0; j < ucount; j++) {
-            if (strcmp(raw_labels[i], unique[j]) == 0) {
+        for (auto& u : label_strings_out) {
+            if (u == std::string(raw_labels[i])) {
                 found = true;
                 break;
             }
         }
         if (!found) {
-            unique[ucount++] = raw_labels[i];
+            label_strings_out.push_back(std::string(raw_labels[i]));
         }
     }
 
-    // Sort with natural sort
-    qsort(unique, ucount, sizeof(char*), cmpstringp);
+    std::sort(label_strings_out.begin(), label_strings_out.end());
 
-    // Build index for each observation
     for (int i = 0; i < obs_count; i++) {
-        for (int j = 0; j < ucount; j++) {
-            if (strcmp(raw_labels[i], unique[j]) == 0) {
+        for (int j = 0; j < (int)label_strings_out.size(); j++) {
+            if (label_strings_out[j] == std::string(raw_labels[i])) {
                 indices_out[i] = (double)j;
                 break;
             }
         }
     }
 
-    // Free raw labels array (strings are now owned by unique)
-    for (int i = 0; i < obs_count; i++) {
-        bool is_unique = false;
-        for (int j = 0; j < ucount; j++) {
-            if (raw_labels[i] == unique[j]) {
-                is_unique = true;
-                break;
-            }
-        }
-        if (!is_unique) {
-            free(raw_labels[i]);
-        }
-    }
-    free(raw_labels);
-
-    *unique_labels_out = unique;
-    *unique_count_out  = ucount;
+    return label_strings_out;
 }
 
 // Read all labels as strings. Returns array of strings (caller frees).
@@ -71,7 +51,6 @@ static char** read_label_strings(FILE* f, int rows) {
     for (int i = 0; i < rows; i++) {
         if (fgets(line, sizeof(line), f) != NULL) {
             assert(strlen(line) < sizeof(line) - 2);
-            // strip newline
             char* nl = strchr(line, '\n');
             if (nl) {
                 *nl = '\0';
@@ -88,36 +67,270 @@ static char** read_label_strings(FILE* f, int rows) {
     return labels;
 }
 
-void load_dataset(const char* data_path, const char* labels_path,
-                  double train_percent, Dataset* train, Dataset* test) {
-    assert(train_percent >= 0.00 && train_percent <= 1.00);
-    Dataset ds = {
-        NULL, NULL, NULL, NULL, NULL, 0, 2, NULL, 0,
-    };
-    FILE* f_data   = fopen(data_path, "r");
-    FILE* f_labels = fopen(labels_path, "r");
-    if (f_data == NULL || f_labels == NULL) {
-        if (f_data != NULL) {
-            fclose(f_data);
-        }
-        if (f_labels != NULL) {
-            fclose(f_labels);
-        }
-        *train = {};
-        *test  = {};
+// Compute min/max values for RealData from its data buffer.
+// Uses shape/dims to determine iteration bounds.
+// Caller must have allocated rd.min_vals and rd.max_vals.
+void compute_realdata_minmax(RealData& rd) {
+    if (!rd.data || !rd.min_vals || !rd.max_vals || !rd.shape) {
         return;
     }
 
-    char line[4096 * 16];
-    int rows = 0;
-    while (fgets(line, sizeof(line), f_labels) != NULL) {
-        rows++;
+    if (rd.dims == 2) {
+        for (int j = 0; j < rd.shape[1]; j++) {
+            rd.min_vals[j] = rd.data[j];
+            rd.max_vals[j] = rd.data[j];
+        }
+        for (int i = 1; i < rd.shape[0]; i++) {
+            for (int j = 0; j < rd.shape[1]; j++) {
+                double val =
+                    rd.data[(size_t)i * (size_t)rd.shape[1] + (size_t)j];
+                if (val < rd.min_vals[j]) {
+                    rd.min_vals[j] = val;
+                }
+                if (val > rd.max_vals[j]) {
+                    rd.max_vals[j] = val;
+                }
+            }
+        }
+    } else if (rd.dims == 3) {
+        for (int feature = 0; feature < rd.shape[1]; feature++) {
+            rd.min_vals[feature] = DBL_MAX;
+            rd.max_vals[feature] = -DBL_MAX;
+        }
+        for (int obs = 0; obs < rd.shape[0]; obs++) {
+            for (int feature = 0; feature < rd.shape[1]; feature++) {
+                for (int column = 0; column < rd.shape[2]; column++) {
+                    size_t idx = (size_t)(obs * rd.shape[1] * rd.shape[2] +
+                                          feature * rd.shape[2] + column);
+                    double val = rd.data[idx];
+                    if (val < rd.min_vals[feature]) {
+                        rd.min_vals[feature] = val;
+                    }
+                    if (val > rd.max_vals[feature]) {
+                        rd.max_vals[feature] = val;
+                    }
+                }
+            }
+        }
     }
-    ds.shape    = (int*)malloc(2 * sizeof(int));
-    ds.shape[0] = rows;
+}
 
+// Normalize RealData to [0,1] range using its min_vals/max_vals.
+// Values with zero range are set to NaN to match original behavior.
+// Modifies rd.data in-place; min_vals/max_vals unchanged.
+void normalize_realdata(RealData& rd) {
+    if (!rd.data || !rd.min_vals || !rd.max_vals || !rd.shape) {
+        return;
+    }
+
+    if (rd.dims == 2) {
+        for (int i = 0; i < rd.shape[0]; i++) {
+            for (int j = 0; j < rd.shape[1]; j++) {
+                double range = rd.max_vals[j] - rd.min_vals[j];
+                if (range == 0.0) {
+                    rd.data[(size_t)i * (size_t)rd.shape[1] + (size_t)j] =
+                        0.0 / 0.0; // NaN
+                } else {
+                    rd.data[(size_t)i * (size_t)rd.shape[1] + (size_t)j] =
+                        (rd.data[(size_t)i * (size_t)rd.shape[1] + (size_t)j] -
+                         rd.min_vals[j]) /
+                        range;
+                }
+            }
+        }
+    } else if (rd.dims == 3) {
+        for (int obs = 0; obs < rd.shape[0]; obs++) {
+            for (int feature = 0; feature < rd.shape[1]; feature++) {
+                double range = rd.max_vals[feature] - rd.min_vals[feature];
+                for (int column = 0; column < rd.shape[2]; column++) {
+                    size_t idx = (size_t)(obs * rd.shape[1] * rd.shape[2] +
+                                          feature * rd.shape[2] + column);
+                    if (range == 0.0) {
+                        rd.data[idx] = 0.0 / 0.0; // NaN
+                    } else {
+                        rd.data[idx] =
+                            (rd.data[idx] - rd.min_vals[feature]) / range;
+                    }
+                }
+            }
+        }
+    }
+}
+
+// Parse 2D (non-timeseries) data from file.
+// Returns RealData with data, min_vals, max_vals, shape allocated.
+// Caller must free: data.data, data.min_vals, data.max_vals, data.shape.
+static RealData parse_realdata_2d(FILE* f_data, int rows, int cols) {
+    RealData rd = {NULL, NULL, NULL, 2, NULL};
+
+    rd.shape    = (int*)malloc(2 * sizeof(int));
+    rd.shape[0] = rows;
+    rd.shape[1] = cols;
+
+    rd.data = (double*)malloc((size_t)rows * (size_t)cols * sizeof(double));
+
+    size_t line_len = 4096 * 16;
+    char* line      = (char*)malloc(4096 * 16);
+    rewind(f_data);
+    for (int i = 0; i < rows; i++) {
+        if (fgets(line, line_len, f_data) != NULL) {
+            bool blank = true;
+            for (size_t j = 0; blank && j < strlen(line); j++) {
+                blank &= (bool)(isspace(line[j]));
+            }
+
+            if (blank) {
+                // Skipping blank lines
+                i--;
+                continue;
+            }
+
+            char* token = strtok(line, ",");
+            int parsed  = 0;
+            for (int j = 0; j < cols && token != NULL; j++) {
+                rd.data[(size_t)i * (size_t)cols + (size_t)j] = atof(token);
+                token = strtok(NULL, ",");
+                parsed++;
+            }
+            if (parsed < cols) {
+                fprintf(stderr,
+                        "%s: truncated line %d "
+                        "(expected %d values, got %d)\n",
+                        __func__, i + 1, cols, parsed);
+            }
+        }
+    }
+    free(line);
+
+    // Min/max calcs
+    compute_realdata_minmax(rd);
+
+    return rd;
+}
+
+// Parse labels from file.
+// Returns {label indices as RealData (dims=1), vector of label strings}.
+// Caller must free the RealData via free_realdata().
+static std::pair<RealData, std::vector<std::string>>
+parse_textdata(FILE* f_labels, int count) {
+    RealData rd = {NULL, NULL, NULL, 1, NULL};
+
+    rd.data = (double*)malloc(count * sizeof(double));
+
+    rewind(f_labels);
+    char** raw_labels = read_label_strings(f_labels, count);
+
+    std::vector<std::string> label_strings =
+        build_label_mapping(raw_labels, count, rd.data);
+
+    // free raw_labels now that we're done with them
+    for (int i = 0; i < count; i++) {
+        free(raw_labels[i]);
+    }
+    free(raw_labels);
+
+    rd.shape    = (int*)malloc(1 * sizeof(int));
+    rd.shape[0] = count;
+
+    return {rd, std::move(label_strings)};
+}
+
+// Load 2D data from file. Returns RealData with dims=2, shape=[rows, cols].
+// Caller must free via free_realdata(). Returns zero-initialized on failure.
+RealData load_realdata_2d(const char* path) {
+    RealData rd = {NULL, NULL, NULL, 2, NULL};
+    FILE* f     = fopen(path, "r");
+    if (!f) {
+        return rd;
+    }
+
+    int cols;
+    int rows = compute_2d_dims(f, &cols);
+    fclose(f);
+
+    if (rows == 0 || cols == 0) {
+        rd.shape    = (int*)malloc(2 * sizeof(int));
+        rd.shape[0] = 0;
+        rd.shape[1] = 0;
+        return rd;
+    }
+
+    // Re-open for parsing
+    f = fopen(path, "r");
+    if (!f) {
+        rd.shape    = (int*)malloc(2 * sizeof(int));
+        rd.shape[0] = 0;
+        rd.shape[1] = 0;
+        return rd;
+    }
+
+    rd = parse_realdata_2d(f, rows, cols);
+    fclose(f);
+
+    if (!rd.data) {
+        free_realdata(rd);
+        rd          = {NULL, NULL, NULL, 2, NULL};
+        rd.shape    = (int*)malloc(2 * sizeof(int));
+        rd.shape[0] = 0;
+        rd.shape[1] = 0;
+    }
+    return rd;
+}
+
+// Load text labels from file. Returns {label indices RealData (dims=1), vector
+// of label strings}. count = number of observations (rows) in the file. Caller
+// must free the RealData via free_realdata().
+std::pair<RealData, std::vector<std::string>> load_textdata(const char* path,
+                                                            int count) {
+    RealData rd = {NULL, NULL, NULL, 1, NULL};
+
+    if (count <= 0) {
+        rd.shape    = (int*)malloc(1 * sizeof(int));
+        rd.shape[0] = 0;
+        return {rd, {}};
+    }
+
+    FILE* f = fopen(path, "r");
+    if (!f) {
+        rd.shape    = (int*)malloc(1 * sizeof(int));
+        rd.shape[0] = 0;
+        return {rd, {}};
+    }
+
+    auto result = parse_textdata(f, count);
+    fclose(f);
+
+    if (!result.first.data) {
+        free_realdata(result.first);
+        result.first          = {NULL, NULL, NULL, 1, NULL};
+        result.first.shape    = (int*)malloc(1 * sizeof(int));
+        result.first.shape[0] = 0;
+    }
+    return result;
+}
+
+// Count non-blank lines and compute dimensions for 2D data.
+static int compute_2d_dims(FILE* f_data, int* p_cols) {
+    fprintf(stderr, "%s\n", __FUNCTION__);
+    size_t line_len = 4096 * 16;
+    char* line      = (char*)malloc(4096 * 16);
+    int rows        = 0;
+
+    while (fgets(line, line_len, f_data) != NULL) {
+        // Skip blank lines
+        bool blank = true;
+        for (size_t i = 0; blank && i < strlen(line); i++) {
+            blank &= (bool)(isspace(line[i]));
+        }
+
+        if (!blank) {
+            rows++;
+        }
+    }
+
+    rewind(f_data);
     int cols = 0;
-    if (fgets(line, sizeof(line), f_data) != NULL) {
+    if (fgets(line, line_len, f_data) != NULL) {
         for (int i = 0; line[i] != '\0' && line[i] != '\n'; i++) {
             if (line[i] == ',') {
                 cols++;
@@ -125,698 +338,312 @@ void load_dataset(const char* data_path, const char* labels_path,
         }
         cols++;
     }
-    ds.shape[1] = cols;
 
-    ds.data     = (double*)malloc((size_t)rows * (size_t)cols * sizeof(double));
-    ds.labels   = (double*)malloc(rows * sizeof(double));
-    ds.min_vals = (double*)malloc(cols * sizeof(double));
-    ds.max_vals = (double*)malloc(cols * sizeof(double));
-    if (ds.data == NULL || ds.labels == NULL || ds.min_vals == NULL ||
-        ds.max_vals == NULL) {
-        free(ds.data);
-        free(ds.labels);
-        free(ds.min_vals);
-        free(ds.max_vals);
-        fclose(f_data);
-        fclose(f_labels);
-        *train = {};
-        *test  = {};
+    free(line);
+    *p_cols = cols;
+    fprintf(stderr, "Rows: %d, cols: %d\n", rows, cols);
+    return rows;
+}
+
+// Compute the stride between consecutive entries (in doubles) from shape/dims.
+// stride = product of shape[1..dims-1]. For 1D data (dims=1), stride=1.
+static size_t entry_stride_doubles(const int* shape, int dims) {
+    size_t stride = 1;
+    for (int i = 1; i < dims; i++) {
+        stride *= (size_t)shape[i];
+    }
+    return stride;
+}
+
+// Shuffle two double arrays simultaneously with the same permutation.
+// Operates on double* data with dims/shape to compute entry stride.
+// Uses rand() % i for i = 1..num_entries-1, matching the original 2D/3D
+// implementations.
+static void shuffle_two(double* data_a, const int* shape_a, int dims_a,
+                        double* data_b, const int* shape_b, int dims_b) {
+    size_t num_entries = (size_t)shape_a[0];
+    size_t stride_a    = entry_stride_doubles(shape_a, dims_a);
+    size_t stride_b    = entry_stride_doubles(shape_b, dims_b);
+
+    double* tmp_a = (double*)malloc(stride_a * sizeof(double));
+    double* tmp_b = (double*)malloc(stride_b * sizeof(double));
+    if (!tmp_a || !tmp_b) {
+        free(tmp_a);
+        free(tmp_b);
         return;
     }
 
-    // Read labels as strings
-    rewind(f_labels);
-    char** raw_labels = read_label_strings(f_labels, rows);
-
-    // Read data
-    rewind(f_data);
-    for (int i = 0; i < rows; i++) {
-        if (fgets(line, sizeof(line), f_data) != NULL) {
-            char* token = strtok(line, ",");
-            for (int j = 0; j < cols; j++) {
-                if (token != NULL) {
-                    ds.data[(size_t)i * (size_t)cols + (size_t)j] = atof(token);
-                    token = strtok(NULL, ",");
-                }
-            }
-        }
-    }
-    fclose(f_data);
-    fclose(f_labels);
-
-    // Build unique sorted label mapping
-    build_label_mapping(raw_labels, rows, ds.labels, &ds.label_strings,
-                        &ds.label_strings_count);
-
-    // Min/max calcs
-    for (int j = 0; j < cols; j++) {
-        ds.min_vals[j] = ds.data[j];
-        ds.max_vals[j] = ds.data[j];
-    }
-    for (int i = 1; i < rows; i++) {
-        for (int j = 0; j < cols; j++) {
-            double val = ds.data[(size_t)i * (size_t)cols + (size_t)j];
-            if (val < ds.min_vals[j]) {
-                ds.min_vals[j] = val;
-            }
-            if (val > ds.max_vals[j]) {
-                ds.max_vals[j] = val;
-            }
-        }
-    }
-
-    // Shuffle (data + labels together)
-    assert(rows >= 1);
-    double* tmp = (double*)malloc(cols * sizeof(*tmp));
-    for (size_t i = 1; i < (size_t)rows; i++) {
+    for (size_t i = 1; i < num_entries; i++) {
         size_t swap_idx = rand() % i;
-        memcpy(tmp, ds.data + (i * cols), cols * sizeof(*ds.data));
-        memcpy(ds.data + (i * cols), ds.data + (swap_idx * cols),
-               cols * sizeof(*ds.data));
-        memcpy(ds.data + (swap_idx * cols), tmp, cols * sizeof(*ds.data));
-        double tmp_label    = ds.labels[i];
-        ds.labels[i]        = ds.labels[swap_idx];
-        ds.labels[swap_idx] = tmp_label;
+        memcpy(tmp_a, data_a + (i * stride_a), stride_a * sizeof(double));
+        memcpy(data_a + (i * stride_a), data_a + (swap_idx * stride_a),
+               stride_a * sizeof(double));
+        memcpy(data_a + (swap_idx * stride_a), tmp_a,
+               stride_a * sizeof(double));
+        memcpy(tmp_b, data_b + (i * stride_b), stride_b * sizeof(double));
+        memcpy(data_b + (i * stride_b), data_b + (swap_idx * stride_b),
+               stride_b * sizeof(double));
+        memcpy(data_b + (swap_idx * stride_b), tmp_b,
+               stride_b * sizeof(double));
     }
-    free(tmp);
-
-    // Train/Test Split
-    int train_len = (int)(train_percent * rows);
-    int test_len  = rows - train_len;
-
-    // Train DS
-    train->data     = (double*)malloc((size_t)train_len * (size_t)cols *
-                                      sizeof(*train->data));
-    train->labels   = (double*)malloc(train_len * sizeof(*train->labels));
-    train->min_vals = (double*)malloc(cols * sizeof(*train->min_vals));
-    train->max_vals = (double*)malloc(cols * sizeof(*train->max_vals));
-    if (!train->data || !train->labels || !train->min_vals ||
-        !train->max_vals) {
-        free(train->data);
-        free(train->labels);
-        free(train->min_vals);
-        free(train->max_vals);
-        free(ds.data);
-        free(ds.labels);
-        free(ds.min_vals);
-        free(ds.max_vals);
-        for (int i = 0; i < ds.label_strings_count; i++) {
-            free(ds.label_strings[i]);
-        }
-        free(ds.label_strings);
-        *train = {};
-        *test  = {};
-        return;
-    }
-    train->label_strings       = ds.label_strings;
-    train->label_strings_count = ds.label_strings_count;
-    train->dims                = 2;
-    train->shape               = (int*)malloc(2 * sizeof(int));
-    train->shape[0]            = train_len;
-    train->shape[1]            = cols;
-    train->timeseries          = false;
-    memcpy(train->min_vals, ds.min_vals, cols * sizeof(*train->min_vals));
-    memcpy(train->max_vals, ds.max_vals, cols * sizeof(*train->max_vals));
-    memcpy(train->data, ds.data, train_len * cols * sizeof(*train->data));
-    memcpy(train->labels, ds.labels, train_len * sizeof(*train->labels));
-
-    // Min/Max calcs for train only
-    for (int col = 0; col < cols; col++) {
-        train->min_vals[col] = train->data[col];
-        train->max_vals[col] = train->data[col];
-    }
-    for (int row = 1; row < train_len; row++) {
-        for (int col = 0; col < cols; col++) {
-            double val = train->data[row * cols + col];
-            if (val < train->min_vals[col]) {
-                train->min_vals[col] = val;
-            }
-            if (val > train->max_vals[col]) {
-                train->max_vals[col] = val;
-            }
-        }
-    }
-
-    // Test DS
-    test->data =
-        (double*)malloc((size_t)test_len * (size_t)cols * sizeof(*test->data));
-    test->labels   = (double*)malloc(test_len * sizeof(*test->labels));
-    test->min_vals = (double*)malloc(cols * sizeof(*test->min_vals));
-    test->max_vals = (double*)malloc(cols * sizeof(*test->max_vals));
-    if (!test->data || !test->labels || !test->min_vals || !test->max_vals) {
-        free(test->data);
-        free(test->labels);
-        free(test->min_vals);
-        free(test->max_vals);
-        free(train->data);
-        free(train->labels);
-        free(train->min_vals);
-        free(train->max_vals);
-        free(ds.data);
-        free(ds.labels);
-        free(ds.min_vals);
-        free(ds.max_vals);
-        for (int i = 0; i < ds.label_strings_count; i++) {
-            free(ds.label_strings[i]);
-        }
-        free(ds.label_strings);
-        *train = {};
-        *test  = {};
-        return;
-    }
-    test->label_strings       = ds.label_strings;
-    test->label_strings_count = ds.label_strings_count;
-    test->dims                = 2;
-    test->shape               = (int*)malloc(2 * sizeof(int));
-    test->shape[0]            = test_len;
-    test->shape[1]            = cols;
-    test->timeseries          = false;
-    memcpy(test->min_vals, ds.min_vals, cols * sizeof(*test->min_vals));
-    memcpy(test->max_vals, ds.max_vals, cols * sizeof(*test->max_vals));
-    memcpy(test->data, ds.data + (train_len * cols),
-           test_len * cols * sizeof(*test->data));
-    memcpy(test->labels, ds.labels + train_len,
-           test_len * sizeof(*test->labels));
-
-    // Min/Max calcs for test only
-    for (int col = 0; col < cols; col++) {
-        test->min_vals[col] = test->data[col];
-        test->max_vals[col] = test->data[col];
-    }
-    for (int row = 0; row < test_len; row++) {
-        for (int col = 0; col < cols; col++) {
-            double val = test->data[row * cols + col];
-            if (val < test->min_vals[col]) {
-                test->min_vals[col] = val;
-            }
-            if (val > test->max_vals[col]) {
-                test->max_vals[col] = val;
-            }
-        }
-    }
-
-    free(ds.min_vals);
-    free(ds.max_vals);
-    free(ds.data);
-    free(ds.labels);
-    free(ds.shape);
+    free(tmp_a);
+    free(tmp_b);
 }
 
-void load_dataset_single(const char* data_path, const char* labels_path,
-                         Dataset* out) {
-    *out           = {NULL, NULL, NULL, NULL, NULL, 0, 2, NULL, false};
-    FILE* f_data   = fopen(data_path, "r");
-    FILE* f_labels = fopen(labels_path, "r");
-    if (f_data == NULL || f_labels == NULL) {
-        if (f_data != NULL) {
-            fclose(f_data);
-        }
-        if (f_labels != NULL) {
-            fclose(f_labels);
-        }
+// Free all members of a RealData.
+void free_realdata(RealData rd) {
+    free(rd.data);
+    free(rd.min_vals);
+    free(rd.max_vals);
+    free(rd.shape);
+}
+
+// Helper: create an empty Dataset
+static Dataset make_empty_dataset() {
+    Dataset out;
+    out.data       = {NULL, NULL, NULL, 0, NULL};
+    out.labels     = {NULL, NULL, NULL, 0, NULL};
+    out.timeseries = 0;
+    return out;
+}
+
+// Generic split builder: handles both 2D and 3D, both classification and
+// regression.
+// - data: input features RealData (source)
+// - labels: label/target RealData (source),
+// - start, len: range within source
+// - out: output Dataset (filled)
+static void build_split_dataset(const RealData* data, const RealData* labels,
+                                int start, int len, Dataset* out) {
+    *out = make_empty_dataset();
+
+    size_t stride = entry_stride_doubles(data->shape, data->dims);
+
+    // Allocate data
+    out->data.data   = (double*)malloc((size_t)len * stride * sizeof(double));
+    out->labels.data = (double*)malloc(
+        (size_t)len * entry_stride_doubles(labels->shape, labels->dims) *
+        sizeof(double));
+    out->data.min_vals = (double*)malloc(data->shape[1] * sizeof(double));
+    out->data.max_vals = (double*)malloc(data->shape[1] * sizeof(double));
+
+    if (!out->data.data || !out->labels.data || !out->data.min_vals ||
+        !out->data.max_vals) {
+        free(out->data.data);
+        free(out->labels.data);
+        free(out->data.min_vals);
+        free(out->data.max_vals);
+        *out = make_empty_dataset();
         return;
     }
 
-    char line[4096 * 16];
-    int rows = 0;
-    while (fgets(line, sizeof(line), f_labels) != NULL) {
-        rows++;
-    }
-    out->shape    = (int*)malloc(2 * sizeof(int));
-    out->shape[0] = rows;
-
-    int cols = 0;
-    if (fgets(line, sizeof(line), f_data) != NULL) {
-        for (int i = 0; line[i] != '\0' && line[i] != '\n'; i++) {
-            if (line[i] == ',') {
-                cols++;
-            }
-        }
-        cols++;
-    }
-    out->shape[1] = cols;
-
-    out->data   = (double*)malloc((size_t)rows * (size_t)cols * sizeof(double));
-    out->labels = (double*)malloc(rows * sizeof(double));
-    out->min_vals = (double*)malloc(cols * sizeof(double));
-    out->max_vals = (double*)malloc(cols * sizeof(double));
-    if (out->data == NULL || out->labels == NULL || out->min_vals == NULL ||
-        out->max_vals == NULL) {
-        free(out->data);
-        free(out->labels);
-        free(out->min_vals);
-        free(out->max_vals);
-        free(out->shape);
-        fclose(f_data);
-        fclose(f_labels);
-        return;
-    }
-
-    // Read labels as strings
-    rewind(f_labels);
-    char** raw_labels = read_label_strings(f_labels, rows);
-
-    // Read data
-    rewind(f_data);
-    for (int i = 0; i < rows; i++) {
-        if (fgets(line, sizeof(line), f_data) != NULL) {
-            char* token = strtok(line, ",");
-            for (int j = 0; j < cols; j++) {
-                if (token != NULL) {
-                    out->data[(size_t)i * (size_t)cols + (size_t)j] =
-                        atof(token);
-                    token = strtok(NULL, ",");
-                }
-            }
+    // For regression labels: allocate min/max; for classification labels no
+    // min/max needed
+    if (labels->dims > 1) {
+        out->labels.min_vals =
+            (double*)malloc(labels->shape[1] * sizeof(double));
+        out->labels.max_vals =
+            (double*)malloc(labels->shape[1] * sizeof(double));
+        if (!out->labels.min_vals || !out->labels.max_vals) {
+            free(out->labels.min_vals);
+            free(out->labels.max_vals);
+            free(out->data.data);
+            free(out->labels.data);
+            free(out->data.min_vals);
+            free(out->data.max_vals);
+            *out = make_empty_dataset();
+            return;
         }
     }
-    fclose(f_data);
-    fclose(f_labels);
 
-    // Build unique sorted label mapping
-    build_label_mapping(raw_labels, rows, out->labels, &out->label_strings,
-                        &out->label_strings_count);
+    // Copy data subset
+    memcpy(out->data.data, data->data + (size_t)start * stride,
+           (size_t)len * stride * sizeof(double));
+    // Copy labels subset
+    size_t label_stride = entry_stride_doubles(labels->shape, labels->dims);
+    memcpy(out->labels.data, labels->data + (size_t)start * label_stride,
+           (size_t)len * label_stride * sizeof(double));
 
-    // Min/max calcs
-    for (int col = 0; col < cols; col++) {
-        out->min_vals[col] = out->data[col];
-        out->max_vals[col] = out->data[col];
+    // For regression: copy min/max for labels
+    if (labels->dims > 1) {
+        assert(out->labels.min_vals);
+        assert(labels->min_vals);
+        assert(out->labels.max_vals);
+        assert(labels->max_vals);
+        memcpy(out->labels.min_vals, labels->min_vals,
+               labels->shape[1] * sizeof(double));
+        memcpy(out->labels.max_vals, labels->max_vals,
+               labels->shape[1] * sizeof(double));
     }
-    for (int row = 1; row < out->shape[0]; row++) {
-        for (int col = 0; col < cols; col++) {
-            double val = out->data[row * cols + col];
-            if (val < out->min_vals[col]) {
-                out->min_vals[col] = val;
-            }
-            if (val > out->max_vals[col]) {
-                out->max_vals[col] = val;
-            }
-        }
+
+    // Set shape info
+    out->data.dims  = data->dims;
+    out->data.shape = (int*)malloc(data->dims * sizeof(int));
+    memcpy(out->data.shape, data->shape, data->dims * sizeof(int));
+    out->data.shape[0] = len;
+
+    out->labels.dims  = labels->dims;
+    out->labels.shape = (int*)malloc(labels->dims * sizeof(int));
+    memcpy(out->labels.shape, labels->shape, labels->dims * sizeof(int));
+    out->labels.shape[0] = len;
+
+    out->timeseries = (data->dims == 3);
+
+    // Recompute min/max on split data subset
+    compute_realdata_minmax(out->data);
+
+    // Normalize split data to [0,1] using split's min/max
+    normalize_realdata(out->data);
+
+    // For regression labels (dims > 1): compute and normalize
+    // Classification labels (dims=1) are integer indices, no normalization
+    // needed
+    if (labels->dims > 1) {
+        compute_realdata_minmax(out->labels);
+        normalize_realdata(out->labels);
     }
 }
 
-void load_dataset_2d(const char* data_path, const char* labels_path,
-                     double train_percent, Dataset* train, Dataset* test) {
-    assert(train_percent >= 0.0 && train_percent <= 1.0);
-    Dataset ds     = {NULL, NULL, NULL, NULL, NULL, 0, 3, NULL, false};
-    FILE* f_data   = fopen(data_path, "r");
-    FILE* f_labels = fopen(labels_path, "r");
-
-    if (f_data == NULL || f_labels == NULL) {
-        if (f_data != NULL) {
-            fclose(f_data);
-        }
-        if (f_labels != NULL) {
-            fclose(f_labels);
-        }
-        *train = {};
-        *test  = {};
+// Free a Dataset. All heap memory is freed.
+void free_dataset(Dataset* ds) {
+    if (!ds) {
         return;
     }
+    free_realdata(ds->data);
+    free_realdata(ds->labels);
+    ds->data.data       = NULL;
+    ds->data.min_vals   = NULL;
+    ds->data.max_vals   = NULL;
+    ds->data.shape      = NULL;
+    ds->labels.data     = NULL;
+    ds->labels.min_vals = NULL;
+    ds->labels.max_vals = NULL;
+    ds->labels.shape    = NULL;
+}
 
-    char line[4096 * 16];
-    int num_obs   = 0;
-    int non_empty = 0;
-    rewind(f_data);
-    while (fgets(line, sizeof(line), f_data) != NULL) {
-        int is_blank = 1;
-        for (int k = 0; line[k]; k++) {
-            if (line[k] != '\n' && line[k] != '\r' && line[k] != ' ') {
-                is_blank = 0;
-                break;
-            }
+// Load a single dataset (no shuffle, no split). Detects 2D vs 3D
+// via timeseries flag. Handles both classification and regression.
+// For classification: labels loaded as text strings mapped to indices.
+// For regression: labels loaded as numeric RealData.
+// Caller must free via free_dataset().
+std::pair<Dataset, std::vector<std::string>>
+load_dataset_single(const char* data_path, const char* labels_path,
+                    size_t timeseries, bool is_regression) {
+    fprintf(stderr, "%s\n", __FUNCTION__);
+    Dataset out = make_empty_dataset();
+    std::vector<std::string> label_strings;
+
+    RealData rd;
+    RealData label_rd;
+
+    rd = load_realdata_2d(data_path);
+    if (timeseries) {
+        assert(rd.dims == 2);
+        int current_len = rd.shape[0] * rd.shape[1];
+        int cols        = rd.shape[1];
+
+        int new_rows = rd.shape[0] / timeseries;
+        int new_len  = new_rows * timeseries * rd.shape[1];
+
+        if (current_len != new_len) {
+            fprintf(stderr,
+                    "Attempting to reshape [%d, %d] to [%d, %d, %d] failed. "
+                    "%d != %d\n",
+                    rd.shape[0], rd.shape[1], new_rows, (int)timeseries,
+                    rd.shape[1], current_len, new_len);
+            exit(1);
         }
-        if (!is_blank) {
-            non_empty++;
-        } else {
-            num_obs++;
+
+        rd.dims  = 3;
+        rd.shape = (int*)realloc(rd.shape, rd.dims * sizeof(*rd.shape));
+        if (!rd.shape) {
+            perror("realloc");
+            exit(1);
         }
-    }
-    if (non_empty > 0) {
-        num_obs++;
-    }
 
-    if (num_obs == 0) {
-        fclose(f_data);
-        fclose(f_labels);
-        *train = {};
-        *test  = {};
-        return;
+        rd.shape[0] = new_rows;
+        rd.shape[1] = (int)timeseries;
+        rd.shape[2] = cols;
     }
 
-    int input_features = non_empty / num_obs;
-    rewind(f_data);
+    // For 2D this is #columns, for 3D this is #features
+    rd.min_vals = (double*)malloc(rd.shape[1] * sizeof(*rd.min_vals));
+    rd.max_vals = (double*)malloc(rd.shape[1] * sizeof(*rd.max_vals));
+    assert(rd.min_vals);
+    assert(rd.max_vals);
 
-    int timesteps = 0;
-    while (fgets(line, sizeof(line), f_data) != NULL) {
-        int is_blank = 1;
-        for (int k = 0; line[k]; k++) {
-            if (line[k] != '\n' && line[k] != '\r' && line[k] != ' ') {
-                is_blank = 0;
-                break;
-            }
-        }
-        if (!is_blank) {
-            for (int i = 0; line[i]; i++) {
-                if (line[i] == ',') {
-                    timesteps++;
-                }
-            }
-            timesteps++;
-            break;
-        }
+    assert(rd.shape);
+    int count = rd.shape[0];
+
+    if (is_regression) {
+        // Regression: labels are numeric RealData.
+        // Always load as 2D — timeseries flag only affects input data
+        // structure, not label structure. Regression targets are
+        // per-observation (one vector per sample), not sequences.
+        label_rd = load_realdata_2d(labels_path);
+        label_rd.min_vals =
+            (double*)malloc(label_rd.shape[1] * sizeof(*label_rd.min_vals));
+        label_rd.max_vals =
+            (double*)malloc(label_rd.shape[1] * sizeof(*label_rd.max_vals));
+        label_strings = {};
+    } else {
+        // Classification: labels are text strings mapped to integer indices
+        auto label_result = load_textdata(labels_path, count);
+        label_rd          = std::move(label_result.first);
+        label_strings     = std::move(label_result.second);
     }
 
-    ds.shape    = (int*)malloc(3 * sizeof(int));
-    ds.shape[0] = num_obs;
-    ds.shape[1] = input_features;
-    ds.shape[2] = timesteps;
-
-    int block_size = input_features * timesteps;
-    int total_data = num_obs * block_size;
-    ds.data        = (double*)malloc(total_data * sizeof(double));
-    ds.labels      = (double*)malloc(num_obs * sizeof(double));
-    ds.min_vals    = (double*)malloc(input_features * sizeof(double));
-    ds.max_vals    = (double*)malloc(input_features * sizeof(double));
-
-    if (ds.data == NULL || ds.labels == NULL || ds.min_vals == NULL ||
-        ds.max_vals == NULL) {
-        free(ds.data);
-        free(ds.labels);
-        free(ds.min_vals);
-        free(ds.max_vals);
-        fclose(f_data);
-        fclose(f_labels);
-        *train = {};
-        *test  = {};
-        return;
+    if (rd.data && label_rd.data) {
+        out.data       = rd;
+        out.labels     = label_rd;
+        out.timeseries = timeseries;
+    } else {
+        assert(false);
+        free_realdata(rd);
+        free_realdata(label_rd);
     }
 
-    rewind(f_data);
-    rewind(f_labels);
+    return {out, std::move(label_strings)};
+}
 
-    // Read data
-    int obs_idx  = 0;
-    int line_cnt = 0;
-    while (fgets(line, sizeof(line), f_data) != NULL) {
-        int is_blank = 1;
-        for (int k = 0; line[k]; k++) {
-            if (line[k] != '\n' && line[k] != '\r' && line[k] != ' ') {
-                is_blank = 0;
-                break;
-            }
-        }
-        if (is_blank) {
-            obs_idx++;
-            line_cnt = 0;
-            continue;
-        }
-        char* token = strtok(line, ",");
-        for (int c = 0; c < timesteps && token != NULL; c++) {
-            ds.data[(obs_idx * block_size) + (line_cnt * timesteps) + c] =
-                atof(token);
-            token = strtok(NULL, ",");
-        }
-        line_cnt++;
+// Shuffle and split a loaded dataset. Shuffles in-place, splits into
+// train/test. Handles both classification and regression via dims check.
+// Caller must free via free_dataset().
+void split_dataset(Dataset* source, double train_percent, Dataset* train,
+                   Dataset* test) {
+    *train = make_empty_dataset();
+    *test  = make_empty_dataset();
+    assert(train_percent >= 0.00 && train_percent <= 1.00);
+
+    if (!source->data.data || !source->labels.data) {
+        return; // empty source
     }
 
-    // Read labels as strings
-    rewind(f_labels);
-    char** raw_labels = read_label_strings(f_labels, num_obs);
+    // Shuffle in-place (both data and labels together)
+    shuffle_two(source->data.data, source->data.shape, source->data.dims,
+                source->labels.data, source->labels.shape, source->labels.dims);
 
-    fclose(f_data);
-    fclose(f_labels);
-
-    // Build unique sorted label mapping
-    build_label_mapping(raw_labels, num_obs, ds.labels, &ds.label_strings,
-                        &ds.label_strings_count);
-
-    // Min/max
-    for (int feature = 0; feature < input_features; feature++) {
-        ds.min_vals[feature] = DBL_MAX;
-        ds.max_vals[feature] = -DBL_MAX;
-    }
-    for (int obs = 0; obs < num_obs; obs++) {
-        for (int feature = 0; feature < input_features; feature++) {
-            for (int column = 0; column < timesteps; column++) {
-                double val = ds.data[(obs * block_size) +
-                                     (feature * timesteps) + column];
-                if (val < ds.min_vals[feature]) {
-                    ds.min_vals[feature] = val;
-                }
-                if (val > ds.max_vals[feature]) {
-                    ds.max_vals[feature] = val;
-                }
-            }
-        }
-    }
-
-    // Shuffle
-    double* tmp_block = (double*)malloc(block_size * sizeof(double));
-    for (int i = 1; i < num_obs; i++) {
-        int swap_idx = rand() % i;
-        memcpy(tmp_block, ds.data + (i * block_size),
-               block_size * sizeof(double));
-        memcpy(ds.data + (i * block_size), ds.data + (swap_idx * block_size),
-               block_size * sizeof(double));
-        memcpy(ds.data + (swap_idx * block_size), tmp_block,
-               block_size * sizeof(double));
-        double tmp_label    = ds.labels[i];
-        ds.labels[i]        = ds.labels[swap_idx];
-        ds.labels[swap_idx] = tmp_label;
-    }
-    free(tmp_block);
-
+    int num_obs   = source->data.shape[0];
     int train_len = (int)(train_percent * num_obs);
     int test_len  = num_obs - train_len;
 
-    train->data     = (double*)malloc(train_len * block_size * sizeof(double));
-    train->labels   = (double*)malloc(train_len * sizeof(double));
-    train->min_vals = (double*)malloc(input_features * sizeof(double));
-    train->max_vals = (double*)malloc(input_features * sizeof(double));
-    if (!train->data || !train->labels || !train->min_vals ||
-        !train->max_vals) {
-        free(train->data);
-        free(train->labels);
-        free(train->min_vals);
-        free(train->max_vals);
-        free(ds.data);
-        free(ds.labels);
-        free(ds.min_vals);
-        free(ds.max_vals);
-        for (int i = 0; i < ds.label_strings_count; i++) {
-            free(ds.label_strings[i]);
-        }
-        free(ds.label_strings);
-        *train = {};
-        *test  = {};
-        return;
-    }
-    train->label_strings       = ds.label_strings;
-    train->label_strings_count = ds.label_strings_count;
-    train->dims                = 3;
-    train->shape               = (int*)malloc(3 * sizeof(int));
-    train->shape[0]            = train_len;
-    train->shape[1]            = input_features;
-    train->shape[2]            = timesteps;
-    train->timeseries          = true;
-    memcpy(train->data, ds.data, train_len * block_size * sizeof(double));
-    memcpy(train->labels, ds.labels, train_len * sizeof(double));
-    memcpy(train->min_vals, ds.min_vals, input_features * sizeof(double));
-    memcpy(train->max_vals, ds.max_vals, input_features * sizeof(double));
-
-    test->data     = (double*)malloc(test_len * block_size * sizeof(double));
-    test->labels   = (double*)malloc(test_len * sizeof(double));
-    test->min_vals = (double*)malloc(input_features * sizeof(double));
-    test->max_vals = (double*)malloc(input_features * sizeof(double));
-    if (!test->data || !test->labels || !test->min_vals || !test->max_vals) {
-        free(test->data);
-        free(test->labels);
-        free(test->min_vals);
-        free(test->max_vals);
-        free(train->data);
-        free(train->labels);
-        free(train->min_vals);
-        free(train->max_vals);
-        free(ds.data);
-        free(ds.labels);
-        free(ds.min_vals);
-        free(ds.max_vals);
-        for (int i = 0; i < ds.label_strings_count; i++) {
-            free(ds.label_strings[i]);
-        }
-        free(ds.label_strings);
-        *train = {};
-        *test  = {};
-        return;
-    }
-    test->label_strings       = ds.label_strings;
-    test->label_strings_count = ds.label_strings_count;
-    test->dims                = 3;
-    test->shape               = (int*)malloc(3 * sizeof(int));
-    test->shape[0]            = test_len;
-    test->shape[1]            = input_features;
-    test->shape[2]            = timesteps;
-    test->timeseries          = true;
-    memcpy(test->data, ds.data + train_len * block_size,
-           test_len * block_size * sizeof(double));
-    memcpy(test->labels, ds.labels + train_len, test_len * sizeof(double));
-    memcpy(test->min_vals, ds.min_vals, input_features * sizeof(double));
-    memcpy(test->max_vals, ds.max_vals, input_features * sizeof(double));
-
-    free(ds.data);
-    free(ds.labels);
-    free(ds.min_vals);
-    free(ds.max_vals);
-    free(ds.shape);
+    build_split_dataset(&source->data, &source->labels, 0, train_len, train);
+    build_split_dataset(&source->data, &source->labels, train_len, test_len,
+                        test);
 }
 
-void load_dataset_2d_single(const char* data_path, const char* labels_path,
-                            Dataset* out) {
-    *out           = {NULL, NULL, NULL, NULL, NULL, 0, 3, NULL, false};
-    FILE* f_data   = fopen(data_path, "r");
-    FILE* f_labels = fopen(labels_path, "r");
-
-    if (f_data == NULL || f_labels == NULL) {
-        if (f_data != NULL) {
-            fclose(f_data);
-        }
-        if (f_labels != NULL) {
-            fclose(f_labels);
-        }
-        return;
-    }
-
-    char line[4096 * 16];
-    int num_obs   = 0;
-    int non_empty = 0;
-    rewind(f_data);
-    while (fgets(line, sizeof(line), f_data) != NULL) {
-        int is_blank = 1;
-        for (int k = 0; line[k]; k++) {
-            if (line[k] != '\n' && line[k] != '\r' && line[k] != ' ') {
-                is_blank = 0;
-                break;
-            }
-        }
-        if (!is_blank) {
-            non_empty++;
-        } else {
-            num_obs++;
-        }
-    }
-    if (non_empty > 0) {
-        num_obs++;
-    }
-
-    if (num_obs == 0) {
-        fclose(f_data);
-        fclose(f_labels);
-        return;
-    }
-
-    int input_features = non_empty / num_obs;
-    rewind(f_data);
-
-    int timesteps = 0;
-    while (fgets(line, sizeof(line), f_data) != NULL) {
-        int is_blank = 1;
-        for (int k = 0; line[k]; k++) {
-            if (line[k] != '\n' && line[k] != '\r' && line[k] != ' ') {
-                is_blank = 0;
-                break;
-            }
-        }
-        if (!is_blank) {
-            for (int i = 0; line[i]; i++) {
-                if (line[i] == ',') {
-                    timesteps++;
-                }
-            }
-            timesteps++;
-            break;
-        }
-    }
-
-    out->shape    = (int*)malloc(3 * sizeof(int));
-    out->shape[0] = num_obs;
-    out->shape[1] = input_features;
-    out->shape[2] = timesteps;
-
-    int block_size = input_features * timesteps;
-    int total_data = num_obs * block_size;
-    out->data      = (double*)malloc(total_data * sizeof(double));
-    out->labels    = (double*)malloc(num_obs * sizeof(double));
-    out->min_vals  = (double*)malloc(input_features * sizeof(double));
-    out->max_vals  = (double*)malloc(input_features * sizeof(double));
-
-    if (out->data == NULL || out->labels == NULL || out->min_vals == NULL ||
-        out->max_vals == NULL) {
-        free(out->data);
-        free(out->labels);
-        free(out->min_vals);
-        free(out->max_vals);
-        fclose(f_data);
-        fclose(f_labels);
-        return;
-    }
-
-    rewind(f_data);
-    rewind(f_labels);
-
-    // Read data
-    int obs_idx  = 0;
-    int line_cnt = 0;
-    while (fgets(line, sizeof(line), f_data) != NULL) {
-        int is_blank = 1;
-        for (int k = 0; line[k]; k++) {
-            if (line[k] != '\n' && line[k] != '\r' && line[k] != ' ') {
-                is_blank = 0;
-                break;
-            }
-        }
-        if (is_blank) {
-            obs_idx++;
-            line_cnt = 0;
-            continue;
-        }
-        char* token = strtok(line, ",");
-        for (int c = 0; c < timesteps && token != NULL; c++) {
-            out->data[(obs_idx * block_size) + (line_cnt * timesteps) + c] =
-                atof(token);
-            token = strtok(NULL, ",");
-        }
-        line_cnt++;
-    }
-
-    // Read labels as strings
-    rewind(f_labels);
-    char** raw_labels = read_label_strings(f_labels, num_obs);
-
-    fclose(f_data);
-    fclose(f_labels);
-
-    // Build unique sorted label mapping
-    build_label_mapping(raw_labels, num_obs, out->labels, &out->label_strings,
-                        &out->label_strings_count);
-
-    // Min/max
-    for (int feature = 0; feature < input_features; feature++) {
-        out->min_vals[feature] = DBL_MAX;
-        out->max_vals[feature] = -DBL_MAX;
-    }
-    for (int obs = 0; obs < num_obs; obs++) {
-        for (int feature = 0; feature < input_features; feature++) {
-            for (int column = 0; column < timesteps; column++) {
-                double val = out->data[(obs * block_size) +
-                                       (feature * timesteps) + column];
-                if (val < out->min_vals[feature]) {
-                    out->min_vals[feature] = val;
-                }
-                if (val > out->max_vals[feature]) {
-                    out->max_vals[feature] = val;
-                }
-            }
-        }
-    }
+// Full dataset loading: load + shuffle + split into train/test.
+// Convenience wrapper around load_dataset_single + split_dataset.
+// label_strings filled with unique label names (empty for regression).
+// For classification: labels_path contains text labels.
+// For regression: labels_path contains numeric target data.
+void load_dataset(const char* data_path, const char* labels_path,
+                  double train_percent, size_t timeseries, Dataset* train,
+                  Dataset* test, std::vector<std::string>& label_strings,
+                  bool is_regression) {
+    auto result =
+        load_dataset_single(data_path, labels_path, timeseries, is_regression);
+    split_dataset(&result.first, train_percent, train, test);
+    free_dataset(&result.first);
+    label_strings = std::move(result.second);
 }

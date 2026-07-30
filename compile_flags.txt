@@ -9,3 +9,5 @@ vendor
 -Wall
 -Wextra
 -std=c++11
+-DOPENCL
+-xc++

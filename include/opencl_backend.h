@@ -4,9 +4,9 @@
 
 #include "backend.h"
 #include "opencl.hpp"
+#include "shared.h"
 #include <chrono>
 #include <memory>
-#include <utility>
 #include <vector>
 
 class OpenclBackend : public TrainingBackend {
@@ -30,11 +30,14 @@ class OpenclBackend : public TrainingBackend {
     size_t batch_size;
     double learning_rate;
     double decay_rate;
+    LossFunc loss_func;
 
     // GPU buffers
     std::unique_ptr<Memory<short>> x;
     std::unique_ptr<Memory<double>> data;
+    std::unique_ptr<Memory<double>> targets;
     std::unique_ptr<Memory<double>> test_data;
+    std::unique_ptr<Memory<double>> test_targets;
     std::unique_ptr<Memory<short>> v_thresh;
     std::unique_ptr<Memory<short>> weights;
     std::unique_ptr<Memory<uint>> delays;

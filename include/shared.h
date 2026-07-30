@@ -18,15 +18,15 @@ struct TrainingBundle {
     std::vector<double> dL_ds;
     std::vector<double> softmax_out;
 
-    Eigen::VectorXd future_mem_grad_;
+    Eigen::VectorXd future_mem_grad;
     Eigen::Matrix<double, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor> sgh;
-    Eigen::VectorXd dL_dV_;
-    Eigen::VectorXd v_pre_t_;
-    Eigen::VectorXd dV_post_dV_pre_;
-    Eigen::VectorXd dV_post_ds_t_;
-    Eigen::VectorXd ds_t_dV_pre_;
-    Eigen::VectorXd dV_leak_dV_t1_;
-    Eigen::VectorXd grad_;
+    Eigen::VectorXd dL_dV;
+    Eigen::VectorXd v_pre_t;
+    Eigen::VectorXd dV_post_dV_pre;
+    Eigen::VectorXd dV_post_ds_t;
+    Eigen::VectorXd ds_t_dV_pre;
+    Eigen::VectorXd dV_leak_dV_t1;
+    Eigen::VectorXd grad;
 
     double rho;
     double tau;
@@ -43,6 +43,8 @@ struct EvaluationResults {
     double loss;
 };
 
+enum class LossFunc { CCE, MSE };
+
 struct NetworkConfiguration {
     neuro::Network* n;
 
@@ -55,7 +57,7 @@ struct NetworkConfiguration {
     size_t max_outgoing;
 
     size_t timesteps;
-    bool timeseries;
+    size_t timeseries;
 
     double min_potential;
     bool leak;
@@ -65,4 +67,5 @@ struct NetworkConfiguration {
     double min_weight;
     double max_weight;
     double spike_value_factor;
+    LossFunc loss_func;
 };

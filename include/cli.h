@@ -1,5 +1,6 @@
 #pragma once
 
+#include "shared.h"
 #include <cstddef>
 #include <string>
 
@@ -11,7 +12,8 @@ struct CliConfig {
     std::string train_label_file;
     std::string test_data_file;
     std::string test_label_file;
-    bool timeseries         = false;
+    size_t timeseries       = 0;
+    LossFunc loss_func      = LossFunc::CCE;
     double connectivity     = 0.2;
     double learning_rate    = 0.008;
     double decay_rate       = 0.0001;
@@ -24,14 +26,15 @@ struct CliConfig {
     size_t batch_size       = 1;
     double training_percent = 0.8;
     std::string network_json_out;
-    size_t threads      = 1;
-    bool show_help      = false;
+    size_t threads        = 1;
+    bool show_help        = false;
     bool confusion_matrix = false;
 #ifdef OPENCL
     bool opencl = false;
 #endif
     size_t max_delay          = 7;
     double weight_init_stddev = 0.1;
+    bool regression           = false;
 };
 
 int parse_cli(int argc, char* argv[], CliConfig* cfg);

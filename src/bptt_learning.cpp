@@ -1,11 +1,10 @@
 #include "backend.h"
 #include "cli.h"
-#include "data_utils.h"
 #include "evaluation.h"
 #include "network_setup.h"
 #include "network_utils.h"
 #include "shared.h"
-#include "training.h"
+#include <algorithm>
 #include <cassert>
 #include <cfloat>
 #include <cmath>
@@ -15,7 +14,6 @@
 #include <cstring>
 #include <ctime>
 #include <string>
-#include <algorithm>
 #include <utility>
 #include <vector>
 
@@ -23,16 +21,33 @@ using namespace std;
 using namespace neuro;
 
 static void print_epoch_log(size_t epoch, size_t total_epochs,
-                            const TrainingStats& stats, double best_train_acc,
-                            double best_test_acc, bool has_test_data) {
-    if (has_test_data) {
-        printf("E%4zu/%zu  TrL: %8g TrA: %7.3f  TeL: %8g TeA: %7.3f  BestTeA: "
-               "%7.3f\n",
-               epoch + 1, total_epochs, stats.train_loss, stats.train_acc,
-               stats.test_loss, stats.test_acc, best_test_acc);
+                            const TrainingStats& stats,
+                            double best_train_metric, double best_test_metric,
+                            bool has_test_data, bool is_regression) {
+    if (is_regression) {
+        if (has_test_data) {
+            printf("E%4zu/%zu  TrL: %8g  TeL: %8g  BestTeL: "
+                   "%8g\n",
+                   epoch + 1, total_epochs, stats.train_loss, stats.test_loss,
+                   best_test_metric);
+        } else {
+            printf("E%4zu/%zu  TrL: %8g  BestTrL: "
+                   "%8g\n",
+                   epoch + 1, total_epochs, stats.train_loss,
+                   best_train_metric);
+        }
     } else {
-        printf("E%4zu/%zu  TrL: %8g TrA: %7.3f  BestTrA: %7.3f\n", epoch + 1,
-               total_epochs, stats.train_loss, stats.train_acc, best_train_acc);
+        if (has_test_data) {
+            printf(
+                "E%4zu/%zu  TrL: %8g TrA: %7.3f  TeL: %8g TeA: %7.3f  BestTeA: "
+                "%7.3f\n",
+                epoch + 1, total_epochs, stats.train_loss, stats.train_acc,
+                stats.test_loss, stats.test_acc, best_test_metric);
+        } else {
+            printf("E%4zu/%zu  TrL: %8g TrA: %7.3f  BestTrA: %7.3f\n",
+                   epoch + 1, total_epochs, stats.train_loss, stats.train_acc,
+                   best_train_metric);
+        }
     }
 }
 
@@ -75,66 +90,55 @@ int main(int argc, char* argv[]) {
 
     Dataset train;
     Dataset test;
-    if (cfg.timeseries) {
-        if (have_simple) {
-            load_dataset_2d(cfg.data_file.c_str(), cfg.label_file.c_str(),
-                            cfg.training_percent, &train, &test);
-        } else {
-            load_dataset_2d_single(cfg.train_data_file.c_str(),
-                                   cfg.train_label_file.c_str(), &train);
-            load_dataset_2d_single(cfg.test_data_file.c_str(),
-                                   cfg.test_label_file.c_str(), &test);
-        }
+    std::vector<std::string> label_strings;
+    size_t train_labels;
+    size_t test_labels;
+
+    if (have_simple) {
+        load_dataset(cfg.data_file.c_str(), cfg.label_file.c_str(),
+                     cfg.training_percent, cfg.timeseries, &train, &test,
+                     label_strings, cfg.regression);
+
+        train_labels = test_labels = label_strings.size();
     } else {
-        if (have_simple) {
-            load_dataset(cfg.data_file.c_str(), cfg.label_file.c_str(),
-                         cfg.training_percent, &train, &test);
-        } else {
-            load_dataset_single(cfg.train_data_file.c_str(),
-                                cfg.train_label_file.c_str(), &train);
-            load_dataset_single(cfg.test_data_file.c_str(),
-                                cfg.test_label_file.c_str(), &test);
-        }
-    }
+        auto train_pair = load_dataset_single(cfg.train_data_file.c_str(),
+                                              cfg.train_label_file.c_str(),
+                                              cfg.timeseries, cfg.regression);
+        train           = train_pair.first;
+        label_strings   = std::move(train_pair.second);
+        train_labels    = label_strings.size();
 
-    size_t train_labels = label_count(&train);
-    size_t test_labels  = label_count(&test);
-    assert(test.shape[0] == 0 || train_labels == test_labels);
+        auto test_pair = load_dataset_single(cfg.test_data_file.c_str(),
+                                             cfg.test_label_file.c_str(),
+                                             cfg.timeseries, cfg.regression);
+        test           = test_pair.first;
+        test_labels    = test_pair.second.size();
 
-    /* Verify train and test label mappings match (same labels, same order)
-     */
-    if (test.shape[0] > 0) {
-        for (int i = 0; i < (int)train_labels; i++) {
-            if (strcmp(train.label_strings[i], test.label_strings[i])) {
-                fprintf(stderr, "Mismatch between train & test labels:\n");
-
-                fprintf(stderr, "Train: [");
-                for (size_t i = 0; i < train_labels; i++) {
-                    fprintf(stderr, "%s", train.label_strings[i]);
-
-                    if (i != train_labels - 1) {
-                        fprintf(stderr, " ");
-                    }
-                }
-                fprintf(stderr, "]\n");
-
-                fprintf(stderr, "Test: [");
-                for (size_t i = 0; i < test_labels; i++) {
-                    fprintf(stderr, "%s", test.label_strings[i]);
-
-                    if (i != test_labels - 1) {
-                        fprintf(stderr, " ");
-                    }
-                }
-                fprintf(stderr, "]\n");
-                exit(1);
+        // Normalize regression labels for split path (build_split_dataset
+        // handles normalization for the simple path)
+        if (cfg.regression) {
+            if (train.labels.data && train.labels.shape) {
+                compute_realdata_minmax(train.labels);
+                normalize_realdata(train.labels);
+            }
+            if (test.labels.data && test.labels.shape) {
+                compute_realdata_minmax(test.labels);
+                normalize_realdata(test.labels);
             }
         }
+
+        // Verify train and test label mappings match (same labels, same
+        // order) — only for classification
+        if (!cfg.regression && test.data.shape[0] > 0) {
+            assert(test_pair.second == label_strings);
+        }
     }
 
-    size_t input_neurons =
-        (cfg.timeseries) ? train.shape[1] * 2 : train.shape[1] * 2;
-    size_t output_neurons = train_labels;
+    assert(test.data.shape[0] == 0 || train_labels == test_labels);
+
+    size_t input_neurons = train.data.shape[1] * 2;
+    size_t output_neurons =
+        cfg.regression ? (size_t)train.labels.shape[1] : train_labels;
     size_t hidden_neurons = cfg.hidden_neurons;
     size_t total_neurons  = input_neurons + hidden_neurons + output_neurons;
 
@@ -187,7 +191,7 @@ int main(int argc, char* argv[]) {
                        output_neurons, total_neurons, neuron_count,
                        synapse_count, discrete, min_potential, min_weight,
                        max_weight, max_threshold, leak_prop, scale,
-                       scale_factor, effective_max_delay);
+                       scale_factor, effective_max_delay, cfg.regression);
 
     NetworkConfiguration nc = {
         .n              = n,
@@ -208,6 +212,7 @@ int main(int argc, char* argv[]) {
         .min_weight     = min_weight,
         .max_weight     = max_weight,
         .spike_value_factor = spike_value_factor,
+        .loss_func          = cfg.loss_func,
     };
 
     // Compute max_in/outgoing from network topology
@@ -231,8 +236,8 @@ int main(int argc, char* argv[]) {
     // Create backend via factory
     auto backend = create_backend(cfg, nc, train, test);
 
-    // Determine which accuracy metric to track for export
-    bool has_test_data = test.shape[0] > 0;
+    // Determine which metric to track for export
+    bool has_test_data = test.data.shape && test.data.shape[0] > 0;
 
     // Training loop
     // "Best" stats are updated when a new best network is found, not
@@ -247,10 +252,20 @@ int main(int argc, char* argv[]) {
         backend->do_one_epoch(epoch);
         stats = backend->get_stats();
 
-        // Export only on new high accuracy
-        double cur_best_acc  = has_test_data ? stats.test_acc : stats.train_acc;
-        double prev_best_acc = has_test_data ? best_test_acc : best_train_acc;
-        if (cur_best_acc > prev_best_acc) {
+        // Export on improved accuracy (classification) or reduced loss
+        // (regression)
+        bool improved = false;
+        if (cfg.regression) {
+            double cur_loss =
+                has_test_data ? stats.test_loss : stats.train_loss;
+            double prev_loss = has_test_data ? best_test_loss : best_train_loss;
+            improved         = cur_loss < prev_loss;
+        } else {
+            double cur_acc  = has_test_data ? stats.test_acc : stats.train_acc;
+            double prev_acc = has_test_data ? best_test_acc : best_train_acc;
+            improved        = cur_acc > prev_acc;
+        }
+        if (improved) {
             best_train_acc  = stats.train_acc;
             best_train_loss = stats.train_loss;
             best_test_acc   = stats.test_acc;
@@ -260,19 +275,22 @@ int main(int argc, char* argv[]) {
             backend->update_weights(n);
 
             export_network(n, cfg, best_train_acc, best_train_loss,
-                           best_test_acc, best_test_loss,
-                           (const char**)train.label_strings,
-                           (int)train_labels);
+                           best_test_acc, best_test_loss, label_strings,
+                           cfg.regression);
         }
 
-        print_epoch_log(epoch, cfg.epochs, stats, best_train_acc, best_test_acc,
-                        has_test_data);
+        double train_metric = cfg.regression ? best_train_loss : best_train_acc;
+        double test_metric  = cfg.regression ? best_test_loss : best_test_acc;
+        print_epoch_log(epoch, cfg.epochs, stats, train_metric, test_metric,
+                        has_test_data, cfg.regression);
     }
 
-    /* Confusion matrix on best saved network (if flag is set) */
-    if (cfg.confusion_matrix) {
-        run_confusion_matrix(cfg, train, test, input_neurons, hidden_neurons,
-                             output_neurons, cfg.timesteps, cfg.timeseries);
+    // Confusion matrix on best saved network (if flag is set, classification
+    // only)
+    if (cfg.confusion_matrix && !cfg.regression) {
+        run_confusion_matrix(cfg, train, test, label_strings, input_neurons,
+                             hidden_neurons, output_neurons, cfg.timesteps,
+                             cfg.timeseries);
     }
 
     // Finalize: sync weights to network
@@ -281,34 +299,9 @@ int main(int argc, char* argv[]) {
     // Cleanup
     backend.reset();
     delete n;
-    free(train.data);
-    free(train.labels);
-    free(train.min_vals);
-    free(train.max_vals);
-    free(train.shape);
 
-    bool free_train = train.label_strings != test.label_strings;
-
-    for (int i = 0; i < train.label_strings_count; i++) {
-        free(train.label_strings[i]);
-        train.label_strings[i] = NULL;
-    }
-    free(train.label_strings);
-    train.label_strings = NULL;
-
-    if (free_train) {
-        for (int i = 0; i < test.label_strings_count; i++) {
-            free(test.label_strings[i]);
-            test.label_strings[i] = NULL;
-        }
-        free(test.label_strings);
-    }
-
-    free(test.data);
-    free(test.labels);
-    free(test.min_vals);
-    free(test.max_vals);
-    free(test.shape);
+    free_dataset(&train);
+    free_dataset(&test);
 
     return 0;
 }

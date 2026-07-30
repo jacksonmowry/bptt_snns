@@ -40,7 +40,8 @@ void load_network(neuro::Processor** pp, neuro::Network* net) {
 void export_network(neuro::Network* n, const CliConfig& cfg,
                     double best_train_acc, double best_train_loss,
                     double best_test_acc, double best_test_loss,
-                    const char** label_strings, int label_strings_count) {
+                    const std::vector<std::string>& label_strings,
+                    bool is_regression) {
     if (cfg.network_json_out.empty()) {
         return;
     }
@@ -51,12 +52,13 @@ void export_network(neuro::Network* n, const CliConfig& cfg,
     meta["best_train_acc"]  = best_train_acc;
     meta["best_test_acc"]   = best_test_acc;
     meta["epoch"]           = cfg.epochs;
+    meta["regression"]      = is_regression;
 
-    /* Export label mapping */
-    if (label_strings && label_strings_count > 0) {
+    // Export label mapping (classification only)
+    if (!label_strings.empty()) {
         nlohmann::json labels_json;
-        for (int i = 0; i < label_strings_count; i++) {
-            labels_json.push_back(label_strings[i]);
+        for (const auto& s : label_strings) {
+            labels_json.push_back(s);
         }
         meta["label_mapping"] = labels_json;
     }

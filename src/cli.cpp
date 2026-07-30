@@ -149,10 +149,13 @@ int parse_cli(int argc, char* argv[], CliConfig* cfg) {
                                  cfg->test_label_file.c_str());
             }
         } else if (arg == "--timeseries" || arg == "-b") {
-            if (++i >= argc) {
-                return cli_error("--timeseries requires a value (true/false)");
+            unsigned long v;
+            int rc = parse_ulong_arg(i, argc, argv, &v, "timeseries");
+            if (rc) {
+                return rc;
             }
-            cfg->timeseries = (std::string(argv[i]) == "true");
+
+            cfg->timeseries = v;
         } else if (arg == "--connectivity" || arg == "-c" || arg == "-S") {
             double v;
             int rc = parse_double_arg(i, argc, argv, &v, "connectivity");
@@ -302,6 +305,26 @@ int parse_cli(int argc, char* argv[], CliConfig* cfg) {
                 return cli_error("--max_delay must be > 0");
             }
             cfg->max_delay = v;
+        } else if (arg == "--regression") {
+            if (++i >= argc) {
+                return cli_error("--regression requires a value (true/false)");
+            }
+            cfg->regression = (std::string(argv[i]) == "true");
+        } else if (arg == "--loss") {
+            if (++i >= argc) {
+                return cli_error("--loss requires a value (cce/mse)");
+            }
+            std::string loss_str = argv[i];
+            if (loss_str == "mse") {
+                cfg->loss_func  = LossFunc::MSE;
+                cfg->regression = true;
+            } else if (loss_str == "cce" || loss_str == "cross_entropy") {
+                cfg->loss_func = LossFunc::CCE;
+            } else {
+                return cli_error(
+                    "--loss: unknown value '%s' (must be 'cce' or 'mse')",
+                    argv[i]);
+            }
         } else if (arg == "--weight_init_stddev") {
             double v;
             int rc = parse_double_arg(i, argc, argv, &v, "weight_init_stddev");
@@ -363,10 +386,18 @@ void print_usage(const char* prog) {
         stderr,
         " N/A, --opencl                        Enable OpenCL Acceleration\n");
 #endif
-    fprintf(stderr, "  -D, --max_delay          UINT         Max synapse delay\n");
-    fprintf(stderr, " N/A, --weight_init_stddev FLOAT        Weight init std dev (>0)\n");
-    fprintf(stderr, "  -h, --help                          Show this help\n");
     fprintf(stderr,
-            "  -m, --confusion_matrix BOOL         Compute confusion matrix on best\n"
-            "                                      saved network after training\n");
+            "  -D, --max_delay          UINT         Max synapse delay\n");
+    fprintf(stderr,
+            "  --weight_init_stddev FLOAT        Weight init std dev (>0)\n");
+    fprintf(stderr, "  --regression               BOOL        Enable "
+                    "regression mode (loads 2 real data files)\n");
+    fprintf(stderr, "  --loss              STRING         Loss function: 'cce' "
+                    "or 'mse' (default: cce)\n");
+    fprintf(stderr, "  -h, --help                          Show this help\n");
+    fprintf(
+        stderr,
+        "  -m, --confusion_matrix BOOL         Compute confusion matrix on "
+        "best\n"
+        "                                      saved network after training\n");
 }

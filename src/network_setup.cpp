@@ -15,7 +15,7 @@ neuro::Network* load_and_init_network(
     double& decay_rate, double& tau, double& rho, size_t& timesteps,
     size_t& hidden_neurons, unsigned long& seed, size_t& epochs,
     size_t& batch_size, double& training_percent, size_t& threads,
-    bool& timeseries, size_t& max_delay, double& weight_init_stddev) {
+    size_t& timeseries, size_t& max_delay, double& weight_init_stddev) {
     json emptynet;
     std::ifstream fin(json_file);
     fin >> emptynet;
@@ -80,7 +80,7 @@ neuro::Network* load_and_init_network(
             override_double("training_percent", training_percent,
                             "--training_percent");
             override_size("threads", threads, "--threads");
-            override_bool("timeseries", timeseries, "--timeseries");
+            override_size("timeseries", timeseries, "--timeseries");
             override_size("max_delay", max_delay, "--max_delay");
             override_double("weight_init_stddev", weight_init_stddev,
                             "--weight_init_stddev");
@@ -103,7 +103,8 @@ void build_run_metadata(neuro::Network* n, int argc, char* argv[],
                         bool discrete, double min_potential, double min_weight,
                         double max_weight, double max_threshold,
                         const std::string& leak_prop, int scale,
-                        double scale_factor, size_t effective_max_delay) {
+                        double scale_factor, size_t effective_max_delay,
+                        bool is_regression) {
     // CLI arguments
     json cli_args = json::array();
     for (int i = 1; i < argc; i++) {
@@ -176,23 +177,56 @@ void build_run_metadata(neuro::Network* n, int argc, char* argv[],
     {
         json train_min = json::array();
         json train_max = json::array();
-        for (int i = 0; i < train->shape[1]; i++) {
-            train_min.push_back(train->min_vals[i]);
-            train_max.push_back(train->max_vals[i]);
+        for (int i = 0; i < train->data.shape[1]; i++) {
+            train_min.push_back(train->data.min_vals[i]);
+            train_max.push_back(train->data.max_vals[i]);
         }
         run_metadata["train_data_min"] = train_min;
         run_metadata["train_data_max"] = train_max;
     }
     // Test data min/max arrays (omit if test set empty)
-    if (test->shape[0] > 0) {
+    if (test->data.shape[0] > 0) {
         json test_min = json::array();
         json test_max = json::array();
-        for (int i = 0; i < test->shape[1]; i++) {
-            test_min.push_back(test->min_vals[i]);
-            test_max.push_back(test->max_vals[i]);
+        for (int i = 0; i < test->data.shape[1]; i++) {
+            test_min.push_back(test->data.min_vals[i]);
+            test_max.push_back(test->data.max_vals[i]);
         }
         run_metadata["test_data_min"] = test_min;
         run_metadata["test_data_max"] = test_max;
+    }
+
+    // Regression label stats (both train and test)
+    if (is_regression) {
+        auto export_label_stats = [](const RealData* labels) {
+            json j;
+            if (labels && labels->data && labels->shape) {
+                json shape_json;
+                for (int i = 0; i < labels->dims; i++) {
+                    shape_json.push_back(labels->shape[i]);
+                }
+                j["shape"] = shape_json;
+                if (labels->min_vals && labels->max_vals) {
+                    json min_json, max_json;
+                    if (labels->dims == 1) {
+                        min_json.push_back(labels->min_vals[0]);
+                        max_json.push_back(labels->max_vals[0]);
+                    } else {
+                        for (int i = 0; i < labels->shape[1]; i++) {
+                            min_json.push_back(labels->min_vals[i]);
+                            max_json.push_back(labels->max_vals[i]);
+                        }
+                    }
+                    j["min"] = min_json;
+                    j["max"] = max_json;
+                }
+            }
+            return j;
+        };
+        run_metadata["train_labels"] = export_label_stats(&train->labels);
+        if (test->data.shape[0] > 0) {
+            run_metadata["test_labels"] = export_label_stats(&test->labels);
+        }
     }
 
     // Merge with existing Associated_Data -> other if any

@@ -44,6 +44,18 @@ double cross_entropy(const double* logits, const double* targets, double* grads,
     return loss;
 }
 
+double mse(const double* logits, const double* targets, double* grads,
+           size_t n) {
+    double loss = 0.0;
+    for (size_t i = 0; i < n; i++) {
+        double diff = logits[i] - targets[i];
+        loss += diff * diff;
+        grads[i] = 2.0 * diff / (double)n;
+    }
+    loss /= (double)n;
+    return loss;
+}
+
 double alpha(bool leak) { return (double)!leak; }
 
 double spike_surrogate(double v_pre_t, double v_thresh, double scale_rho,
