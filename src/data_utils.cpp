@@ -38,7 +38,7 @@ void encode_spikes(neuro::Processor* p, const Dataset* d, size_t index,
         // Use shared spike raster encoder for non-timeseries
         auto raster = encode_spike_raster(
             d->data.data + index * d->data.shape[1], d->data.shape[1],
-            timesteps, nullptr, nullptr, true /* already normalized */);
+            timesteps, nullptr, nullptr, true); // already normalized
 
         for (size_t t = 0; t < timesteps; t++) {
             for (size_t n = 0; n < raster.size(); n++) {

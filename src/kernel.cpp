@@ -164,7 +164,7 @@ string opencl_c_container() {
             }
 
             if (loss_func == 0u) {
-                /* CCE: softmax + cross-entropy + one-hot gradient */
+                // CCE: softmax + cross-entropy + one-hot gradient
                 float sum     = 0.0f;
                 uint max_idx  = 0;
                 float max_val = 0.0f;
@@ -196,7 +196,7 @@ string opencl_c_container() {
                     dL_ds[i] -= (i == target_idx ? 1.0f : 0.0f);
                 }
             } else {
-                /* MSE: mean squared error + gradient */
+                // MSE: mean squared error + gradient
                 float mse_loss  = 0.0f;
                 uint row_offset = target_idx * num_output_neurons;
                 for (uint i = 0; i < num_output_neurons; i++) {

@@ -54,7 +54,7 @@ void export_network(neuro::Network* n, const CliConfig& cfg,
     meta["epoch"]           = cfg.epochs;
     meta["regression"]      = is_regression;
 
-    /* Export label mapping (classification only) */
+    // Export label mapping (classification only)
     if (!label_strings.empty()) {
         nlohmann::json labels_json;
         for (const auto& s : label_strings) {

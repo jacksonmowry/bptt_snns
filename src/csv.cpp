@@ -9,7 +9,7 @@
 #include <string>
 #include <vector>
 
-/* Forward declarations for helpers used by high-level loaders */
+// Forward declarations for helpers used by high-level loaders
 static int compute_2d_dims(FILE* f_data, int* p_cols);
 
 // Build unique sorted label list from raw strings. Returns count.
@@ -235,8 +235,8 @@ parse_textdata(FILE* f_labels, int count) {
     return {rd, std::move(label_strings)};
 }
 
-/* Load 2D data from file. Returns RealData with dims=2, shape=[rows, cols].
- * Caller must free via free_realdata(). Returns zero-initialized on failure. */
+// Load 2D data from file. Returns RealData with dims=2, shape=[rows, cols].
+// Caller must free via free_realdata(). Returns zero-initialized on failure.
 RealData load_realdata_2d(const char* path) {
     RealData rd = {NULL, NULL, NULL, 2, NULL};
     FILE* f     = fopen(path, "r");
@@ -277,9 +277,9 @@ RealData load_realdata_2d(const char* path) {
     return rd;
 }
 
-/* Load text labels from file. Returns {label indices RealData (dims=1), vector
- * of label strings}. count = number of observations (rows) in the file. Caller
- * must free the RealData via free_realdata(). */
+// Load text labels from file. Returns {label indices RealData (dims=1), vector
+// of label strings}. count = number of observations (rows) in the file. Caller
+// must free the RealData via free_realdata().
 std::pair<RealData, std::vector<std::string>> load_textdata(const char* path,
                                                             int count) {
     RealData rd = {NULL, NULL, NULL, 1, NULL};
@@ -520,11 +520,11 @@ void free_dataset(Dataset* ds) {
     ds->labels.shape    = NULL;
 }
 
-/* Load a single dataset (no shuffle, no split). Detects 2D vs 3D
- * via timeseries flag. Handles both classification and regression.
- * For classification: labels loaded as text strings mapped to indices.
- * For regression: labels loaded as numeric RealData.
- * Caller must free via free_dataset(). */
+// Load a single dataset (no shuffle, no split). Detects 2D vs 3D
+// via timeseries flag. Handles both classification and regression.
+// For classification: labels loaded as text strings mapped to indices.
+// For regression: labels loaded as numeric RealData.
+// Caller must free via free_dataset().
 std::pair<Dataset, std::vector<std::string>>
 load_dataset_single(const char* data_path, const char* labels_path,
                     size_t timeseries, bool is_regression) {
@@ -605,9 +605,9 @@ load_dataset_single(const char* data_path, const char* labels_path,
     return {out, std::move(label_strings)};
 }
 
-/* Shuffle and split a loaded dataset. Shuffles in-place, splits into
- * train/test. Handles both classification and regression via dims check.
- * Caller must free via free_dataset(). */
+// Shuffle and split a loaded dataset. Shuffles in-place, splits into
+// train/test. Handles both classification and regression via dims check.
+// Caller must free via free_dataset().
 void split_dataset(Dataset* source, double train_percent, Dataset* train,
                    Dataset* test) {
     *train = make_empty_dataset();
@@ -631,11 +631,11 @@ void split_dataset(Dataset* source, double train_percent, Dataset* train,
                         test);
 }
 
-/* Full dataset loading: load + shuffle + split into train/test.
- * Convenience wrapper around load_dataset_single + split_dataset.
- * label_strings filled with unique label names (empty for regression).
- * For classification: labels_path contains text labels.
- * For regression: labels_path contains numeric target data. */
+// Full dataset loading: load + shuffle + split into train/test.
+// Convenience wrapper around load_dataset_single + split_dataset.
+// label_strings filled with unique label names (empty for regression).
+// For classification: labels_path contains text labels.
+// For regression: labels_path contains numeric target data.
 void load_dataset(const char* data_path, const char* labels_path,
                   double train_percent, size_t timeseries, Dataset* train,
                   Dataset* test, std::vector<std::string>& label_strings,

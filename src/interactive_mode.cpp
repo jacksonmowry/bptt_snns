@@ -174,7 +174,7 @@ static int main_evaluate(const string& network_json_path, bool test,
         int label_dims = 1;
 
         if (regression) {
-            /* Use train_labels if present, else test_labels. */
+            // Use train_labels if present, else test_labels.
             const json* labels_obj = nullptr;
             if (test) {
                 if (other.contains("test_labels") &&
@@ -283,8 +283,8 @@ static int main_evaluate(const string& network_json_path, bool test,
             Dataset tmp_ds;
 
             if (timeseries) {
-                /* 3D dataset: [1, n_features, timesteps]
-                 * Repeat each normalized value across all timesteps */
+                // 3D dataset: [1, n_features, timesteps]
+                // Repeat each normalized value across all timesteps
                 int ts          = (int)timesteps;
                 int n_cols      = (int)n_features * ts;
                 double* norm_3d = new double[n_cols];
@@ -315,7 +315,7 @@ static int main_evaluate(const string& network_json_path, bool test,
             tmp_ds.timeseries   = timeseries;
 
             if (regression) {
-                /* Regression: evaluate and denormalize output */
+                // Regression: evaluate and denormalize output
                 // evaluate_sample returns argmax class index which doesn't
                 // apply for regression — instead we need the raw spike logits
                 p->clear_activity();
@@ -369,7 +369,7 @@ static int main_evaluate(const string& network_json_path, bool test,
                 }
 
             } else {
-                /* Classification: evaluate_sample returns predicted class */
+                // Classification: evaluate_sample returns predicted class
                 int pred = evaluate_sample(p, tmp_ds, 0, hidden_neurons,
                                            output_neurons, timesteps,
                                            timeseries, input_neurons);

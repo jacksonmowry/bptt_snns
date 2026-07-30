@@ -55,7 +55,7 @@ EvaluationResults forward(TrainingBundle* tb, Processor* p, const Dataset* d,
     }
 
     if (nc->loss_func == LossFunc::CCE) {
-        /* Classification: assert single-column label (one-hot target) */
+        // Classification: assert single-column label (one-hot target)
         if (d->labels.dims == 1) {
             assert(d->labels.shape[0] > 0);
         } else {

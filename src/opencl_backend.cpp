@@ -13,7 +13,7 @@ using namespace neuro;
 
 static void encode(Memory<double>& data, const Dataset& d, bool timeseries,
                    LossFunc loss_func) {
-    /* Both CCE and MSE: use 1/x spike encoding */
+    // Both CCE and MSE: use 1/x spike encoding
     (void)loss_func;
 
     if (timeseries) {

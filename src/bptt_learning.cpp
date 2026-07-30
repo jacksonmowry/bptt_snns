@@ -114,8 +114,8 @@ int main(int argc, char* argv[]) {
         test           = test_pair.first;
         test_labels    = test_pair.second.size();
 
-        /* Normalize regression labels for split path (build_split_dataset
-         * handles normalization for the simple path) */
+        // Normalize regression labels for split path (build_split_dataset
+        // handles normalization for the simple path)
         if (cfg.regression) {
             if (train.labels.data && train.labels.shape) {
                 compute_realdata_minmax(train.labels);
@@ -127,8 +127,8 @@ int main(int argc, char* argv[]) {
             }
         }
 
-        /* Verify train and test label mappings match (same labels, same
-         * order) — only for classification */
+        // Verify train and test label mappings match (same labels, same
+        // order) — only for classification
         if (!cfg.regression && test.data.shape[0] > 0) {
             assert(test_pair.second == label_strings);
         }
@@ -285,8 +285,8 @@ int main(int argc, char* argv[]) {
                         has_test_data, cfg.regression);
     }
 
-    /* Confusion matrix on best saved network (if flag is set, classification
-     * only) */
+    // Confusion matrix on best saved network (if flag is set, classification
+    // only)
     if (cfg.confusion_matrix && !cfg.regression) {
         run_confusion_matrix(cfg, train, test, label_strings, input_neurons,
                              hidden_neurons, output_neurons, cfg.timesteps,

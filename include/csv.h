@@ -5,7 +5,7 @@
 #include <utility>
 #include <vector>
 
-/* Real-valued data: features, min/max normalization, shape */
+// Real-valued data: features, min/max normalization, shape
 typedef struct {
     double* data;     // feature values, heap-allocated
     double* min_vals; // per-dimension min, heap-allocated
@@ -14,7 +14,7 @@ typedef struct {
     int* shape;       // heap-allocated array of size dims
 } RealData;
 
-/* Combined dataset: real data + real label indices */
+// Combined dataset: real data + real label indices
 typedef struct {
     RealData data;   // input features
     RealData labels; // label indices (dims=2, shape=[count, n], where n is the
