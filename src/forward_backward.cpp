@@ -6,7 +6,6 @@
 #include <Eigen/Dense>
 #include <algorithm>
 #include <cassert>
-#include <cfloat>
 #include <cstring>
 
 using namespace neuro;
@@ -92,9 +91,6 @@ EvaluationResults forward(TrainingBundle* tb, Processor* p, const Dataset* d,
 
         // Accuracy not meaningful for MSE — leave at 0
         er.correct = 0;
-
-        // Populate target from label row
-        memset(tb->target.data(), 0, nc->output_neurons * sizeof(double));
 
         // 2D labels: multiple targets per observation
         const double* label_row = d->labels.data + index * nc->output_neurons;

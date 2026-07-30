@@ -7,9 +7,10 @@
 #include <cstdlib>
 #include <memory>
 
-std::unique_ptr<TrainingBackend>
-create_backend(const CliConfig& cfg, NetworkConfiguration& nc,
-               const Dataset& train, const Dataset& test, LossFunc loss_func) {
+std::unique_ptr<TrainingBackend> create_backend(const CliConfig& cfg,
+                                                NetworkConfiguration& nc,
+                                                const Dataset& train,
+                                                const Dataset& test) {
 #ifdef OPENCL
     if (cfg.opencl) {
         if (!nc.discrete) {
@@ -19,7 +20,7 @@ create_backend(const CliConfig& cfg, NetworkConfiguration& nc,
             exit(1);
         }
         return std::unique_ptr<TrainingBackend>(new OpenclBackend(
-            cfg, nc, train, test, nc.max_incoming, nc.max_outgoing, loss_func));
+            cfg, nc, train, test, nc.max_incoming, nc.max_outgoing));
     }
 #endif
     return std::unique_ptr<TrainingBackend>(

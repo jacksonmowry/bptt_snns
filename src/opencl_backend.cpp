@@ -11,11 +11,7 @@
 using namespace std;
 using namespace neuro;
 
-static void encode(Memory<double>& data, const Dataset& d, bool timeseries,
-                   LossFunc loss_func) {
-    // Both CCE and MSE: use 1/x spike encoding
-    (void)loss_func;
-
+static void encode(Memory<double>& data, const Dataset& d, bool timeseries) {
     if (timeseries) {
         // data = [observations * (input_features * 2) * dataset_timesteps]
         assert(data.length() ==
@@ -98,12 +94,11 @@ static void write_weights_to_network(neuro::Network* n, size_t total_neurons,
 
 OpenclBackend::OpenclBackend(const CliConfig& cfg, NetworkConfiguration& nc,
                              const Dataset& train, const Dataset& test,
-                             size_t max_incoming, size_t max_outgoing,
-                             LossFunc loss_func)
+                             size_t max_incoming, size_t max_outgoing)
     : cfg(cfg), nc(nc), train(train), test(test), max_incoming(max_incoming),
       max_outgoing(max_outgoing), batch_size(cfg.batch_size),
       learning_rate(cfg.learning_rate), decay_rate(cfg.decay_rate),
-      loss_func(loss_func), b1_t(1.0), b2_t(1.0) {
+      loss_func(cfg.loss_func), b1_t(1.0), b2_t(1.0) {
 
     Device device(select_device_with_most_flops());
     const size_t encode_work_size = nc.input_neurons;
@@ -186,7 +181,7 @@ OpenclBackend::OpenclBackend(const CliConfig& cfg, NetworkConfiguration& nc,
         (uint)nc.total_neurons, (uint)nc.timesteps, (uint)0,
         (uint)nc.max_incoming));
 
-    uint loss_func_uint = (loss_func == LossFunc::MSE) ? 1u : 0u;
+    uint loss_func_uint = (cfg.loss_func == LossFunc::MSE) ? 1u : 0u;
     loss_kernel.reset(new Kernel(
         device, loss_work_size, "risp_loss_kernel", *s, *dL_ds, *correct, *loss,
         *targets, (uint)nc.total_neurons, (uint)nc.output_neurons,
@@ -217,9 +212,9 @@ OpenclBackend::OpenclBackend(const CliConfig& cfg, NetworkConfiguration& nc,
         (short)nc.max_weight, (int)nc.steps));
 
     // Encode data
-    encode(*data, train, cfg.timeseries, loss_func);
+    encode(*data, train, cfg.timeseries);
     if (test.data.shape[0] > 0) {
-        encode(*test_data, test, cfg.timeseries, loss_func);
+        encode(*test_data, test, cfg.timeseries);
     }
 
     // Initialize GPU buffers from network

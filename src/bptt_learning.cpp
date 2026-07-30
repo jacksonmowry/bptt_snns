@@ -234,10 +234,10 @@ int main(int argc, char* argv[]) {
     nc.max_incoming = max_incoming;
 
     // Create backend via factory
-    auto backend = create_backend(cfg, nc, train, test, cfg.loss_func);
+    auto backend = create_backend(cfg, nc, train, test);
 
     // Determine which metric to track for export
-    bool has_test_data = test.data.shape[0] > 0;
+    bool has_test_data = test.data.shape && test.data.shape[0] > 0;
 
     // Training loop
     // "Best" stats are updated when a new best network is found, not

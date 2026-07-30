@@ -410,8 +410,7 @@ static Dataset make_empty_dataset() {
 // Generic split builder: handles both 2D and 3D, both classification and
 // regression.
 // - data: input features RealData (source)
-// - labels: label/target RealData (source). For classification: dims=1,
-// shape=[num_obs].
+// - labels: label/target RealData (source),
 // - start, len: range within source
 // - out: output Dataset (filled)
 static void build_split_dataset(const RealData* data, const RealData* labels,
@@ -438,8 +437,8 @@ static void build_split_dataset(const RealData* data, const RealData* labels,
         return;
     }
 
-    // For regression labels: allocate min/max; for classification labels (1D):
-    // no min/max needed
+    // For regression labels: allocate min/max; for classification labels no
+    // min/max needed
     if (labels->dims > 1) {
         out->labels.min_vals =
             (double*)malloc(labels->shape[1] * sizeof(double));
@@ -469,6 +468,8 @@ static void build_split_dataset(const RealData* data, const RealData* labels,
     if (labels->dims > 1) {
         assert(out->labels.min_vals);
         assert(labels->min_vals);
+        assert(out->labels.max_vals);
+        assert(labels->max_vals);
         memcpy(out->labels.min_vals, labels->min_vals,
                labels->shape[1] * sizeof(double));
         memcpy(out->labels.max_vals, labels->max_vals,

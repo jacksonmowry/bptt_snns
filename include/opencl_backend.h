@@ -13,7 +13,7 @@ class OpenclBackend : public TrainingBackend {
   public:
     OpenclBackend(const CliConfig& cfg, NetworkConfiguration& nc,
                   const Dataset& train, const Dataset& test,
-                  size_t max_incoming, size_t max_outgoing, LossFunc loss_func);
+                  size_t max_incoming, size_t max_outgoing);
     ~OpenclBackend() override;
 
     void do_one_epoch(size_t epoch) override;
