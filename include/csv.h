@@ -17,35 +17,36 @@ typedef struct {
 /* Combined dataset: real data + real label indices */
 typedef struct {
     RealData data;   // input features
-    RealData labels; // label indices (dims=1, shape=[count])
+    RealData labels; // label indices (dims=2, shape=[count, n], where n is the
+                     // number of output features, 1 for classification
+                     // problems, 1+ for regression problems)
     size_t timeseries;
 } Dataset;
 
-/* Low-level loaders — file I/O and parsing encapsulated. Returns heap-allocated
- * structs. Caller must free via free_realdata(). */
-RealData load_realdata_2d(const char* path); /* 2D data: rows x cols */
+// Low-level loaders — file I/O and parsing encapsulated. Returns heap-allocated
+//  structs. Caller must free via free_realdata().
+RealData load_realdata_2d(const char* path); // 2D data: rows x cols
 
-/* Parse labels from file. Returns {label indices as RealData (dims=1), vector
- * of label strings}. count = number of observations (rows) in the file. Caller
- * must free the RealData's data/shape via free_realdata(). */
+// Parse labels from file. Returns {label indices as RealData (dims=1), vector
+// of label strings}. count = number of observations (rows) in the file. Caller
+// must free the RealData's data/shape via free_realdata().
 std::pair<RealData, std::vector<std::string>> load_textdata(const char* path,
                                                             int count);
 
-/* High-level dataset loader. Loads both files, shuffles, and splits.
- * For classification: labels_path contains text labels mapped to integer
- * indices. For regression: labels_path contains numeric target data.
- * label_strings filled with unique label names (empty for regression).
- * Caller must free train and test via free_dataset(). */
+// High-level dataset loader. Loads both files, shuffles, and splits.
+// For classification: labels_path contains text labels mapped to integer
+// indices. For regression: labels_path contains numeric target data.
+// label_strings filled with unique label names (empty for regression).
+// Caller must free train and test via free_dataset().
 void load_dataset(const char* data_path, const char* labels_path,
                   double train_percent, size_t timeseries, Dataset* train,
                   Dataset* test, std::vector<std::string>& label_strings,
                   bool is_regression = false);
 
-/* Low-level: load a single dataset (no split), then split separately.
- * For classification: returns {Dataset, label_strings}.
- * For regression: returns {Dataset, empty vector}.
- * Both data and labels are loaded as RealData; labels are normalized.
- * Returns {Dataset, label_strings}. */
+// Low-level: load a single dataset (no split), then split separately.
+// For classification: returns {Dataset, label_strings}.
+// For regression: returns {Dataset, empty vector}.
+// Both data and labels are loaded as RealData; labels are normalized.
 std::pair<Dataset, std::vector<std::string>>
 load_dataset_single(const char* data_path, const char* labels_path,
                     size_t timeseries, bool is_regression = false);
@@ -53,16 +54,16 @@ load_dataset_single(const char* data_path, const char* labels_path,
 void split_dataset(Dataset* source, double train_percent, Dataset* train,
                    Dataset* test);
 
-/* Compute min/max values for RealData from its data buffer.
- * Uses shape/dims to determine iteration bounds.
- * Caller must allocate min_vals/max_vals arrays of correct size. */
+// Compute min/max values for RealData from its data buffer.
+// Uses shape/dims to determine iteration bounds.
+// Caller must allocate min_vals/max_vals arrays of correct size.
 void compute_realdata_minmax(RealData& rd);
 
-/* Normalize RealData to [0,1] range using its min_vals/max_vals.
- * Values with zero range are set to NaN to match original behavior.
- * Modifies rd.data in-place; min_vals/max_vals unchanged. */
+// Normalize RealData to [0,1] range using its min_vals/max_vals.
+// Values with zero range are set to NaN to match original behavior.
+// Modifies rd.data in-place; min_vals/max_vals unchanged.
 void normalize_realdata(RealData& rd);
 
-/* Dataset cleanup */
+// Dataset cleanup
 void free_dataset(Dataset* ds);
 void free_realdata(RealData rd);
