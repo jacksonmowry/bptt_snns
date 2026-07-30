@@ -12,8 +12,7 @@
 class OpenclBackend : public TrainingBackend {
   public:
     OpenclBackend(const CliConfig& cfg, NetworkConfiguration& nc,
-                  const Dataset& train, const Dataset& test,
-                  size_t max_incoming, size_t max_outgoing);
+                  const Dataset& train, const Dataset& test);
     ~OpenclBackend() override;
 
     void do_one_epoch(size_t epoch) override;
@@ -25,8 +24,6 @@ class OpenclBackend : public TrainingBackend {
     NetworkConfiguration& nc;
     const Dataset& train;
     const Dataset& test;
-    size_t max_incoming;
-    size_t max_outgoing;
     size_t batch_size;
     double learning_rate;
     double decay_rate;

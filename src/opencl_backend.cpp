@@ -93,12 +93,9 @@ static void write_weights_to_network(neuro::Network* n, size_t total_neurons,
 }
 
 OpenclBackend::OpenclBackend(const CliConfig& cfg, NetworkConfiguration& nc,
-                             const Dataset& train, const Dataset& test,
-                             size_t max_incoming, size_t max_outgoing)
-    : cfg(cfg), nc(nc), train(train), test(test), max_incoming(max_incoming),
-      max_outgoing(max_outgoing), batch_size(cfg.batch_size),
-      learning_rate(cfg.learning_rate), decay_rate(cfg.decay_rate),
-      loss_func(cfg.loss_func), b1_t(1.0), b2_t(1.0) {
+                             const Dataset& train, const Dataset& test)
+    : cfg(cfg), nc(nc), train(train), test(test), batch_size(cfg.batch_size),
+      b1_t(1.0), b2_t(1.0) {
 
     Device device(select_device_with_most_flops());
     const size_t encode_work_size = nc.input_neurons;
@@ -230,9 +227,9 @@ OpenclBackend::OpenclBackend(const CliConfig& cfg, NetworkConfiguration& nc,
             neuro::Edge* edge  = node->incoming[j];
             size_t incoming_id = edge->from->id;
 
-            (*weights)[(i * max_incoming) + j]      = edge->get("Weight");
-            (*delays)[(i * max_incoming) + j]       = edge->get("Delay");
-            (*incoming_ids)[(i * max_incoming) + j] = edge->from->id;
+            (*weights)[(i * nc.max_incoming) + j]      = edge->get("Weight");
+            (*delays)[(i * nc.max_incoming) + j]       = edge->get("Delay");
+            (*incoming_ids)[(i * nc.max_incoming) + j] = edge->from->id;
 
             (*gradient_slot)[i * nc.max_incoming + j] =
                 (*outgoing)[incoming_id];

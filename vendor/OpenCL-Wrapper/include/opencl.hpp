@@ -581,9 +581,7 @@ class Device {
                   const string& opencl_c_code = get_opencl_c_code()) {
         print_device_info(info);
         this->info     = info;
-        this->cl_queue = cl::CommandQueue(
-            info.cl_context,
-            info.cl_device);
+        this->cl_queue = cl::CommandQueue(info.cl_context, info.cl_device);
         cl::Program::Sources cl_source;
         const string kernel_code =
             enable_device_capabilities() + "\n" + opencl_c_code;
@@ -857,14 +855,14 @@ template <typename T> class Memory {
         }
         return *this; // destructor of memory will be called automatically
     }
-    inline T* const exchange_host_buffer(
+    inline T* exchange_host_buffer(
         T* const host_buffer) { // sets host_buffer to new pointer and returns
                                 // old pointer
         T* const swap     = this->host_buffer;
         this->host_buffer = host_buffer;
         return swap;
     }
-    inline T* const exchange_host_buffer_unaligned(
+    inline T* exchange_host_buffer_unaligned(
         T* const host_buffer_unaligned) { // sets host_buffer_unaligned to new
                                           // pointer and returns old pointer
         T* const swap               = this->host_buffer_unaligned;
@@ -934,16 +932,16 @@ template <typename T> class Memory {
                            // Nvidia GPUs!
                            // if(device_buffer_exists) cl_queue.finish();
     }
-    inline const ulong length() const { return N; }
-    inline const uint dimensions() const { return d; }
-    inline const ulong range() const { return N * (ulong)d; }
-    inline const ulong capacity() const {
+    inline ulong length() const { return N; }
+    inline uint dimensions() const { return d; }
+    inline ulong range() const { return N * (ulong)d; }
+    inline ulong capacity() const {
         return N * (ulong)d * sizeof(T);
     } // returns capacity of the buffer in Bytes
-    inline T* const data() { return host_buffer; }
-    inline const T* const data() const { return host_buffer; }
-    inline T* const operator()() { return host_buffer; }
-    inline const T* const operator()() const { return host_buffer; }
+    inline T* data() { return host_buffer; }
+    inline T* data() const { return host_buffer; }
+    inline T* operator()() { return host_buffer; }
+    inline T* operator()() const { return host_buffer; }
     inline T& operator[](const ulong i) { return host_buffer[i]; }
     inline const T& operator[](const ulong i) const { return host_buffer[i]; }
     inline const T operator()(const ulong i) const { return host_buffer[i]; }
@@ -1058,6 +1056,7 @@ template <typename T> class Memory {
         Event* event_returned =
             nullptr) { // read 2D domain from device, either for all vector
                        // dimensions (-1) or for a specified dimension
+        (void)Ny;
         if (host_buffer_exists && device_buffer_exists && !is_zero_copy) {
             for (uint y = y0; y < y1; y++) {
                 const ulong n = x0 + y * Nx;
@@ -1081,14 +1080,15 @@ template <typename T> class Memory {
             }
         }
     }
-    inline void write_to_device_2d(
-        const ulong x0, const ulong x1, const ulong y0, const ulong y1,
-        const ulong Nx, const ulong Ny, const int dimension = -1,
-        const bool blocking                 = true,
-        const vector<Event>* event_waitlist = nullptr,
-        Event* event_returned =
-            nullptr) { // write 2D domain to device, either for all vector
-                       // dimensions (-1) or for a specified dimension
+    inline void
+    write_to_device_2d(const ulong x0, const ulong x1, const ulong y0,
+                       const ulong y1, const ulong Nx, const ulong Ny,
+                       const int dimension = -1, const bool blocking = true,
+                       const vector<Event>* event_waitlist = nullptr,
+                       Event* event_returned               = nullptr) {
+        (void)Ny;
+        // write 2D domain to device, either for all vector
+        // dimensions (-1) or for a specified dimension
         if (host_buffer_exists && device_buffer_exists && !is_zero_copy) {
             for (uint y = y0; y < y1; y++) {
                 const ulong n = x0 + y * Nx;
@@ -1112,14 +1112,16 @@ template <typename T> class Memory {
             }
         }
     }
-    inline void read_from_device_3d(
-        const ulong x0, const ulong x1, const ulong y0, const ulong y1,
-        const ulong z0, const ulong z1, const ulong Nx, const ulong Ny,
-        const ulong Nz, const int dimension = -1, const bool blocking = true,
-        const vector<Event>* event_waitlist = nullptr,
-        Event* event_returned =
-            nullptr) { // read 3D domain from device, either for all vector
-                       // dimensions (-1) or for a specified dimension
+    inline void
+    read_from_device_3d(const ulong x0, const ulong x1, const ulong y0,
+                        const ulong y1, const ulong z0, const ulong z1,
+                        const ulong Nx, const ulong Ny, const ulong Nz,
+                        const int dimension = -1, const bool blocking = true,
+                        const vector<Event>* event_waitlist = nullptr,
+                        Event* event_returned               = nullptr) {
+        (void)Nz;
+        // read 3D domain from device, either for all vector
+        // dimensions (-1) or for a specified dimension
         if (host_buffer_exists && device_buffer_exists && !is_zero_copy) {
             for (uint z = z0; z < z1; z++) {
                 for (uint y = y0; y < y1; y++) {
@@ -1146,14 +1148,16 @@ template <typename T> class Memory {
             }
         }
     }
-    inline void write_to_device_3d(
-        const ulong x0, const ulong x1, const ulong y0, const ulong y1,
-        const ulong z0, const ulong z1, const ulong Nx, const ulong Ny,
-        const ulong Nz, const int dimension = -1, const bool blocking = true,
-        const vector<Event>* event_waitlist = nullptr,
-        Event* event_returned =
-            nullptr) { // write 3D domain to device, either for all vector
-                       // dimensions (-1) or for a specified dimension
+    inline void
+    write_to_device_3d(const ulong x0, const ulong x1, const ulong y0,
+                       const ulong y1, const ulong z0, const ulong z1,
+                       const ulong Nx, const ulong Ny, const ulong Nz,
+                       const int dimension = -1, const bool blocking = true,
+                       const vector<Event>* event_waitlist = nullptr,
+                       Event* event_returned               = nullptr) {
+        (void)Nz;
+        // write 3D domain to device, either for all vector
+        // dimensions (-1) or for a specified dimension
         if (host_buffer_exists && device_buffer_exists && !is_zero_copy) {
             for (uint z = z0; z < z1; z++) {
                 for (uint y = y0; y < y1; y++) {
@@ -1291,7 +1295,7 @@ class Kernel {
         cl_range_local = cl::NDRange(workgroup_size);
         return *this;
     }
-    inline const ulong range() const { return N; }
+    inline ulong range() const { return N; }
     inline uint get_number_of_parameters() const {
         return number_of_parameters;
     }

@@ -19,8 +19,8 @@ std::unique_ptr<TrainingBackend> create_backend(const CliConfig& cfg,
                 "OpenCL support is not enabled for non-discrete networks.\n");
             exit(1);
         }
-        return std::unique_ptr<TrainingBackend>(new OpenclBackend(
-            cfg, nc, train, test, nc.max_incoming, nc.max_outgoing));
+        return std::unique_ptr<TrainingBackend>(
+            new OpenclBackend(cfg, nc, train, test));
     }
 #endif
     return std::unique_ptr<TrainingBackend>(
