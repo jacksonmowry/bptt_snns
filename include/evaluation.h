@@ -4,9 +4,8 @@
 #include "csv.h"
 #include "framework.hpp"
 #include <cstddef>
-#include <vector>
 #include <string>
-
+#include <vector>
 
 int evaluate_sample(neuro::Processor* p, const Dataset& dataset, size_t idx,
                     size_t hidden_neurons, size_t output_neurons,
@@ -17,4 +16,5 @@ bool run_confusion_matrix(const CliConfig& cfg, const Dataset& train,
                           const Dataset& test,
                           const std::vector<std::string>& label_strings,
                           size_t input_neurons, size_t hidden_neurons,
-                          size_t output_neurons, size_t timesteps, bool timeseries);
+                          size_t output_neurons, size_t timesteps,
+                          bool timeseries);

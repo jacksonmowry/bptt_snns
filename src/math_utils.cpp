@@ -44,7 +44,8 @@ double cross_entropy(const double* logits, const double* targets, double* grads,
     return loss;
 }
 
-double mse(const double* logits, const double* targets, double* grads, size_t n) {
+double mse(const double* logits, const double* targets, double* grads,
+           size_t n) {
     double loss = 0.0;
     for (size_t i = 0; i < n; i++) {
         double diff = logits[i] - targets[i];

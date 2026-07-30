@@ -31,7 +31,8 @@ string opencl_c_container() {
             int num_input_neurons, int timesteps, uint observation_idx,
             short spike_value_factor) {
             const uint global_id = get_global_id(0);
-            const uint total_work = (uint)num_input_neurons * (uint)dataset_timesteps;
+            const uint total_work =
+                (uint)num_input_neurons * (uint)dataset_timesteps;
             if (global_id >= total_work) {
                 return;
             }
@@ -48,8 +49,7 @@ string opencl_c_container() {
             const double encoding_end   = encoding_start + encoding_window;
 
             const double val =
-                data[(observation_idx * num_input_neurons *
-                      dataset_timesteps) +
+                data[(observation_idx * num_input_neurons * dataset_timesteps) +
                      (neuron_id * dataset_timesteps) + (column_t)];
 
             if (val <= 0.0) {
@@ -66,21 +66,20 @@ string opencl_c_container() {
             global const short* x, global const short* v_thresh,
             global const short* weights, global const uint* delays,
             global const uint* incoming, global const uint* incoming_ids,
-            global const uchar* is_input_neuron, global int* v,
-            global char* s, global int* v_pre, short v_decay, int v_rest,
-            uint num_neurons, uint num_steps, uint timestep,
-            uint max_incoming) {
+            global const uchar* is_input_neuron, global int* v, global char* s,
+            global int* v_pre, short v_decay, int v_rest, uint num_neurons,
+            uint num_steps, uint timestep, uint max_incoming) {
             const uint neuron_id = get_global_id(0);
             if (neuron_id >= num_neurons) {
                 return;
             }
 
             const short V_thresh = v_thresh[neuron_id];
-            const int V        = timestep == 0u ? 0 : v[neuron_id];
+            const int V          = timestep == 0u ? 0 : v[neuron_id];
             const uint idx       = neuron_id * num_steps + timestep;
             const uint inc_count = incoming[neuron_id];
 
-            bool has_event    = false;
+            bool has_event  = false;
             int total_input = 0;
 
             if (is_input_neuron[neuron_id]) {
@@ -141,12 +140,11 @@ string opencl_c_container() {
             s[idx]       = (char)has_spiked;
         }
 
-        kernel void risp_loss_kernel(global const char* s, global float* dL_ds,
-                                     global float* correct, global float* loss,
-                                     global const double* targets,
-                                     uint num_neurons, uint num_output_neurons,
-                                     uint num_steps, uint loss_func,
-                                     uint target_idx) {
+        kernel void risp_loss_kernel(
+            global const char* s, global float* dL_ds, global float* correct,
+            global float* loss, global const double* targets, uint num_neurons,
+            uint num_output_neurons, uint num_steps, uint loss_func,
+            uint target_idx) {
             const uint neuron_id = get_global_id(0);
             // Serial for now
             if (neuron_id > 0) {
@@ -167,9 +165,9 @@ string opencl_c_container() {
 
             if (loss_func == 0u) {
                 /* CCE: softmax + cross-entropy + one-hot gradient */
-                float sum           = 0.0f;
-                uint max_idx        = 0;
-                float max_val       = 0.0f;
+                float sum     = 0.0f;
+                uint max_idx  = 0;
+                float max_val = 0.0f;
 
                 // Softmax
                 for (uint i = 0; i < num_output_neurons; i++) {
@@ -199,12 +197,12 @@ string opencl_c_container() {
                 }
             } else {
                 /* MSE: mean squared error + gradient */
-                float mse_loss = 0.0f;
+                float mse_loss  = 0.0f;
                 uint row_offset = target_idx * num_output_neurons;
                 for (uint i = 0; i < num_output_neurons; i++) {
-                    float pred = dL_ds[i];
+                    float pred   = dL_ds[i];
                     float target = (float)targets[row_offset + i];
-                    float diff = pred - target;
+                    float diff   = pred - target;
                     mse_loss += diff * diff;
                     dL_ds[i] = 2.0f * diff / (float)num_output_neurons;
                 }

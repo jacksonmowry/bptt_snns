@@ -1,7 +1,7 @@
 #include "evaluation.h"
 #include "data_utils.h"
-#include "network_utils.h"
 #include "framework.hpp"
+#include "network_utils.h"
 #include <algorithm>
 #include <cassert>
 #include <cfloat>
@@ -36,12 +36,12 @@ int evaluate_sample(Processor* p, const Dataset& dataset, size_t idx,
     }
 
     /* Find argmax */
-    int pred = 0;
+    int pred      = 0;
     int max_count = output_logits[0];
     for (int o = 1; o < (int)output_neurons; o++) {
         if (output_logits[o] > max_count) {
             max_count = output_logits[o];
-            pred = o;
+            pred      = o;
         }
     }
     return pred;
@@ -51,7 +51,8 @@ bool run_confusion_matrix(const CliConfig& cfg, const Dataset& train,
                           const Dataset& test,
                           const std::vector<std::string>& label_strings,
                           size_t input_neurons, size_t hidden_neurons,
-                          size_t output_neurons, size_t timesteps, bool timeseries) {
+                          size_t output_neurons, size_t timesteps,
+                          bool timeseries) {
     if (cfg.network_json_out.empty()) {
         return false;
     }
@@ -91,9 +92,9 @@ bool run_confusion_matrix(const CliConfig& cfg, const Dataset& train,
 
     /* Evaluate each sample */
     for (size_t idx = 0; idx < num_samples; idx++) {
-        pred_labels[idx] = evaluate_sample(p, *eval_dataset, idx, hidden_neurons,
-                                           output_neurons, timesteps,
-                                           timeseries, input_neurons);
+        pred_labels[idx] = evaluate_sample(
+            p, *eval_dataset, idx, hidden_neurons, output_neurons, timesteps,
+            timeseries, input_neurons);
         true_labels[idx] = (int)eval_dataset->labels.data[idx];
     }
 
@@ -102,9 +103,10 @@ bool run_confusion_matrix(const CliConfig& cfg, const Dataset& train,
     vector<vector<size_t>> cm(num_classes, vector<size_t>(num_classes, 0));
     size_t correct = 0;
     for (size_t idx = 0; idx < num_samples; idx++) {
-        int t = true_labels[idx];
+        int t  = true_labels[idx];
         int p_ = pred_labels[idx];
-        if (t >= 0 && (size_t)t < num_classes && p_ >= 0 && (size_t)p_ < num_classes) {
+        if (t >= 0 && (size_t)t < num_classes && p_ >= 0 &&
+            (size_t)p_ < num_classes) {
             cm[(size_t)t][(size_t)p_]++;
             if (t == p_) {
                 correct++;

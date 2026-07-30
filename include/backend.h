@@ -1,7 +1,6 @@
 #pragma once
 
 #include "shared.h"
-#include <memory>
 #include "training.h"
 #include <cstddef>
 #include <memory>
@@ -23,8 +22,6 @@ class TrainingBackend {
     virtual void update_weights(neuro::Network* network) = 0;
 };
 
-std::unique_ptr<TrainingBackend> create_backend(const CliConfig& cfg,
-                                                NetworkConfiguration& nc,
-                                                const Dataset& train,
-                                                const Dataset& test,
-                                                LossFunc loss_func);
+std::unique_ptr<TrainingBackend>
+create_backend(const CliConfig& cfg, NetworkConfiguration& nc,
+               const Dataset& train, const Dataset& test, LossFunc loss_func);

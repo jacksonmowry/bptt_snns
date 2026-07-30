@@ -14,8 +14,9 @@ void encode_spikes(neuro::Processor* p, const Dataset* d, size_t index,
                 double encoding_start = column_t * encoding_window;
                 double encoding_end   = encoding_start + encoding_window;
 
-                double x = d->data.data[(index * d->data.shape[1] * d->data.shape[2]) +
-                                        (input * d->data.shape[2]) + column_t];
+                double x =
+                    d->data.data[(index * d->data.shape[1] * d->data.shape[2]) +
+                                 (input * d->data.shape[2]) + column_t];
                 double inv_x = 1.0 - x;
 
                 if (x > 0.0) {
@@ -36,9 +37,8 @@ void encode_spikes(neuro::Processor* p, const Dataset* d, size_t index,
     } else {
         // Use shared spike raster encoder for non-timeseries
         auto raster = encode_spike_raster(
-            d->data.data + index * d->data.shape[1],
-            d->data.shape[1], timesteps,
-            nullptr, nullptr, true /* already normalized */);
+            d->data.data + index * d->data.shape[1], d->data.shape[1],
+            timesteps, nullptr, nullptr, true /* already normalized */);
 
         for (size_t t = 0; t < timesteps; t++) {
             for (size_t n = 0; n < raster.size(); n++) {
@@ -50,13 +50,12 @@ void encode_spikes(neuro::Processor* p, const Dataset* d, size_t index,
     }
 }
 
-std::vector<std::vector<bool>> encode_spike_raster(const double* values, size_t n_features,
-                                                    size_t timesteps,
-                                                    const double* min_vals,
-                                                    const double* max_vals,
-                                                    bool use_normalized) {
+std::vector<std::vector<bool>>
+encode_spike_raster(const double* values, size_t n_features, size_t timesteps,
+                    const double* min_vals, const double* max_vals,
+                    bool use_normalized) {
     std::vector<std::vector<bool>> spikes(n_features * 2,
-                                           std::vector<bool>(timesteps, false));
+                                          std::vector<bool>(timesteps, false));
 
     for (size_t input = 0; input < n_features; input++) {
         double x;
