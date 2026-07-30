@@ -58,14 +58,6 @@ neuro::Network* load_and_init_network(
                            param_name, target);
                 }
             };
-            auto override_bool = [&](const std::string& key, bool& target,
-                                     const char* param_name) {
-                if (other.count(key)) {
-                    target = other[key].get<bool>();
-                    printf("[metadata override] %s: %s (from saved network)\n",
-                           param_name, target ? "true" : "false");
-                }
-            };
 
             override_double("connectivity", connectivity, "--connectivity");
             override_double("learning_rate", learning_rate, "--learning_rate");
