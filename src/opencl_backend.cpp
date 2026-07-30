@@ -1,8 +1,6 @@
 #ifdef OPENCL
 
 #include "opencl_backend.h"
-#include "network_utils.h"
-#include <algorithm>
 #include <chrono>
 #include <cstddef>
 #include <cstdio>
@@ -21,24 +19,28 @@ static void encode(Memory<double>& data, const Dataset& d, bool timeseries,
     if (timeseries) {
         // data = [observations * (input_features * 2) * dataset_timesteps]
         assert(data.length() ==
-               (unsigned long)(d.data.shape[0] * (d.data.shape[1] * 2) * d.data.shape[2]));
+               (unsigned long)(d.data.shape[0] * (d.data.shape[1] * 2) *
+                               d.data.shape[2]));
 
         for (int obs = 0; obs < d.data.shape[0]; obs++) {
             for (int input_feature = 0; input_feature < d.data.shape[1];
                  input_feature++) {
 
-                for (int dataset_timestep = 0; dataset_timestep < d.data.shape[2];
-                     dataset_timestep++) {
-                    double x = d.data.data[(obs * d.data.shape[1] * d.data.shape[2]) +
-                                           (input_feature * d.data.shape[2]) +
-                                           (dataset_timestep)];
+                for (int dataset_timestep = 0;
+                     dataset_timestep < d.data.shape[2]; dataset_timestep++) {
+                    double x =
+                        d.data.data[(obs * d.data.shape[1] * d.data.shape[2]) +
+                                    (input_feature * d.data.shape[2]) +
+                                    (dataset_timestep)];
                     double inv_x = 1.0 - x;
 
                     if (x > 0.0) {
-                        size_t idx = (obs * (d.data.shape[1] * 2) * d.data.shape[2]) +
-                                     (input_feature * 2 * d.data.shape[2]) +
-                                     (dataset_timestep);
-                        assert(idx < (size_t)(d.data.shape[0] * (d.data.shape[1] * 2) *
+                        size_t idx =
+                            (obs * (d.data.shape[1] * 2) * d.data.shape[2]) +
+                            (input_feature * 2 * d.data.shape[2]) +
+                            (dataset_timestep);
+                        assert(idx < (size_t)(d.data.shape[0] *
+                                              (d.data.shape[1] * 2) *
                                               d.data.shape[2]));
                         data[(obs * (d.data.shape[1] * 2) * d.data.shape[2]) +
                              (input_feature * 2 * d.data.shape[2]) +
@@ -46,10 +48,12 @@ static void encode(Memory<double>& data, const Dataset& d, bool timeseries,
                     }
 
                     if (inv_x > 0.0) {
-                        size_t idx = (obs * (d.data.shape[1] * 2) * d.data.shape[2]) +
-                                     ((input_feature * 2 + 1) * d.data.shape[2]) +
-                                     (dataset_timestep);
-                        assert(idx < (size_t)(d.data.shape[0] * (d.data.shape[1] * 2) *
+                        size_t idx =
+                            (obs * (d.data.shape[1] * 2) * d.data.shape[2]) +
+                            ((input_feature * 2 + 1) * d.data.shape[2]) +
+                            (dataset_timestep);
+                        assert(idx < (size_t)(d.data.shape[0] *
+                                              (d.data.shape[1] * 2) *
                                               d.data.shape[2]));
                         data[(obs * (d.data.shape[1] * 2) * d.data.shape[2]) +
                              ((input_feature * 2 + 1) * d.data.shape[2]) +
@@ -60,15 +64,17 @@ static void encode(Memory<double>& data, const Dataset& d, bool timeseries,
         }
     } else {
         // data = [observations * (input_features * 2)]
-        assert(data.length() == (unsigned long)(d.data.shape[0] * (d.data.shape[1] * 2)));
+        assert(data.length() ==
+               (unsigned long)(d.data.shape[0] * (d.data.shape[1] * 2)));
 
         for (int row = 0; row < d.data.shape[0]; row++) {
             for (int col = 0; col < d.data.shape[1]; col++) {
-                double x = d.data.data[row * d.data.shape[1] + col];
+                double x     = d.data.data[row * d.data.shape[1] + col];
                 double inv_x = 1.0 - x;
 
                 if (x > 0.0) {
-                    data[(row * d.data.shape[1] * 2) + (col * 2)] = double(1.0 / x);
+                    data[(row * d.data.shape[1] * 2) + (col * 2)] =
+                        double(1.0 / x);
                 }
                 if (inv_x > 0.0) {
                     data[(row * d.data.shape[1] * 2) + (col * 2 + 1)] =
@@ -95,15 +101,14 @@ OpenclBackend::OpenclBackend(const CliConfig& cfg, NetworkConfiguration& nc,
                              size_t max_incoming, size_t max_outgoing,
                              LossFunc loss_func)
     : cfg(cfg), nc(nc), train(train), test(test), max_incoming(max_incoming),
-      max_outgoing(max_outgoing), loss_func(loss_func),
-      batch_size(cfg.batch_size), learning_rate(cfg.learning_rate),
-      decay_rate(cfg.decay_rate), b1_t(1.0), b2_t(1.0) {
+      max_outgoing(max_outgoing), batch_size(cfg.batch_size),
+      learning_rate(cfg.learning_rate), decay_rate(cfg.decay_rate),
+      loss_func(loss_func), b1_t(1.0), b2_t(1.0) {
 
     Device device(select_device_with_most_flops());
-    const size_t encode_work_size        = nc.input_neurons;
-    const size_t encode_timeseries_work_size = cfg.timeseries
-        ? nc.input_neurons * train.data.shape[2]
-        : 0;
+    const size_t encode_work_size = nc.input_neurons;
+    const size_t encode_timeseries_work_size =
+        cfg.timeseries ? nc.input_neurons * train.data.shape[2] : 0;
     const size_t forward_work_size       = nc.total_neurons;
     const size_t loss_work_size          = nc.output_neurons;
     const size_t backward_grad_work_size = nc.total_neurons;
@@ -115,7 +120,8 @@ OpenclBackend::OpenclBackend(const CliConfig& cfg, NetworkConfiguration& nc,
 
     data.reset(new Memory<double>(
         device, cfg.timeseries
-                    ? train.data.shape[0] * (train.data.shape[1] * 2) * train.data.shape[2]
+                    ? train.data.shape[0] * (train.data.shape[1] * 2) *
+                          train.data.shape[2]
                     : train.data.shape[0] * train.data.shape[1] * 2));
 
     // Target/label buffer for loss computation
@@ -126,7 +132,8 @@ OpenclBackend::OpenclBackend(const CliConfig& cfg, NetworkConfiguration& nc,
     if (test.data.shape[0] > 0) {
         test_data.reset(new Memory<double>(
             device, cfg.timeseries
-                        ? test.data.shape[0] * (test.data.shape[1] * 2) * test.data.shape[2]
+                        ? test.data.shape[0] * (test.data.shape[1] * 2) *
+                              test.data.shape[2]
                         : test.data.shape[0] * test.data.shape[1] * 2));
     }
 
@@ -166,10 +173,11 @@ OpenclBackend::OpenclBackend(const CliConfig& cfg, NetworkConfiguration& nc,
                    *data, (int)train.data.shape[1], (int)nc.input_neurons,
                    (int)nc.timesteps, (uint)0, (short)nc.spike_value_factor));
 
-    encode_timeseries_kernel.reset(new Kernel(
-        device, encode_timeseries_work_size, "risp_encode_timeseries_inputs_kernel", *x,
-        *data, (int)train.data.shape[2], (int)nc.input_neurons, (int)nc.timesteps,
-        (uint)0, (short)nc.spike_value_factor));
+    encode_timeseries_kernel.reset(
+        new Kernel(device, encode_timeseries_work_size,
+                   "risp_encode_timeseries_inputs_kernel", *x, *data,
+                   (int)train.data.shape[2], (int)nc.input_neurons,
+                   (int)nc.timesteps, (uint)0, (short)nc.spike_value_factor));
 
     forward_kernel.reset(new Kernel(
         device, forward_work_size, "risp_forward_kernel", *x, *v_thresh,
@@ -179,11 +187,10 @@ OpenclBackend::OpenclBackend(const CliConfig& cfg, NetworkConfiguration& nc,
         (uint)nc.max_incoming));
 
     uint loss_func_uint = (loss_func == LossFunc::MSE) ? 1u : 0u;
-    loss_kernel.reset(
-        new Kernel(device, loss_work_size, "risp_loss_kernel", *s, *dL_ds,
-                   *correct, *loss, *targets,
-                   (uint)nc.total_neurons, (uint)nc.output_neurons,
-                   (uint)nc.timesteps, loss_func_uint, (uint)0));
+    loss_kernel.reset(new Kernel(
+        device, loss_work_size, "risp_loss_kernel", *s, *dL_ds, *correct, *loss,
+        *targets, (uint)nc.total_neurons, (uint)nc.output_neurons,
+        (uint)nc.timesteps, loss_func_uint, (uint)0));
 
     backward_grad_kernel.reset(new Kernel(
         device, backward_grad_work_size, "risp_backward_grad_kernel", *dL_ds,
@@ -249,22 +256,29 @@ OpenclBackend::OpenclBackend(const CliConfig& cfg, NetworkConfiguration& nc,
     // Fill targets buffer (all rows, all columns)
     // CCE: labels have 1 column (class index), stored in column 0
     // MSE: labels 1D (not used), 2D (1+ output neuron), or 3D (not yet used)
-    for (size_t i = 0; i < train.data.shape[0]; i++) {
+    for (int i = 0; i < train.data.shape[0]; i++) {
         for (size_t j = 0; j < nc.output_neurons; j++) {
             if (loss_func == LossFunc::CCE) {
                 // CCE: only column 0 has the class index
-                (*targets)[i * nc.output_neurons + j] = (j == 0) ? train.labels.data[i] : 0.0;
+                (*targets)[i * nc.output_neurons + j] =
+                    (j == 0) ? train.labels.data[i] : 0.0;
             } else if (train.labels.dims == 1) {
                 // MSE 1D labels: single target per observation
-                (*targets)[i * nc.output_neurons + j] = (j == 0) ? train.labels.data[i] : 0.0;
+                (*targets)[i * nc.output_neurons + j] =
+                    (j == 0) ? train.labels.data[i] : 0.0;
             } else if (train.labels.dims == 2) {
                 // MSE 2D labels: multi-target
                 size_t label_stride = (size_t)train.labels.shape[1];
-                (*targets)[i * nc.output_neurons + j] = (j < label_stride) ? train.labels.data[i * label_stride + j] : 0.0;
+                (*targets)[i * nc.output_neurons + j] =
+                    (j < label_stride) ? train.labels.data[i * label_stride + j]
+                                       : 0.0;
             } else {
                 // MSE 3D labels: multiple features x timesteps
-                size_t label_stride = (size_t)train.labels.shape[1] * (size_t)train.labels.shape[2];
-                (*targets)[i * nc.output_neurons + j] = (j < label_stride) ? train.labels.data[i * label_stride + j] : 0.0;
+                size_t label_stride = (size_t)train.labels.shape[1] *
+                                      (size_t)train.labels.shape[2];
+                (*targets)[i * nc.output_neurons + j] =
+                    (j < label_stride) ? train.labels.data[i * label_stride + j]
+                                       : 0.0;
             }
         }
     }
@@ -272,22 +286,32 @@ OpenclBackend::OpenclBackend(const CliConfig& cfg, NetworkConfiguration& nc,
 
     // Fill test targets buffer
     if (test.data.shape[0] > 0) {
-        test_targets.reset(new Memory<double>(device, test.data.shape[0] * nc.output_neurons));
+        test_targets.reset(
+            new Memory<double>(device, test.data.shape[0] * nc.output_neurons));
         for (size_t i = 0; i < (size_t)test.data.shape[0]; i++) {
             for (size_t j = 0; j < nc.output_neurons; j++) {
                 if (loss_func == LossFunc::CCE) {
-                    (*test_targets)[i * nc.output_neurons + j] = (j == 0) ? test.labels.data[i] : 0.0;
+                    (*test_targets)[i * nc.output_neurons + j] =
+                        (j == 0) ? test.labels.data[i] : 0.0;
                 } else if (test.labels.dims == 1) {
                     // MSE 1D labels: single target per observation
-                    (*test_targets)[i * nc.output_neurons + j] = (j == 0) ? test.labels.data[i] : 0.0;
+                    (*test_targets)[i * nc.output_neurons + j] =
+                        (j == 0) ? test.labels.data[i] : 0.0;
                 } else if (test.labels.dims == 2) {
                     // MSE 2D labels: multi-target
                     size_t test_label_stride = (size_t)test.labels.shape[1];
-                    (*test_targets)[i * nc.output_neurons + j] = (j < test_label_stride) ? test.labels.data[i * test_label_stride + j] : 0.0;
+                    (*test_targets)[i * nc.output_neurons + j] =
+                        (j < test_label_stride)
+                            ? test.labels.data[i * test_label_stride + j]
+                            : 0.0;
                 } else {
                     // MSE 3D labels: multiple features x timesteps
-                    size_t test_label_stride = (size_t)test.labels.shape[1] * (size_t)test.labels.shape[2];
-                    (*test_targets)[i * nc.output_neurons + j] = (j < test_label_stride) ? test.labels.data[i * test_label_stride + j] : 0.0;
+                    size_t test_label_stride = (size_t)test.labels.shape[1] *
+                                               (size_t)test.labels.shape[2];
+                    (*test_targets)[i * nc.output_neurons + j] =
+                        (j < test_label_stride)
+                            ? test.labels.data[i * test_label_stride + j]
+                            : 0.0;
                 }
             }
         }
@@ -367,11 +391,13 @@ void OpenclBackend::do_one_epoch(size_t epoch) {
 
             // Loss
             if (loss_func == LossFunc::MSE) {
-                loss_kernel->set_parameters(8, 1u);  // loss_func = MSE
-                loss_kernel->set_parameters(9, (uint)obs);  // obs index for row offset
+                loss_kernel->set_parameters(8, 1u); // loss_func = MSE
+                loss_kernel->set_parameters(
+                    9, (uint)obs); // obs index for row offset
             } else {
-                loss_kernel->set_parameters(8, 0u);  // loss_func = CCE
-                loss_kernel->set_parameters(9, (uint)train.labels.data[obs]);  // class index
+                loss_kernel->set_parameters(8, 0u); // loss_func = CCE
+                loss_kernel->set_parameters(
+                    9, (uint)train.labels.data[obs]); // class index
             }
             loss_kernel->run();
 
@@ -416,7 +442,8 @@ void OpenclBackend::do_one_epoch(size_t epoch) {
 
         if (cfg.timeseries) {
             encode_timeseries_kernel->set_parameters(1, *test_data);
-            encode_timeseries_kernel->set_parameters(2, (int)test.data.shape[2]);
+            encode_timeseries_kernel->set_parameters(2,
+                                                     (int)test.data.shape[2]);
         } else {
             encode_kernel->set_parameters(1, *test_data);
             encode_kernel->set_parameters(2, (int)test.data.shape[1]);
@@ -444,11 +471,13 @@ void OpenclBackend::do_one_epoch(size_t epoch) {
 
             // Loss
             if (loss_func == LossFunc::MSE) {
-                loss_kernel->set_parameters(8, 1u);  // loss_func = MSE
-                loss_kernel->set_parameters(9, (uint)obs);  // obs index for row offset
+                loss_kernel->set_parameters(8, 1u); // loss_func = MSE
+                loss_kernel->set_parameters(
+                    9, (uint)obs); // obs index for row offset
             } else {
-                loss_kernel->set_parameters(8, 0u);  // loss_func = CCE
-                loss_kernel->set_parameters(9, (uint)test.labels.data[obs]);  // class index
+                loss_kernel->set_parameters(8, 0u); // loss_func = CCE
+                loss_kernel->set_parameters(
+                    9, (uint)test.labels.data[obs]); // class index
             }
             loss_kernel->run();
         }
@@ -460,7 +489,8 @@ void OpenclBackend::do_one_epoch(size_t epoch) {
 
         if (cfg.timeseries) {
             encode_timeseries_kernel->set_parameters(1, *data);
-            encode_timeseries_kernel->set_parameters(2, (int)train.data.shape[2]);
+            encode_timeseries_kernel->set_parameters(2,
+                                                     (int)train.data.shape[2]);
         } else {
             encode_kernel->set_parameters(1, *data);
             encode_kernel->set_parameters(2, (int)train.data.shape[1]);
@@ -470,10 +500,12 @@ void OpenclBackend::do_one_epoch(size_t epoch) {
         loss_kernel->set_parameters(4, *targets);
     }
 
-    double avg_test_loss =
-        test.data.shape[0] > 0 ? epoch_test_loss / (double)test.data.shape[0] : 0.0;
-    double avg_test_acc =
-        test.data.shape[0] > 0 ? epoch_test_correct / (double)test.data.shape[0] : 0.0;
+    double avg_test_loss = test.data.shape[0] > 0
+                               ? epoch_test_loss / (double)test.data.shape[0]
+                               : 0.0;
+    double avg_test_acc  = test.data.shape[0] > 0
+                               ? epoch_test_correct / (double)test.data.shape[0]
+                               : 0.0;
 
     stats.train_acc  = avg_train_acc;
     stats.train_loss = avg_train_loss;

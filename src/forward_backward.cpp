@@ -85,65 +85,41 @@ EvaluationResults forward(TrainingBundle* tb, Processor* p, const Dataset* d,
         er.loss = loss_spike;
 
     } else {
-        /* Regression (MSE): labels 1D (not used), 2D (1+ output neurons), or 3D (3D timeseries targets, not yet used) */
-        if (d->labels.dims == 1) {
-            assert(d->labels.shape[0] > 0);
-        } else if (d->labels.dims == 2) {
-            assert(d->labels.shape[1] >= 1);
-            assert(d->labels.shape[1] == (int)nc->output_neurons);
-        } else {
-            assert(d->labels.dims == 3);
-            assert(d->labels.shape[1] * d->labels.shape[2] == (int)nc->output_neurons);
-        }
+        // Regression (MSE): 2D (== output neurons)
+        assert(d->labels.dims == 2);
+        assert(d->labels.shape[0] > 0);
+        assert(d->labels.shape[1] == (int)nc->output_neurons);
 
-        /* Accuracy not meaningful for MSE — leave at 0 */
+        // Accuracy not meaningful for MSE — leave at 0
         er.correct = 0;
 
-        /* Populate target from label row */
+        // Populate target from label row
         memset(tb->target.data(), 0, nc->output_neurons * sizeof(double));
 
-        if (d->labels.dims == 1) {
-            /* 1D labels: single target per observation */
-            assert(nc->output_neurons == 1);
-            tb->target[0] = d->labels.data[index];
-        } else if (d->labels.dims == 2) {
-            /* 2D labels: multiple targets per observation */
-            size_t label_cols = (size_t)d->labels.shape[1];
-            const double* label_row = d->labels.data + index * label_cols;
+        // 2D labels: multiple targets per observation
+        const double* label_row = d->labels.data + index * nc->output_neurons;
 
-            size_t copy_count = (nc->output_neurons < label_cols)
-                                    ? nc->output_neurons
-                                    : label_cols;
-            memcpy(tb->target.data(), label_row, copy_count * sizeof(double));
-        } else {
-            /* 3D labels: multiple features x timesteps targets */
-            size_t label_stride = (size_t)d->labels.shape[1] * (size_t)d->labels.shape[2];
-            const double* label_block = d->labels.data + index * label_stride;
-            size_t copy_count = (nc->output_neurons < label_stride)
-                                    ? nc->output_neurons
-                                    : label_stride;
-            memcpy(tb->target.data(), label_block, copy_count * sizeof(double));
-        }
+        memcpy(tb->target.data(), label_row,
+               nc->output_neurons * sizeof(double));
 
-        double loss_spike =
-            mse(tb->spike_logits.data(), tb->target.data(),
-                tb->dL_ds.data(), nc->output_neurons);
-        er.loss = loss_spike;
+        double loss_spike = mse(tb->spike_logits.data(), tb->target.data(),
+                                tb->dL_ds.data(), nc->output_neurons);
+        er.loss           = loss_spike;
     }
 
     return er;
 }
 
 void backward(TrainingBundle* tb, const NetworkConfiguration* nc) {
-    tb->future_mem_grad_.setZero();
+    tb->future_mem_grad.setZero();
     tb->sgh.setZero();
-    tb->dL_dV_.setZero();
-    tb->v_pre_t_.setZero();
-    tb->dV_post_dV_pre_.setZero();
-    tb->dV_post_ds_t_.setZero();
-    tb->ds_t_dV_pre_.setZero();
-    tb->dV_leak_dV_t1_.setZero();
-    tb->grad_.setZero();
+    tb->dL_dV.setZero();
+    tb->v_pre_t.setZero();
+    tb->dV_post_dV_pre.setZero();
+    tb->dV_post_ds_t.setZero();
+    tb->ds_t_dV_pre.setZero();
+    tb->dV_leak_dV_t1.setZero();
+    tb->grad.setZero();
 
     for (int t = nc->timesteps - 1; t >= 0; t--) {
         tb->sgh.col(t).segment(nc->layer_offsets[2], nc->output_neurons) +=
@@ -151,25 +127,25 @@ void backward(TrainingBundle* tb, const NetworkConfiguration* nc) {
                                               nc->output_neurons) /
             nc->timesteps;
 
-        tb->dL_dV_   = tb->future_mem_grad_;
-        tb->v_pre_t_ = Eigen::Map<const Eigen::VectorXd>(&tb->v_pre[t][0],
-                                                         nc->total_neurons);
+        tb->dL_dV   = tb->future_mem_grad;
+        tb->v_pre_t = Eigen::Map<const Eigen::VectorXd>(&tb->v_pre[t][0],
+                                                        nc->total_neurons);
 
-        tb->dV_post_dV_pre_ = (Eigen::Map<const Eigen::VectorXd>(
-                                   &tb->spikes[t][0], nc->total_neurons)
-                                   .array() <= 0)
-                                  .cast<double>();
+        tb->dV_post_dV_pre = (Eigen::Map<const Eigen::VectorXd>(
+                                  &tb->spikes[t][0], nc->total_neurons)
+                                  .array() <= 0)
+                                 .cast<double>();
 
-        tb->dV_post_ds_t_ = -tb->v_pre_t_;
+        tb->dV_post_ds_t = -tb->v_pre_t;
         if (nc->min_potential > 0) {
-            tb->dV_post_ds_t_ =
-                (tb->dV_post_ds_t_.array() + nc->min_potential).matrix();
+            tb->dV_post_ds_t =
+                (tb->dV_post_ds_t.array() + nc->min_potential).matrix();
         }
 
-        tb->ds_t_dV_pre_ =
+        tb->ds_t_dV_pre =
             (tb->rho / (2.0 * tb->tau)) *
-            (-(tb->v_pre_t_ - Eigen::Map<const Eigen::VectorXd>(
-                                  &((*tb->thresholds)[0]), nc->total_neurons))
+            (-(tb->v_pre_t - Eigen::Map<const Eigen::VectorXd>(
+                                 &((*tb->thresholds)[0]), nc->total_neurons))
                   .array()
                   .abs()
                   .matrix() /
@@ -178,22 +154,22 @@ void backward(TrainingBundle* tb, const NetworkConfiguration* nc) {
                 .exp()
                 .matrix();
 
-        tb->dV_leak_dV_t1_ =
-            (tb->v_pre_t_.array() >= nc->min_potential).cast<double>() *
+        tb->dV_leak_dV_t1 =
+            (tb->v_pre_t.array() >= nc->min_potential).cast<double>() *
             (1.0 - nc->leak);
 
-        tb->grad_ = (tb->dL_dV_.array() * tb->dV_post_dV_pre_.array()) +
-                    (tb->dL_dV_.array() * tb->dV_post_ds_t_.array() *
-                     tb->ds_t_dV_pre_.array()) +
-                    (tb->sgh.col(t).array() * tb->ds_t_dV_pre_.array());
+        tb->grad = (tb->dL_dV.array() * tb->dV_post_dV_pre.array()) +
+                   (tb->dL_dV.array() * tb->dV_post_ds_t.array() *
+                    tb->ds_t_dV_pre.array()) +
+                   (tb->sgh.col(t).array() * tb->ds_t_dV_pre.array());
 
-        tb->future_mem_grad_ =
-            (tb->dL_dV_.array() * tb->dV_post_dV_pre_.array() *
-             tb->dV_leak_dV_t1_.array()) +
-            (tb->dL_dV_.array() * tb->dV_post_ds_t_.array() *
-             tb->ds_t_dV_pre_.array() * tb->dV_leak_dV_t1_.array()) +
-            (tb->sgh.col(t).array() * tb->ds_t_dV_pre_.array() *
-             tb->dV_leak_dV_t1_.array());
+        tb->future_mem_grad =
+            (tb->dL_dV.array() * tb->dV_post_dV_pre.array() *
+             tb->dV_leak_dV_t1.array()) +
+            (tb->dL_dV.array() * tb->dV_post_ds_t.array() *
+             tb->ds_t_dV_pre.array() * tb->dV_leak_dV_t1.array()) +
+            (tb->sgh.col(t).array() * tb->ds_t_dV_pre.array() *
+             tb->dV_leak_dV_t1.array());
 
         for (int dest = nc->total_neurons - 1; dest >= 0; dest--) {
             for (size_t source_idx = 0;
@@ -209,9 +185,9 @@ void backward(TrainingBundle* tb, const NetworkConfiguration* nc) {
                 }
 
                 double source_spike = tb->spikes[source_time][source];
-                tb->delta_W[dest][source_idx] += source_spike * tb->grad_(dest);
+                tb->delta_W[dest][source_idx] += source_spike * tb->grad(dest);
                 tb->sgh(source, source_time) +=
-                    tb->grad_(dest) * (*tb->weights)[dest][source_idx];
+                    tb->grad(dest) * (*tb->weights)[dest][source_idx];
             }
         }
     }

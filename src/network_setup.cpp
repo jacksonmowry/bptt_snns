@@ -15,8 +15,7 @@ neuro::Network* load_and_init_network(
     double& decay_rate, double& tau, double& rho, size_t& timesteps,
     size_t& hidden_neurons, unsigned long& seed, size_t& epochs,
     size_t& batch_size, double& training_percent, size_t& threads,
-    bool& timeseries, size_t& max_delay, double& weight_init_stddev,
-    LossFunc loss_func) {
+    size_t& timeseries, size_t& max_delay, double& weight_init_stddev) {
     json emptynet;
     std::ifstream fin(json_file);
     fin >> emptynet;
@@ -81,7 +80,7 @@ neuro::Network* load_and_init_network(
             override_double("training_percent", training_percent,
                             "--training_percent");
             override_size("threads", threads, "--threads");
-            override_bool("timeseries", timeseries, "--timeseries");
+            override_size("timeseries", timeseries, "--timeseries");
             override_size("max_delay", max_delay, "--max_delay");
             override_double("weight_init_stddev", weight_init_stddev,
                             "--weight_init_stddev");

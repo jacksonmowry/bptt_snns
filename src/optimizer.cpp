@@ -16,9 +16,9 @@
 #endif
 
 void weight_updates(const NetworkConfiguration* nc, const Dataset* d,
-                    size_t current_batch_size, size_t batch_size,
-                    size_t batch_start, size_t epoch, double& b1_t,
-                    double& b2_t, std::vector<std::vector<double>>& m_weights,
+                    size_t current_batch_size, size_t batch_start, size_t epoch,
+                    double& b1_t, double& b2_t,
+                    std::vector<std::vector<double>>& m_weights,
                     std::vector<std::vector<double>>& v_weights,
                     double learning_rate, double decay_rate,
                     std::vector<std::vector<double>>& weights,
@@ -45,9 +45,9 @@ void weight_updates(const NetworkConfiguration* nc, const Dataset* d,
 
             double lr = learning_rate;
             if (epoch == 0) {
-                lr =
-                    ((batch_start + current_batch_size) / (double)d->data.shape[0]) *
-                    learning_rate;
+                lr = ((batch_start + current_batch_size) /
+                      (double)d->data.shape[0]) *
+                     learning_rate;
             }
 
             weights[i][j] -= lr * mW_hat / (sqrt(vW_hat + ADAM_EPS));

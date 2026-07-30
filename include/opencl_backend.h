@@ -3,19 +3,17 @@
 #ifdef OPENCL
 
 #include "backend.h"
-#include "shared.h"
 #include "opencl.hpp"
+#include "shared.h"
 #include <chrono>
 #include <memory>
-#include <utility>
 #include <vector>
 
 class OpenclBackend : public TrainingBackend {
   public:
     OpenclBackend(const CliConfig& cfg, NetworkConfiguration& nc,
                   const Dataset& train, const Dataset& test,
-                  size_t max_incoming, size_t max_outgoing,
-                  LossFunc loss_func);
+                  size_t max_incoming, size_t max_outgoing, LossFunc loss_func);
     ~OpenclBackend() override;
 
     void do_one_epoch(size_t epoch) override;

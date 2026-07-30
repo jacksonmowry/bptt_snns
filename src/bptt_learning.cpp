@@ -91,22 +91,28 @@ int main(int argc, char* argv[]) {
     Dataset train;
     Dataset test;
     std::vector<std::string> label_strings;
+    size_t train_labels;
+    size_t test_labels;
 
     if (have_simple) {
         load_dataset(cfg.data_file.c_str(), cfg.label_file.c_str(),
                      cfg.training_percent, cfg.timeseries, &train, &test,
                      label_strings, cfg.regression);
-    } else {
-        auto [train_ds, train_ls] = load_dataset_single(
-            cfg.train_data_file.c_str(), cfg.train_label_file.c_str(),
-            cfg.timeseries, cfg.regression);
-        train         = train_ds;
-        label_strings = std::move(train_ls);
 
-        auto [test_ds, test_ls] = load_dataset_single(
-            cfg.test_data_file.c_str(), cfg.test_label_file.c_str(),
-            cfg.timeseries, cfg.regression);
-        test = test_ds;
+        train_labels = test_labels = label_strings.size();
+    } else {
+        auto train_pair = load_dataset_single(cfg.train_data_file.c_str(),
+                                              cfg.train_label_file.c_str(),
+                                              cfg.timeseries, cfg.regression);
+        train           = train_pair.first;
+        label_strings   = std::move(train_pair.second);
+        train_labels    = label_strings.size();
+
+        auto test_pair = load_dataset_single(cfg.test_data_file.c_str(),
+                                             cfg.test_label_file.c_str(),
+                                             cfg.timeseries, cfg.regression);
+        test           = test_pair.first;
+        test_labels    = test_pair.second.size();
 
         /* Normalize regression labels for split path (build_split_dataset
          * handles normalization for the simple path) */
@@ -124,24 +130,15 @@ int main(int argc, char* argv[]) {
         /* Verify train and test label mappings match (same labels, same
          * order) — only for classification */
         if (!cfg.regression && test.data.shape[0] > 0) {
-            assert(test_ls == label_strings);
-            (void)test_ls;
+            assert(test_pair.second == label_strings);
         }
     }
 
-    size_t train_labels = label_strings.size();
-    size_t test_labels  = label_strings.size();
     assert(test.data.shape[0] == 0 || train_labels == test_labels);
 
-    size_t input_neurons =
-        (cfg.timeseries) ? train.data.shape[1] * 2 : train.data.shape[1] * 2;
+    size_t input_neurons = train.data.shape[1] * 2;
     size_t output_neurons =
-        cfg.regression
-            ? (train.labels.dims == 1
-                   ? 1
-                   : (size_t)train.labels.shape[1] *
-                         (train.labels.dims == 3 ? train.labels.shape[2] : 1))
-            : train_labels;
+        cfg.regression ? (size_t)train.labels.shape[1] : train_labels;
     size_t hidden_neurons = cfg.hidden_neurons;
     size_t total_neurons  = input_neurons + hidden_neurons + output_neurons;
 
@@ -149,7 +146,7 @@ int main(int argc, char* argv[]) {
         cfg.network_json_file, cfg.connectivity, cfg.learning_rate,
         cfg.decay_rate, cfg.tau, cfg.rho, cfg.timesteps, hidden_neurons,
         cfg.seed, cfg.epochs, cfg.batch_size, cfg.training_percent, cfg.threads,
-        cfg.timeseries, cfg.max_delay, cfg.weight_init_stddev, cfg.loss_func);
+        cfg.timeseries, cfg.max_delay, cfg.weight_init_stddev);
 
     bool discrete         = n->get_data("proc_params")["discrete"];
     std::string leak_prop = n->get_data("proc_params")["leak_mode"];

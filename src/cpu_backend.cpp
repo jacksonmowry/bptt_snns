@@ -109,8 +109,8 @@ void CpuBackend::do_one_epoch(size_t epoch) {
         }
         pthread_mutex_unlock(&state->mut);
 
-        weight_updates(&nc, &train, current_batch_size, batch_size, batch_start,
-                       epoch, state->b1_t, state->b2_t, state->m_weights,
+        weight_updates(&nc, &train, current_batch_size, batch_start, epoch,
+                       state->b1_t, state->b2_t, state->m_weights,
                        state->v_weights, learning_rate, decay_rate,
                        state->weights, state->delta_W);
     }

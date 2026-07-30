@@ -1,14 +1,11 @@
 #include "data_utils.h"
 #include "evaluation.h"
+#include "framework.hpp"
 #include "network_utils.h"
 #include "nlohmann/json.hpp"
-#include "framework.hpp"
-#include <algorithm>
-#include <cmath>
 #include <cstring>
 #include <fstream>
 #include <iostream>
-#include <sstream>
 #include <string>
 #include <vector>
 
@@ -22,13 +19,16 @@ static void print_help(const char* prog) {
     fprintf(stderr, "Options:\n");
     fprintf(stderr, "  --network_json <file>   Path to network JSON config "
                     "file (required)\n");
-    fprintf(stderr, "  --test                  Use test min/max instead of train "
-                    "(optional, default: false)\n");
+    fprintf(stderr,
+            "  --test                  Use test min/max instead of train "
+            "(optional, default: false)\n");
     fprintf(stderr, "  --evaluate              Use evaluate_sample() for local "
                     "prediction (optional)\n");
-    fprintf(stderr, "  --output_csv <file>     Write regression predictions to CSV "
-                    "(default: stdout)\n");
-    fprintf(stderr, "  --csv_delimiter <char>  CSV delimiter character (default: ,)\n");
+    fprintf(stderr,
+            "  --output_csv <file>     Write regression predictions to CSV "
+            "(default: stdout)\n");
+    fprintf(stderr,
+            "  --csv_delimiter <char>  CSV delimiter character (default: ,)\n");
     fprintf(stderr, "  -h, --help              Show this help message\n");
     fprintf(stderr, "\n");
 }
@@ -42,10 +42,10 @@ struct CliArgs {
 };
 
 static int parse_args(int argc, char* argv[], CliArgs* out) {
-    out->test           = false;
-    out->evaluate       = false;
-    out->output_csv     = "";
-    out->csv_delimiter  = ',';
+    out->test          = false;
+    out->evaluate      = false;
+    out->output_csv    = "";
+    out->csv_delimiter = ',';
 
     if (argc < 2) {
         print_help(argv[0]);
@@ -116,7 +116,8 @@ static int main_evaluate(const string& network_json_path, bool test,
     // Open and parse the network JSON file
     ifstream fstream(network_json_path);
     if (!fstream.is_open()) {
-        fprintf(stderr, "Error: failed to open '%s'\n", network_json_path.c_str());
+        fprintf(stderr, "Error: failed to open '%s'\n",
+                network_json_path.c_str());
         return 1;
     }
 
@@ -127,12 +128,12 @@ static int main_evaluate(const string& network_json_path, bool test,
         const json& other = network_json.at("Associated_Data").at("other");
 
         // Extract metadata
-        size_t timesteps  = other.value("timesteps", 0);
+        size_t timesteps      = other.value("timesteps", 0);
         size_t hidden_neurons = (size_t)other.value("hidden_neurons", 0);
         size_t output_neurons = (size_t)other.value("output_neurons", 0);
         size_t input_neurons  = (size_t)other.value("input_neurons", 0);
-        bool timeseries     = other.value("timeseries", false);
-        bool regression     = other.value("regression", false);
+        bool timeseries       = other.value("timeseries", false);
+        bool regression       = other.value("regression", false);
 
         // Select min/max based on --test flag
         const json& data_min_json =
@@ -149,9 +150,10 @@ static int main_evaluate(const string& network_json_path, bool test,
 
         if (timesteps == 0 || hidden_neurons == 0 || output_neurons == 0 ||
             input_neurons == 0) {
-            fprintf(stderr, "Error: network JSON missing required fields "
-                            "(timesteps=%zu, hidden=%zu, output=%zu, "
-                            "input=%zu)\n",
+            fprintf(stderr,
+                    "Error: network JSON missing required fields "
+                    "(timesteps=%zu, hidden=%zu, output=%zu, "
+                    "input=%zu)\n",
                     timesteps, hidden_neurons, output_neurons, input_neurons);
             return 1;
         }
@@ -159,42 +161,52 @@ static int main_evaluate(const string& network_json_path, bool test,
         size_t n_features = input_neurons / 2;
 
         vector<double> min_vals, max_vals;
-        for (auto& v : data_min_json) min_vals.push_back(v.get<double>());
-        for (auto& v : data_max_json) max_vals.push_back(v.get<double>());
+        for (auto& v : data_min_json) {
+            min_vals.push_back(v.get<double>());
+        }
+        for (auto& v : data_max_json) {
+            max_vals.push_back(v.get<double>());
+        }
 
-        // For regression: load label stats from nested train_labels / test_labels
+        // For regression: load label stats from nested train_labels /
+        // test_labels
         vector<double> label_min, label_max;
         int label_dims = 1;
-        int label_shape_1 = 1;
-        int label_shape_2 = 1;
 
         if (regression) {
             /* Use train_labels if present, else test_labels. */
             const json* labels_obj = nullptr;
             if (test) {
-                if (other.contains("test_labels") && other["test_labels"].is_object()) {
+                if (other.contains("test_labels") &&
+                    other["test_labels"].is_object()) {
                     labels_obj = &other["test_labels"];
-                } else if (other.contains("train_labels") && other["train_labels"].is_object()) {
+                } else if (other.contains("train_labels") &&
+                           other["train_labels"].is_object()) {
                     labels_obj = &other["train_labels"];
                 }
             } else {
-                if (other.contains("train_labels") && other["train_labels"].is_object()) {
+                if (other.contains("train_labels") &&
+                    other["train_labels"].is_object()) {
                     labels_obj = &other["train_labels"];
                 }
             }
 
             if (!labels_obj || labels_obj->empty()) {
-                fprintf(stderr, "Error: regression network JSON missing "
-                                "label metadata (train_labels or test_labels)\n");
+                fprintf(stderr,
+                        "Error: regression network JSON missing "
+                        "label metadata (train_labels or test_labels)\n");
                 return 1;
             }
 
-            const json& labels_shape_json =
-                (*labels_obj).contains("shape") ? (*labels_obj)["shape"] : json::array({1});
-            const json& labels_min_json =
-                (*labels_obj).contains("min") ? (*labels_obj)["min"] : json::array();
-            const json& labels_max_json =
-                (*labels_obj).contains("max") ? (*labels_obj)["max"] : json::array();
+            const json& labels_shape_json = (*labels_obj).contains("shape")
+                                                ? (*labels_obj)["shape"]
+                                                : json::array({1});
+            const json& labels_min_json   = (*labels_obj).contains("min")
+                                                ? (*labels_obj)["min"]
+                                                : json::array();
+            const json& labels_max_json   = (*labels_obj).contains("max")
+                                                ? (*labels_obj)["max"]
+                                                : json::array();
 
             if (labels_min_json.empty() || labels_max_json.empty()) {
                 fprintf(stderr, "Error: regression network JSON missing "
@@ -204,14 +216,14 @@ static int main_evaluate(const string& network_json_path, bool test,
 
             if (!labels_shape_json.empty() && labels_shape_json.is_array()) {
                 label_dims = (int)labels_shape_json.size();
-                label_shape_1 = labels_shape_json[0].get<int>();
-                if (label_dims >= 2) {
-                    label_shape_2 = labels_shape_json[1].get<int>();
-                }
             }
 
-            for (auto& v : labels_min_json) label_min.push_back(v.get<double>());
-            for (auto& v : labels_max_json) label_max.push_back(v.get<double>());
+            for (auto& v : labels_min_json) {
+                label_min.push_back(v.get<double>());
+            }
+            for (auto& v : labels_max_json) {
+                label_max.push_back(v.get<double>());
+            }
         }
 
         // For classification: load label mapping
@@ -242,7 +254,6 @@ static int main_evaluate(const string& network_json_path, bool test,
         }
 
         // Read batches from stdin
-        size_t sample_count = 0;
         while (true) {
             vector<double> raw_values(n_features);
             bool got_all = true;
@@ -252,7 +263,9 @@ static int main_evaluate(const string& network_json_path, bool test,
                     break;
                 }
             }
-            if (!got_all) break;
+            if (!got_all) {
+                break;
+            }
 
             // Normalize using data min/max
             vector<double> normalized(n_features);
@@ -268,45 +281,46 @@ static int main_evaluate(const string& network_json_path, bool test,
 
             // Create temporary normalized dataset for encode_spikes
             Dataset tmp_ds;
-            Dataset* tmp_ds_ptr = &tmp_ds;
 
             if (timeseries) {
                 /* 3D dataset: [1, n_features, timesteps]
                  * Repeat each normalized value across all timesteps */
-                int ts = (int)timesteps;
-                int n_cols = (int)n_features * ts;
+                int ts          = (int)timesteps;
+                int n_cols      = (int)n_features * ts;
                 double* norm_3d = new double[n_cols];
                 for (size_t f = 0; f < n_features; f++) {
                     for (int t = 0; t < ts; t++) {
                         norm_3d[(size_t)f * ts + t] = normalized[f];
                     }
                 }
-                tmp_ds.data.data   = norm_3d;
-                tmp_ds.data.shape  = (int*)malloc(3 * sizeof(int));
+                tmp_ds.data.data     = norm_3d;
+                tmp_ds.data.shape    = (int*)malloc(3 * sizeof(int));
                 tmp_ds.data.shape[0] = 1;
                 tmp_ds.data.shape[1] = (int)n_features;
                 tmp_ds.data.shape[2] = ts;
                 tmp_ds.data.dims     = 3;
             } else {
                 double* norm_data = new double[n_features];
-                memcpy(norm_data, normalized.data(), n_features * sizeof(double));
-                tmp_ds.data.data   = norm_data;
-                tmp_ds.data.shape  = (int*)malloc(2 * sizeof(int));
+                memcpy(norm_data, normalized.data(),
+                       n_features * sizeof(double));
+                tmp_ds.data.data     = norm_data;
+                tmp_ds.data.shape    = (int*)malloc(2 * sizeof(int));
                 tmp_ds.data.shape[0] = 1;
                 tmp_ds.data.shape[1] = (int)n_features;
                 tmp_ds.data.dims     = 2;
             }
-            tmp_ds.labels.data   = nullptr;
-            tmp_ds.labels.dims   = 1;
-            tmp_ds.labels.shape  = nullptr;
-            tmp_ds.timeseries    = timeseries;
+            tmp_ds.labels.data  = nullptr;
+            tmp_ds.labels.dims  = 1;
+            tmp_ds.labels.shape = nullptr;
+            tmp_ds.timeseries   = timeseries;
 
             if (regression) {
                 /* Regression: evaluate and denormalize output */
                 // evaluate_sample returns argmax class index which doesn't
                 // apply for regression — instead we need the raw spike logits
                 p->clear_activity();
-                encode_spikes(p, &tmp_ds, 0, timesteps, timeseries, input_neurons);
+                encode_spikes(p, &tmp_ds, 0, timesteps, timeseries,
+                              input_neurons);
 
                 // Accumulate output logits across timesteps
                 vector<double> output_logits(output_neurons, 0.0);
@@ -314,8 +328,8 @@ static int main_evaluate(const string& network_json_path, bool test,
                     p->run(1);
                     const vector<int>& neuron_counts = p->neuron_counts();
                     for (size_t o = 0; o < output_neurons; o++) {
-                        size_t output_neuron_idx = input_neurons +
-                            hidden_neurons + o;
+                        size_t output_neuron_idx =
+                            input_neurons + hidden_neurons + o;
                         output_logits[o] += neuron_counts[output_neuron_idx];
                     }
                 }
@@ -332,8 +346,7 @@ static int main_evaluate(const string& network_json_path, bool test,
                     if (range == 0.0) {
                         denorm[0] = label_min[0];
                     } else {
-                        denorm[0] = label_min[0] +
-                                    output_logits[0] * range;
+                        denorm[0] = label_min[0] + output_logits[0] * range;
                     }
                 } else {
                     for (size_t o = 0; o < output_neurons; o++) {
@@ -342,8 +355,8 @@ static int main_evaluate(const string& network_json_path, bool test,
                             if (range == 0.0) {
                                 denorm[o] = label_min[o];
                             } else {
-                                denorm[o] = label_min[o] +
-                                            output_logits[o] * range;
+                                denorm[o] =
+                                    label_min[o] + output_logits[o] * range;
                             }
                         }
                     }
@@ -371,7 +384,6 @@ static int main_evaluate(const string& network_json_path, bool test,
             if (tmp_ds.data.data) {
                 delete[] (double*)tmp_ds.data.data;
             }
-            sample_count++;
         }
 
         if (out_fp != stdout) {
@@ -430,8 +442,12 @@ static int main_client(const string& network_json_path, bool test) {
         }
 
         vector<double> min_vals, max_vals;
-        for (auto& v : data_min) min_vals.push_back(v.get<double>());
-        for (auto& v : data_max) max_vals.push_back(v.get<double>());
+        for (auto& v : data_min) {
+            min_vals.push_back(v.get<double>());
+        }
+        for (auto& v : data_max) {
+            max_vals.push_back(v.get<double>());
+        }
 
         // Client protocol mode: encode spikes and output commands
         vector<vector<bool>> spikes(n * 2, vector<bool>(timesteps, false));
@@ -447,12 +463,14 @@ static int main_client(const string& network_json_path, bool test) {
                     break;
                 }
             }
-            if (!got_all) break;
+            if (!got_all) {
+                break;
+            }
 
             // Encode spikes (normalizes internally with min/max)
-            spikes = encode_spike_raster(values.data(), n, timesteps,
-                                          min_vals.data(), max_vals.data(),
-                                          false);
+            spikes =
+                encode_spike_raster(values.data(), n, timesteps,
+                                    min_vals.data(), max_vals.data(), false);
 
             for (size_t i = 0; i < n * 2; i++) {
                 printf("ASR %zu ", i);
@@ -496,8 +514,8 @@ int main(int argc, char* argv[]) {
     }
 
     if (args.evaluate) {
-        return main_evaluate(args.network_json, args.test,
-                             args.output_csv, args.csv_delimiter);
+        return main_evaluate(args.network_json, args.test, args.output_csv,
+                             args.csv_delimiter);
     } else {
         return main_client(args.network_json, args.test);
     }
