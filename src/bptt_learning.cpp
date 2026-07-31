@@ -276,7 +276,7 @@ int main(int argc, char* argv[]) {
 
             export_network(n, cfg, best_train_acc, best_train_loss,
                            best_test_acc, best_test_loss, label_strings,
-                           cfg.regression);
+                           cfg.regression, epoch);
         }
 
         double train_metric = cfg.regression ? best_train_loss : best_train_acc;

@@ -41,7 +41,7 @@ void export_network(neuro::Network* n, const CliConfig& cfg,
                     double best_train_acc, double best_train_loss,
                     double best_test_acc, double best_test_loss,
                     const std::vector<std::string>& label_strings,
-                    bool is_regression) {
+                    bool is_regression, size_t current_epoch) {
     if (cfg.network_json_out.empty()) {
         return;
     }
@@ -51,7 +51,7 @@ void export_network(neuro::Network* n, const CliConfig& cfg,
     meta["best_test_loss"]  = best_test_loss;
     meta["best_train_acc"]  = best_train_acc;
     meta["best_test_acc"]   = best_test_acc;
-    meta["epoch"]           = cfg.epochs;
+    meta["epoch"]           = current_epoch;
     meta["regression"]      = is_regression;
 
     // Export label mapping (classification only)
